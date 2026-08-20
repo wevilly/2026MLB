@@ -8,22 +8,26 @@ import {
 
 const router: IRouter = Router();
 
+const fantasyProsConfigured = Boolean(process.env["FANTASYPROS_API_KEY"]);
+
 const sources = [
   {
     name: "MLB Official",
-    status: "HEALTHY",
-    freshness: "12 min ago",
-    lastSuccess: "2026-08-20T19:38:00Z",
-    rowCount: 240,
-    detail: "Schedule, teams, starters and game state",
+    status: "NOT RUN",
+    freshness: "No successful ingest",
+    lastSuccess: null,
+    rowCount: 0,
+    detail: "Official schedule adapter has not run yet",
   },
   {
     name: "FantasyPros",
-    status: "HEALTHY",
-    freshness: "27 min ago",
-    lastSuccess: "2026-08-20T19:23:00Z",
-    rowCount: 1184,
-    detail: "Daily hitter, pitcher and lineup snapshots",
+    status: fantasyProsConfigured ? "NOT RUN" : "NOT CONFIGURED",
+    freshness: fantasyProsConfigured ? "No successful ingest" : "Credential not configured",
+    lastSuccess: null,
+    rowCount: 0,
+    detail: fantasyProsConfigured
+      ? "Credential present; daily adapter has not run yet"
+      : "FantasyPros credential is required for projection ingestion",
   },
   {
     name: "Weather",
@@ -38,73 +42,28 @@ const sources = [
 const today = {
   date: "Thu, Aug 20, 2026",
   timezone: "America/New_York",
-  games: [
-    {
-      id: "mlb-2026-08-20-nyy-bos",
-      time: "1:05 PM",
-      away: "NYY",
-      home: "BOS",
-      park: "Fenway Park",
-      roof: "Open",
-      weather: "NOT FOUND",
-      awayStarter: { name: "M. Fried", hand: "L", state: "CONFIRMED", note: "Official" },
-      homeStarter: { name: "T. Houck", hand: "R", state: "PROBABLE", note: "MLB probable" },
-      lineupState: "PROJECTED",
-      state: "FIRE",
-      flag: "Home starter not official",
-    },
-    {
-      id: "mlb-2026-08-20-lad-sd",
-      time: "4:10 PM",
-      away: "LAD",
-      home: "SD",
-      park: "Petco Park",
-      roof: "Open",
-      weather: "NOT FOUND",
-      awayStarter: { name: "Y. Yamamoto", hand: "R", state: "CONFIRMED", note: "Official" },
-      homeStarter: { name: "D. Cease", hand: "R", state: "CONFIRMED", note: "Official" },
-      lineupState: "POSTED",
-      state: "HALF",
-      flag: null,
-    },
-    {
-      id: "mlb-2026-08-20-ast-kc",
-      time: "8:10 PM",
-      away: "HOU",
-      home: "KC",
-      park: "Kauffman Stadium",
-      roof: "Open",
-      weather: "NOT FOUND",
-      awayStarter: { name: "TBD", hand: "—", state: "TBD", note: "Awaiting official state" },
-      homeStarter: { name: "S. Lugo", hand: "R", state: "PROBABLE", note: "MLB probable" },
-      lineupState: "NOT FOUND",
-      state: "HOLD",
-      flag: "Starter and lineup block",
-    },
-  ],
+  games: [],
   sources,
   alerts: [
-    "3 projected lineups remain unposted",
+    "No MLB official schedule ingest has completed",
+    fantasyProsConfigured
+      ? "FantasyPros credential is present, but no snapshots have been ingested"
+      : "FantasyPros projections are unavailable until a credential is configured",
     "Weather source is not configured; park conditions remain NOT FOUND",
-    "1 starter identity is still unresolved",
   ],
 };
 
 const projections = {
-  snapshotLabel: "FantasyPros · latest of 4 daily snapshots",
-  currentAsOf: "Thu, Aug 20 · 2:40 PM ET",
-  priorAsOf: "Thu, Aug 20 · 9:12 AM ET",
-  rows: [
-    { player: "Aaron Judge", team: "NYY", position: "OF", market: "HR", current: 0.34, prior: 0.31, asOf: "2:40 PM ET", movement: "UP" },
-    { player: "Rafael Devers", team: "BOS", position: "3B", market: "2+ TB", current: 0.27, prior: 0.28, asOf: "2:40 PM ET", movement: "DOWN" },
-    { player: "Fernando Tatis Jr.", team: "SD", position: "OF", market: "2+ TB", current: 0.29, prior: 0.25, asOf: "2:40 PM ET", movement: "UP" },
-    { player: "Bobby Witt Jr.", team: "KC", position: "SS", market: "Walk", current: 0.18, prior: null, asOf: "2:40 PM ET", movement: "NEW" },
-    { player: "Freddie Freeman", team: "LAD", position: "1B", market: "Walk", current: 0.22, prior: 0.22, asOf: "2:40 PM ET", movement: "FLAT" },
-  ],
+  snapshotLabel: fantasyProsConfigured
+    ? "FantasyPros · waiting for first ingest"
+    : "FantasyPros · credential required",
+  currentAsOf: "NOT FOUND",
+  priorAsOf: null,
+  rows: [],
   systemNotes: [
-    "Our baseline, research-adjusted and market-implied systems are not active in Phase 1.",
-    "FantasyPros snapshots are immutable; current and prior views are never averaged together.",
-    "No row below should be interpreted as a betting probability.",
+    "No FantasyPros snapshots are stored yet, so no projection values are displayed.",
+    "When ingested, every FantasyPros pull is immutable; current and prior views are never averaged together.",
+    "Internal and market systems are intentionally unavailable in Phase 1.",
   ],
 };
 
@@ -112,16 +71,16 @@ const dataHealth = {
   overall: "DEGRADED",
   sources,
   issues: [
-    { label: "Weather adapter", detail: "No provider configured. Park conditions remain NOT FOUND.", severity: "BLOCKING" },
-    { label: "Identity review", detail: "1 external player ID requires manual resolution.", severity: "REVIEW" },
-    { label: "Lineup state", detail: "3 games are still PROJECTED or NOT FOUND.", severity: "INFO" },
+    { label: "MLB official ingest", detail: "No completed schedule/game ingest exists yet.", severity: "BLOCKING" },
+    { label: "FantasyPros ingest", detail: fantasyProsConfigured ? "Credential is present, but no snapshots are stored." : "Credential is not configured; no snapshots can be ingested.", severity: "BLOCKING" },
+    { label: "Weather adapter", detail: "No provider configured. Park conditions remain NOT FOUND.", severity: "INFO" },
   ],
-  lastRun: "Last ingest run · 2:40 PM ET · completed with warnings",
+  lastRun: "No completed ingestion runs recorded",
 };
 
 const settings = {
   connections: [
-    { name: "FantasyPros", configured: true, detail: "Secret present · server-side only" },
+    { name: "FantasyPros", configured: fantasyProsConfigured, detail: fantasyProsConfigured ? "Secret present · server-side only" : "Not configured" },
     { name: "OpenAI", configured: false, detail: "Live AI disabled for Phase 1" },
     { name: "Odds provider", configured: false, detail: "Optional source not configured" },
     { name: "Weather provider", configured: false, detail: "Optional source not configured" },

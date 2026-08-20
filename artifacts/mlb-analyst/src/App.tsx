@@ -201,7 +201,7 @@ function DashboardPage() {
   return (
     <div className="page-content rise-in">
       <div className="page-intro">
-        <div><Kicker>Tuesday / 10 September 2024 / America-New_York</Kicker><h1>Today <span className="slash">//</span> slate control</h1><p>One clean surface for the day’s inputs, provenance, and open questions.</p></div>
+        <div><Kicker>{data ? `${data.date} / ${data.timezone.replace('/', ' / ')}` : 'Slate date / timezone'}</Kicker><h1>Today <span className="slash">//</span> slate control</h1><p>One clean surface for the day’s inputs, provenance, and open questions.</p></div>
         <button className="button button-dark" onClick={() => query.refetch()} data-testid="button-refresh-slate"><RefreshCw size={15} /> Refresh slate</button>
       </div>
       {query.isLoading ? <LoadingPanel rows={5} /> : query.isError ? <QueryMessage kind="error" onRetry={() => query.refetch()} /> : !data ? <QueryMessage kind="empty" /> : (
