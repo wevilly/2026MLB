@@ -74,6 +74,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AnalystSettings"
+  /analyst/refresh/mlb:
+    post:
+      operationId: refreshMlbOfficial
+      tags: [analyst]
+      summary: Run the official MLB schedule and starter ingest
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Ingest completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResult"
+  /analyst/refresh/fantasypros:
+    post:
+      operationId: refreshFantasyPros
+      tags: [analyst]
+      summary: Run the server-side FantasyPros daily-state ingest
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Ingest completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResult"
 components:
   schemas:
     HealthStatus:
@@ -114,7 +148,7 @@ components:
         awayStarter: { $ref: "#/components/schemas/Starter" }
         homeStarter: { $ref: "#/components/schemas/Starter" }
         lineupState: { type: string }
-        state: { type: string }
+        state: { type: string, enum: [READY, PARTIAL, BLOCKED] }
         flag: { type: ["string", "null"] }
       required: [id, time, away, home, park, roof, weather, awayStarter, homeStarter, lineupState, state, flag]
     TodayDashboard:
@@ -133,7 +167,7 @@ components:
         team: { type: string }
         position: { type: string }
         market: { type: string }
-        current: { type: number }
+        current: { type: ["number", "null"] }
         prior: { type: ["number", "null"] }
         asOf: { type: string }
         movement: { type: string }
@@ -177,4 +211,13 @@ components:
         defaultMarket: { type: string }
         refreshCadence: { type: string }
       required: [connections, timezone, defaultMarket, refreshCadence]
+    IngestResult:
+      type: object
+      properties:
+        source: { type: string }
+        ingestRunId: { type: string }
+        rowCount: { type: number }
+        normalizedRowCount: { type: number }
+        rejectedRowCount: { type: number }
+      required: [source, ingestRunId, rowCount, normalizedRowCount, rejectedRowCount]
 

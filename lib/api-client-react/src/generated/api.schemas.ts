@@ -26,6 +26,15 @@ export interface Starter {
   note: string;
 }
 
+export type SlateGameState = typeof SlateGameState[keyof typeof SlateGameState];
+
+
+export const SlateGameState = {
+  READY: 'READY',
+  PARTIAL: 'PARTIAL',
+  BLOCKED: 'BLOCKED',
+} as const;
+
 export interface SlateGame {
   id: string;
   time: string;
@@ -37,7 +46,7 @@ export interface SlateGame {
   awayStarter: Starter;
   homeStarter: Starter;
   lineupState: string;
-  state: string;
+  state: SlateGameState;
   /** @nullable */
   flag: string | null;
 }
@@ -55,7 +64,8 @@ export interface ProjectionRow {
   team: string;
   position: string;
   market: string;
-  current: number;
+  /** @nullable */
+  current: number | null;
   /** @nullable */
   prior: number | null;
   asOf: string;
@@ -96,4 +106,20 @@ export interface AnalystSettings {
   defaultMarket: string;
   refreshCadence: string;
 }
+
+export interface IngestResult {
+  source: string;
+  ingestRunId: string;
+  rowCount: number;
+  normalizedRowCount: number;
+  rejectedRowCount: number;
+}
+
+export type RefreshMlbOfficialParams = {
+date?: string;
+};
+
+export type RefreshFantasyProsParams = {
+date?: string;
+};
 

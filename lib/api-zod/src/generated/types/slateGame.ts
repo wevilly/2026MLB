@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SlateGameState } from './slateGameState';
 import type { Starter } from './starter';
 
 export interface SlateGame {
@@ -18,7 +19,7 @@ export interface SlateGame {
   awayStarter: Starter;
   homeStarter: Starter;
   lineupState: string;
-  state: string;
+  state: SlateGameState;
   /** @nullable */
   flag: string | null;
 }

@@ -1,6 +1,6 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useGetAnalystDataHealth, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday } from '@workspace/api-client-react';
+import { useGetAnalystDataHealth, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial } from '@workspace/api-client-react';
 import type { AnalystSettings, DataHealth, HealthIssue, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TodayDashboard } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X } from 'lucide-react';
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
@@ -194,6 +194,14 @@ function AppShell({ children }: { children: ReactNode }) {
 
 function DashboardPage() {
   const query = useGetAnalystToday();
+  const refreshMlb = useRefreshMlbOfficial({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ['getAnalystToday'] });
+        queryClient.invalidateQueries({ queryKey: ['getAnalystDataHealth'] });
+      },
+    },
+  });
   const data = query.data as TodayDashboard | undefined;
   const flaggedGames = data?.games?.filter((game) => game.flag).length ?? 0;
   const freshSources = data?.sources?.filter((source) => toneFor(source.status) === 'good').length ?? 0;
@@ -202,7 +210,7 @@ function DashboardPage() {
     <div className="page-content rise-in">
       <div className="page-intro">
         <div><Kicker>{data ? `${data.date} / ${data.timezone.replace('/', ' / ')}` : 'Slate date / timezone'}</Kicker><h1>Today <span className="slash">//</span> slate control</h1><p>One clean surface for the day’s inputs, provenance, and open questions.</p></div>
-        <button className="button button-dark" onClick={() => query.refetch()} data-testid="button-refresh-slate"><RefreshCw size={15} /> Refresh slate</button>
+        <button className="button button-dark" onClick={() => refreshMlb.mutate({})} disabled={refreshMlb.isPending} data-testid="button-refresh-slate"><RefreshCw size={15} /> {refreshMlb.isPending ? 'Ingesting official MLB…' : 'Refresh official MLB'}</button>
       </div>
       {query.isLoading ? <LoadingPanel rows={5} /> : query.isError ? <QueryMessage kind="error" onRetry={() => query.refetch()} /> : !data ? <QueryMessage kind="empty" /> : (
         <>
@@ -236,25 +244,34 @@ function DashboardPage() {
 }
 
 function GameCard({ game }: { game: SlateGame }) {
-  const flagTone = game.flag ? 'warn' : 'good';
+  const readinessTone = toneFor(game.state);
   return (
     <article className="game-card" data-testid={`card-game-${game.id}`}>
-      <div className="game-card-top"><span className="game-time">{game.time}</span><Badge tone={flagTone}>{game.flag ?? game.state}</Badge><span className="game-id">{game.id}</span></div>
+      <div className="game-card-top"><span className="game-time">{game.time}</span><Badge tone={readinessTone}>{game.state}</Badge><span className="game-id">{game.id}</span></div>
       <div className="matchup"><div><strong>{game.away}</strong><span>{game.awayStarter.name} <i>{game.awayStarter.hand}</i></span></div><div className="at-mark">@</div><div className="home-team"><strong>{game.home}</strong><span>{game.homeStarter.name} <i>{game.homeStarter.hand}</i></span></div></div>
       <div className="game-details"><span><Cloud size={13} /> {game.weather}</span><span><span className="diamond-mark" /> {game.park}</span><span className="lineup-state"><StatusDot tone={toneFor(game.lineupState)} /> {game.lineupState}</span></div>
-      {(game.awayStarter.note || game.homeStarter.note) && <div className="starter-note"><Bell size={13} /> <span>{game.awayStarter.note || game.homeStarter.note}</span></div>}
+      {(game.flag || game.awayStarter.note || game.homeStarter.note) && <div className="starter-note"><Bell size={13} /> <span>{game.flag || game.awayStarter.note || game.homeStarter.note}</span></div>}
     </article>
   );
 }
 
 function ProjectionsPage() {
   const query = useGetAnalystProjections();
+  const refreshFantasyPros = useRefreshFantasyPros({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ['getAnalystProjections'] });
+        queryClient.invalidateQueries({ queryKey: ['getAnalystToday'] });
+        queryClient.invalidateQueries({ queryKey: ['getAnalystDataHealth'] });
+      },
+    },
+  });
   const data = query.data as ProjectionCenter | undefined;
   return (
     <div className="page-content rise-in">
       <div className="page-intro">
-        <div><Kicker>FantasyPros / snapshot diff</Kicker><h1>Projection <span className="slash">//</span> center</h1><p>Current values beside the prior snapshot. Movement is visible, not implied.</p></div>
-        <button className="button button-dark" onClick={() => query.refetch()} data-testid="button-refresh-projections"><RefreshCw size={15} /> Refresh snapshot</button>
+        <div><Kicker>FantasyPros / immutable snapshot</Kicker><h1>Projection <span className="slash">//</span> center</h1><p>Source components are visible. Market probabilities and confidence grades are intentionally unavailable before validation.</p></div>
+        <button className="button button-dark" onClick={() => refreshFantasyPros.mutate({})} disabled={refreshFantasyPros.isPending} data-testid="button-refresh-projections"><RefreshCw size={15} /> {refreshFantasyPros.isPending ? 'Ingesting FantasyPros…' : 'Ingest FantasyPros'}</button>
       </div>
       {query.isLoading ? <LoadingPanel rows={7} /> : query.isError ? <QueryMessage kind="error" onRetry={() => query.refetch()} /> : !data ? <QueryMessage kind="empty" /> : (
         <>
@@ -264,7 +281,7 @@ function ProjectionsPage() {
             <Badge tone="good"><StatusDot tone="good" /> Reproducible view</Badge>
           </Panel>
           <Panel className="projection-panel">
-            <SectionHeading eyebrow="Player projections" title="Snapshot comparison" detail={`${data.rows?.length ?? 0} rows / values in source units`} action={<button className="icon-button" onClick={() => query.refetch()} aria-label="Refresh projections table" data-testid="button-refresh-projection-table"><RefreshCw size={15} /></button>} />
+            <SectionHeading eyebrow="Player source components" title="Four-market foundation" detail={`${data.rows?.length ?? 0} rows / source components only`} action={<button className="icon-button" onClick={() => refreshFantasyPros.mutate({})} disabled={refreshFantasyPros.isPending} aria-label="Ingest FantasyPros projection table" data-testid="button-refresh-projection-table"><RefreshCw size={15} /></button>} />
             {data.rows?.length ? <ProjectionTable rows={data.rows} /> : <QueryMessage kind="empty" />}
           </Panel>
           <Panel className="notes-panel"><div className="notes-title"><BookOpen size={16} /><Kicker>System notes</Kicker></div>{data.systemNotes?.length ? <div className="notes-grid">{data.systemNotes.map((note, index) => <div key={`${note}-${index}`} data-testid={`system-note-${index}`}><span>0{index + 1}</span><p>{note}</p></div>)}</div> : <p className="muted-copy">No notes attached to this snapshot.</p>}</Panel>
@@ -278,7 +295,7 @@ function ProjectionTable({ rows }: { rows: ProjectionRow[] }) {
   return (
     <div className="table-wrap">
       <table className="data-table">
-        <thead><tr><th>Player</th><th>Team</th><th>Pos</th><th>Market</th><th className="number">Current</th><th className="number">Prior</th><th>Movement</th><th>As of</th></tr></thead>
+        <thead><tr><th>Player</th><th>Team</th><th>Pos</th><th>Market</th><th className="number">Source component</th><th className="number">Prior</th><th>State</th><th>As of</th></tr></thead>
         <tbody>{rows.map((row, index) => {
           const direction = row.movement.toLowerCase().includes('down') || row.movement.includes('-') ? 'down' : row.movement.toLowerCase().includes('flat') ? 'flat' : 'up';
           return <tr key={`${row.player}-${index}`} data-testid={`row-projection-${index}`}><td><strong>{row.player}</strong></td><td><span className="team-chip">{row.team}</span></td><td>{row.position}</td><td className="market-cell">{row.market}</td><td className="number value-current">{row.current}</td><td className="number value-prior">{row.prior ?? '—'}</td><td><span className={`movement movement-${direction}`}>{direction === 'up' ? <ArrowUpRight size={13} /> : direction === 'down' ? <ArrowDownRight size={13} /> : <span className="movement-flat">—</span>}{row.movement}</span></td><td className="asof-cell">{row.asOf}</td></tr>;

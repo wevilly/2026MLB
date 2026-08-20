@@ -11,7 +11,8 @@ export interface ProjectionRow {
   team: string;
   position: string;
   market: string;
-  current: number;
+  /** @nullable */
+  current: number | null;
   /** @nullable */
   prior: number | null;
   asOf: string;

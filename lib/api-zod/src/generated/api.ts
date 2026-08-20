@@ -44,7 +44,7 @@ export const GetAnalystTodayResponse = zod.object({
   "note": zod.string()
 }),
   "lineupState": zod.string(),
-  "state": zod.string(),
+  "state": zod.enum(['READY', 'PARTIAL', 'BLOCKED']),
   "flag": zod.string().nullable()
 })),
   "sources": zod.array(zod.object({
@@ -71,7 +71,7 @@ export const GetAnalystProjectionsResponse = zod.object({
   "team": zod.string(),
   "position": zod.string(),
   "market": zod.string(),
-  "current": zod.number(),
+  "current": zod.number().nullable(),
   "prior": zod.number().nullable(),
   "asOf": zod.string(),
   "movement": zod.string()
@@ -114,6 +114,38 @@ export const GetAnalystSettingsResponse = zod.object({
   "timezone": zod.string(),
   "defaultMarket": zod.string(),
   "refreshCadence": zod.string()
+})
+
+
+/**
+ * @summary Run the official MLB schedule and starter ingest
+ */
+export const RefreshMlbOfficialQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
+export const RefreshMlbOfficialResponse = zod.object({
+  "source": zod.string(),
+  "ingestRunId": zod.string(),
+  "rowCount": zod.number(),
+  "normalizedRowCount": zod.number(),
+  "rejectedRowCount": zod.number()
+})
+
+
+/**
+ * @summary Run the server-side FantasyPros daily-state ingest
+ */
+export const RefreshFantasyProsQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
+export const RefreshFantasyProsResponse = zod.object({
+  "source": zod.string(),
+  "ingestRunId": zod.string(),
+  "rowCount": zod.number(),
+  "normalizedRowCount": zod.number(),
+  "rejectedRowCount": zod.number()
 })
 
 

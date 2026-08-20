@@ -6,11 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 import {
+  useMutation,
   useQuery
 } from '@tanstack/react-query';
 import type {
+  MutationFunction,
   QueryFunction,
   QueryKey,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult
 } from '@tanstack/react-query';
@@ -19,7 +23,10 @@ import type {
   AnalystSettings,
   DataHealth,
   HealthStatus,
+  IngestResult,
   ProjectionCenter,
+  RefreshFantasyProsParams,
+  RefreshMlbOfficialParams,
   TodayDashboard
 } from './api.schemas';
 
@@ -435,4 +442,160 @@ export function useGetAnalystSettings<TData = Awaited<ReturnType<typeof getAnaly
 
 
 
+
+export const getRefreshMlbOfficialUrl = (params?: RefreshMlbOfficialParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/mlb?${stringifiedParams}` : `/api/analyst/refresh/mlb`
+}
+
+/**
+ * @summary Run the official MLB schedule and starter ingest
+ */
+export const refreshMlbOfficial = async (params?: RefreshMlbOfficialParams, options?: Parameters<typeof customFetch>[1]): Promise<IngestResult> => {
+
+  return customFetch<IngestResult>(getRefreshMlbOfficialUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshMlbOfficialMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshMlbOfficial>>, TError,{params?: RefreshMlbOfficialParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshMlbOfficial>>, TError,{params?: RefreshMlbOfficialParams}, TContext> => {
+
+const mutationKey = ['refreshMlbOfficial'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMlbOfficial>>, {params?: RefreshMlbOfficialParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshMlbOfficial(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshMlbOfficialMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMlbOfficial>>>
+
+    export type RefreshMlbOfficialMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run the official MLB schedule and starter ingest
+ */
+export const useRefreshMlbOfficial = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshMlbOfficial>>, TError,{params?: RefreshMlbOfficialParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshMlbOfficial>>,
+        TError,
+        {params?: RefreshMlbOfficialParams},
+        TContext
+      > => {
+      return useMutation(getRefreshMlbOfficialMutationOptions(options));
+    }
+
+export const getRefreshFantasyProsUrl = (params?: RefreshFantasyProsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/fantasypros?${stringifiedParams}` : `/api/analyst/refresh/fantasypros`
+}
+
+/**
+ * @summary Run the server-side FantasyPros daily-state ingest
+ */
+export const refreshFantasyPros = async (params?: RefreshFantasyProsParams, options?: Parameters<typeof customFetch>[1]): Promise<IngestResult> => {
+
+  return customFetch<IngestResult>(getRefreshFantasyProsUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshFantasyProsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshFantasyPros>>, TError,{params?: RefreshFantasyProsParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshFantasyPros>>, TError,{params?: RefreshFantasyProsParams}, TContext> => {
+
+const mutationKey = ['refreshFantasyPros'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshFantasyPros>>, {params?: RefreshFantasyProsParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshFantasyPros(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshFantasyProsMutationResult = NonNullable<Awaited<ReturnType<typeof refreshFantasyPros>>>
+
+    export type RefreshFantasyProsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run the server-side FantasyPros daily-state ingest
+ */
+export const useRefreshFantasyPros = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshFantasyPros>>, TError,{params?: RefreshFantasyProsParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshFantasyPros>>,
+        TError,
+        {params?: RefreshFantasyProsParams},
+        TContext
+      > => {
+      return useMutation(getRefreshFantasyProsMutationOptions(options));
+    }
 
