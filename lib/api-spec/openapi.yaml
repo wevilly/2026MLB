@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: analyst
+    description: MLB Analyst Phase 1 read models
 paths:
   /healthz:
     get:
@@ -24,6 +26,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /analyst/today:
+    get:
+      operationId: getAnalystToday
+      tags: [analyst]
+      summary: Get today's MLB slate and source state
+      responses:
+        "200":
+          description: Today's analyst dashboard state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TodayDashboard"
+  /analyst/projections:
+    get:
+      operationId: getAnalystProjections
+      tags: [analyst]
+      summary: Get FantasyPros projection snapshot summary
+      responses:
+        "200":
+          description: Projection center data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectionCenter"
+  /analyst/data-health:
+    get:
+      operationId: getAnalystDataHealth
+      tags: [analyst]
+      summary: Get source freshness and data-quality state
+      responses:
+        "200":
+          description: Data health summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataHealth"
+  /analyst/settings:
+    get:
+      operationId: getAnalystSettings
+      tags: [analyst]
+      summary: Get safe connection and preference metadata
+      responses:
+        "200":
+          description: Safe settings metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalystSettings"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +83,98 @@ components:
           type: string
       required:
         - status
+    SourceBadge:
+      type: object
+      properties:
+        name: { type: string }
+        status: { type: string }
+        freshness: { type: string }
+        lastSuccess: { type: ["string", "null"] }
+        rowCount: { type: number }
+        detail: { type: string }
+      required: [name, status, freshness, lastSuccess, rowCount, detail]
+    Starter:
+      type: object
+      properties:
+        name: { type: string }
+        hand: { type: string }
+        state: { type: string }
+        note: { type: string }
+      required: [name, hand, state, note]
+    SlateGame:
+      type: object
+      properties:
+        id: { type: string }
+        time: { type: string }
+        away: { type: string }
+        home: { type: string }
+        park: { type: string }
+        roof: { type: string }
+        weather: { type: string }
+        awayStarter: { $ref: "#/components/schemas/Starter" }
+        homeStarter: { $ref: "#/components/schemas/Starter" }
+        lineupState: { type: string }
+        state: { type: string }
+        flag: { type: ["string", "null"] }
+      required: [id, time, away, home, park, roof, weather, awayStarter, homeStarter, lineupState, state, flag]
+    TodayDashboard:
+      type: object
+      properties:
+        date: { type: string }
+        timezone: { type: string }
+        games: { type: array, items: { $ref: "#/components/schemas/SlateGame" } }
+        sources: { type: array, items: { $ref: "#/components/schemas/SourceBadge" } }
+        alerts: { type: array, items: { type: string } }
+      required: [date, timezone, games, sources, alerts]
+    ProjectionRow:
+      type: object
+      properties:
+        player: { type: string }
+        team: { type: string }
+        position: { type: string }
+        market: { type: string }
+        current: { type: number }
+        prior: { type: ["number", "null"] }
+        asOf: { type: string }
+        movement: { type: string }
+      required: [player, team, position, market, current, prior, asOf, movement]
+    ProjectionCenter:
+      type: object
+      properties:
+        snapshotLabel: { type: string }
+        currentAsOf: { type: string }
+        priorAsOf: { type: ["string", "null"] }
+        rows: { type: array, items: { $ref: "#/components/schemas/ProjectionRow" } }
+        systemNotes: { type: array, items: { type: string } }
+      required: [snapshotLabel, currentAsOf, priorAsOf, rows, systemNotes]
+    HealthIssue:
+      type: object
+      properties:
+        label: { type: string }
+        detail: { type: string }
+        severity: { type: string }
+      required: [label, detail, severity]
+    DataHealth:
+      type: object
+      properties:
+        overall: { type: string }
+        sources: { type: array, items: { $ref: "#/components/schemas/SourceBadge" } }
+        issues: { type: array, items: { $ref: "#/components/schemas/HealthIssue" } }
+        lastRun: { type: string }
+      required: [overall, sources, issues, lastRun]
+    ConnectionStatus:
+      type: object
+      properties:
+        name: { type: string }
+        configured: { type: boolean }
+        detail: { type: string }
+      required: [name, configured, detail]
+    AnalystSettings:
+      type: object
+      properties:
+        connections: { type: array, items: { $ref: "#/components/schemas/ConnectionStatus" } }
+        timezone: { type: string }
+        defaultMarket: { type: string }
+        refreshCadence: { type: string }
+      required: [connections, timezone, defaultMarket, refreshCadence]
 

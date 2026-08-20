@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "MLB Analyst Platform"
+description = "A baseball operations and research terminal for tracking official MLB slate state, FantasyPros projections, source freshness, and auditable analysis workflows."
+version = "1.0.0"
+id = "artifacts/mlb-analyst"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 25630
+
+[services.development]
+run = "pnpm --filter @workspace/mlb-analyst run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/mlb-analyst", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/mlb-analyst/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25630"
+BASE_PATH = "/"
