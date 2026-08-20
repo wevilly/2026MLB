@@ -1,0 +1,1062 @@
+Continue building the MLB Analyst Platform from the existing project.
+
+Read the existing project files and the latest Progress Report before making changes.
+
+This prompt SUPERSEDES earlier instructions that made sportsbook pricing, implied probability, expected value, or closing-line value part of the core decision process.
+
+# MAJOR PROJECT CHANGE
+
+The platform is now optimized for:
+
+**PREDICTION ACCURACY + BASEBALL RESEARCH QUALITY**
+
+It is NOT primarily an odds-value engine.
+
+Do not use:
+
+* sportsbook price
+* American odds
+* decimal odds
+* implied probability
+* closing-line value
+* price-based expected value
+
+to select, rank, downgrade, or upgrade players.
+
+Do not require a price before a player can receive FIRE, HALF, HOLD, PASS, or PARKED status.
+
+If sportsbook data is added in the future, it must remain a separate optional informational layer unless the project owner explicitly changes this rule.
+
+A strong baseball prediction should remain a strong baseball prediction regardless of price.
+
+---
+
+# THE FOUR CORE HITTER MARKETS
+
+The platform must now treat these as FOUR INDEPENDENT research and modeling problems:
+
+1. **2+ Total Bases**
+2. **Extra Base Hit**
+3. **Batter Walk**
+4. **Home Run**
+
+Do not create one universal hitter score and reuse it across all markets.
+
+A player can rank:
+
+* #1 for Extra Base Hit
+* #8 for 2+ Total Bases
+* #30 for Walk
+* #15 for Home Run
+
+That is expected.
+
+The system should identify the market that best fits the player's actual mechanism.
+
+---
+
+# EXTRA BASE HIT DEFINITION
+
+For this project:
+
+**An Extra Base Hit means the batter records at least one double, triple, or home run.**
+
+Singles do NOT count.
+
+XBH = 2B + 3B + HR.
+
+The standard prediction target should initially be:
+
+**1+ Extra Base Hit / Over 0.5 XBH**
+
+Keep XBH completely separate from 2+ Total Bases.
+
+A hitter can reach 2+ Total Bases with:
+
+* two singles
+* one double
+* one triple
+* one home run
+
+But XBH requires:
+
+* double
+* triple
+* or home run
+
+That distinction is fundamental.
+
+Do not allow the UI, models, reports, or AI Analyst to describe Total Bases as an extra-base-hit market.
+
+---
+
+# MARKET-SPECIFIC BASEBALL LOGIC
+
+## 1. 2+ TOTAL BASES
+
+The TB engine should emphasize TWO paths:
+
+### Contact/volume path
+
+* plate appearances
+* batting-order position
+* hit probability
+* contact rate
+* strikeout rate
+* line-drive rate
+* expected batting average
+* doubles production
+* balls in play
+* opposing pitcher contact-inducing profile
+
+### Damage path
+
+* SLG
+* xSLG
+* barrels per PA
+* hard-hit rate
+* 90th percentile exit velocity
+* pitch-type matchup
+* park environment
+
+A contact-inducing weak pitcher can be excellent for TB.
+
+A strikeout-heavy pitcher can suppress TB even if he allows loud contact when the ball is put in play.
+
+---
+
+## 2. EXTRA BASE HIT
+
+Build XBH as its own independent engine.
+
+The XBH engine should emphasize:
+
+* doubles per PA
+* triples per PA
+* home runs per PA
+* XBH per PA
+* extra-base-hit share of total hits
+* gap power
+* line-drive rate
+* hard-hit rate
+* 90th percentile exit velocity
+* barrel rate
+* sweet-spot rate
+* launch-angle distribution
+* pull percentage
+* pull-air rate
+* opposite-field extra-base ability
+* sprint speed where relevant to triples
+* handedness split
+* pitch-type results
+* park doubles factor
+* park triples factor
+* park home-run factor
+* outfield dimensions
+* wall height
+* altitude
+* opposing starter XBH/contact-damage profile
+* bullpen XBH/contact-damage path
+* lineup position / projected PA
+
+XBH should NOT simply rank the biggest home-run hitters.
+
+Doubles-heavy hitters can be elite XBH candidates even if their HR probability is modest.
+
+Fast hitters in large outfields can gain value through triples.
+
+Pull-power hitters can gain XBH probability in parks with short pull-side dimensions.
+
+A player's XBH profile should identify the dominant route:
+
+* DOUBLE ROUTE
+* TRIPLE ROUTE
+* HOME RUN ROUTE
+* MULTI-PATH
+
+Store that route as an explainable feature.
+
+---
+
+## 3. BATTER WALK
+
+Walk research should emphasize:
+
+### Hitter
+
+* BB%
+* unintentional BB%
+* chase rate
+* zone swing rate
+* pitches per PA
+* first-pitch swing rate
+* count behavior
+* handedness split
+
+### Pitcher
+
+* BB%
+* uBB%
+* zone rate
+* first-pitch strike rate
+* chase generated
+* pitch execution in hitter's counts
+* walk split by batter side
+
+### Environment
+
+* likely relievers
+* reliever walk rates
+* hitter lineup slot
+* umpire when available
+
+Do not use hitter power as a substitute for actual plate discipline.
+
+---
+
+## 4. HOME RUN
+
+HR research should emphasize:
+
+* barrels per PA
+* rolling barrel rates
+* maximum EV
+* 90th percentile EV
+* pull-air rate
+* pulled fly-ball rate
+* launch-angle distribution
+* supported HR/FB
+* pitch-location vulnerability
+* pitch-type matchup
+* pitcher barrel rate allowed
+* pitcher hard-hit rate allowed
+* pitcher fly-ball rate
+* pitcher HR/9
+* HR park component
+* weather direction
+* batter handedness
+
+Do not let a hitter become an HR candidate simply because he ranks highly for TB or XBH.
+
+---
+
+# REMOVE PRICING FROM THE CORE ROADMAP
+
+Delete or de-prioritize any existing requirement that says:
+
+* exact price required before FIRE
+* implied probability required
+* pair break-even required
+* CLV required
+* price snapshot required for prediction quality
+* EV required to determine recommendation strength
+
+Do not calculate FIRE/HALF/HOLD from sportsbook price.
+
+The platform may retain old price-related database tables if removing them would damage migrations, but:
+
+* they should not be required
+* they should not block any workflow
+* they should not appear as core metrics
+* they should not influence models
+* they should not influence AI confidence
+* they should not influence pick ranking
+
+Mark them as OPTIONAL / FUTURE if they remain.
+
+---
+
+# CORE PLATFORM GOAL
+
+For every player-market prediction, the system should eventually answer:
+
+1. **How likely is this outcome based on our calibrated model?**
+2. **Why does this player fit THIS market specifically?**
+3. **What baseball mechanism supports the prediction?**
+4. **What evidence argues against it?**
+5. **What data is missing or stale?**
+6. **How does FantasyPros compare?**
+7. **What do independent bettors/cappers think?**
+8. **Has this type of prediction worked historically?**
+9. **What confidence should we have given sample size and data quality?**
+
+---
+
+# UPDATED CONFIDENCE SYSTEM
+
+Use:
+
+* FIRE
+* HALF
+* HOLD
+* PASS
+* PARKED
+
+These represent **prediction confidence and research completeness**, not betting value.
+
+## FIRE
+
+One of the strongest market-specific baseball predictions on the slate.
+
+Requires:
+
+* strong supporting mechanism
+* high-quality data
+* reliable opportunity
+* no major unresolved conflict
+
+## HALF
+
+Good prediction with meaningful supporting evidence, but weaker than FIRE.
+
+## HOLD
+
+Interesting research candidate with one or more material concerns.
+
+## PASS
+
+Researched and no meaningful predictive edge.
+
+## PARKED
+
+A blocking question remains unresolved.
+
+Examples:
+
+* uncertain starter
+* opener/bulk role unclear
+* player identity conflict
+* lineup conflict
+* injury/scratch uncertainty
+* stale critical source
+
+---
+
+# CURRENT BUILD PHASE
+
+Do NOT build the four prediction models yet.
+
+The current priority remains the DATA FOUNDATION.
+
+However, the database, APIs, UI contracts, and ingestion layer MUST be designed now so they support all four markets:
+
+* TB
+* XBH
+* WALK
+* HR
+
+Do not create a schema that assumes only TB / Walk / HR.
+
+---
+
+# PHASE 1B - DATA FOUNDATION
+
+## 1. DATABASE FOUNDATION
+
+Implement or update production Postgres tables for:
+
+* teams
+* players
+* player aliases
+* external player IDs
+* games
+* venues
+* rosters
+* starters
+* starter-state history
+* lineup snapshots
+* lineup entries
+* source registry
+* ingest runs
+* ingest issues
+* raw-payload metadata
+* FantasyPros projection snapshots
+* FantasyPros projection rows
+* news
+* future player features
+* future pitcher features
+* future bullpen features
+* future market predictions
+* future prediction settlements
+* future model versions
+* future external bettor picks
+
+Market enums must include:
+
+* TOTAL_BASES_2_PLUS
+* EXTRA_BASE_HIT
+* BATTER_WALK
+* HOME_RUN
+
+Do not hardcode a three-market architecture.
+
+---
+
+# 2. CANONICAL PLAYER IDENTITY
+
+Each player must have one internal canonical player ID.
+
+Support mappings for:
+
+* MLBAM / MLB Stats API
+* FantasyPros
+* FanGraphs when added
+* Statcast / Baseball Savant
+* Retrosheet when added
+* other future sources
+
+Create player alias handling.
+
+Identity confidence:
+
+* CONFIRMED
+* HIGH_CONFIDENCE
+* REVIEW_REQUIRED
+
+Never silently merge an uncertain player.
+
+Never create duplicate canonical players due to:
+
+* accents
+* suffixes
+* punctuation
+* abbreviated names
+* alternate source formatting
+
+Identity conflicts belong in Data Health.
+
+---
+
+# 3. OFFICIAL MLB INGESTION
+
+Implement the production MLB Stats API adapter.
+
+For a requested date ingest:
+
+* MLB game ID
+* schedule
+* home/away teams
+* venue
+* first pitch
+* game state
+* roster information
+* probable pitchers
+* official starters when known
+* starter status
+* official posted lineups
+* batting order
+* defensive position
+* handedness where available
+
+Starter state:
+
+* CONFIRMED
+* PROBABLE
+* TBD
+* OPENER
+* BULK
+* UNKNOWN
+
+Do not infer OPENER/BULK without evidence.
+
+---
+
+# 4. FANTASYPROS INGESTION
+
+Use only server-side:
+
+`FANTASYPROS_API_KEY`
+
+Never expose it to the frontend.
+
+Ingest available FantasyPros MLB data including:
+
+* hitter projections
+* pitcher projections
+* projected lineups
+* player metadata
+* news
+
+Store each pull as an immutable snapshot.
+
+Never overwrite earlier projections.
+
+If FantasyPros provides component projections relevant to XBH, preserve them individually.
+
+Examples:
+
+* hits
+* doubles
+* triples
+* home runs
+* total bases
+* walks
+* plate appearances / at-bats where available
+
+Do not collapse these fields prematurely.
+
+XBH can later be derived from:
+
+`projected doubles + projected triples + projected home runs`
+
+when those components exist.
+
+Label derived values clearly as DERIVED.
+
+Do not invent missing XBH projections.
+
+---
+
+# 5. PROJECTION CENTER UPDATE
+
+Update Projection Center to recognize all four markets.
+
+Eventually the interface should support:
+
+* TB
+* XBH
+* Walk
+* HR
+
+For now, display real FantasyPros components that have actually been ingested.
+
+Allow comparison of snapshot times:
+
+* Morning
+* Midday
+* Afternoon
+* Latest
+
+Highlight movement.
+
+Do not show "Our Model" values until models are active.
+
+Show:
+
+NOT ACTIVE
+
+instead of placeholders.
+
+---
+
+# 6. TODAY DASHBOARD
+
+Populate from real MLB data.
+
+Each game card should show:
+
+* matchup
+* first pitch ET
+* venue
+* starter names
+* starter states
+* lineup states
+* FantasyPros data availability
+* last update
+* blocking issues
+
+Use data-readiness statuses before models exist:
+
+* READY
+* PARTIAL
+* BLOCKED
+
+Do not show fake FIRE/HALF/HOLD predictions before research models are built.
+
+---
+
+# 7. DATA HEALTH
+
+For every source show:
+
+* configured state
+* last attempt
+* last success
+* freshness
+* rows received
+* rows normalized
+* rows rejected
+* HTTP status
+* duration
+* last error
+* next scheduled run
+
+Issue queues:
+
+* IDENTITY CONFLICT
+* STARTER CONFLICT
+* LINEUP CONFLICT
+* GAME STATE CONFLICT
+* SOURCE FAILURE
+* STALE SOURCE
+* NORMALIZATION FAILURE
+* DUPLICATE ENTITY
+* MISSING REQUIRED FIELD
+
+---
+
+# PHASE 2 - PLAYER AND PITCHER RESEARCH FOUNDATION
+
+After Phase 1B passes acceptance, build Statcast/FanGraphs research infrastructure.
+
+Do not yet make final picks.
+
+## Player Lab should eventually contain:
+
+### General
+
+* PA
+* AVG
+* OBP
+* SLG
+* ISO
+* xBA
+* xSLG
+* xwOBA
+* K%
+* BB%
+
+### Contact
+
+* contact rate
+* zone contact
+* chase contact
+* line-drive rate
+* ground-ball rate
+* fly-ball rate
+
+### Damage
+
+* hard-hit rate
+* barrel rate
+* barrel per PA
+* average EV
+* 90th percentile EV
+* max EV
+* sweet-spot rate
+* launch-angle distribution
+
+### XBH-specific
+
+* doubles
+* triples
+* HR
+* XBH
+* 2B/PA
+* 3B/PA
+* HR/PA
+* XBH/PA
+* XBH / hits
+* gap-hit profile
+* sprint speed
+* directional XBH profile
+* doubles park compatibility
+* triples park compatibility
+
+### Plate discipline
+
+* chase rate
+* zone swing
+* first-pitch swing
+* pitches/PA
+* uBB%
+
+### Splits
+
+* vs LHP
+* vs RHP
+* home/away
+* current season
+* career baseline
+* rolling 7/14/30/60
+
+### Arsenal
+
+Performance against pitch type, velocity and movement families.
+
+---
+
+# PITCHER LAB
+
+Eventually include:
+
+* ERA
+* xERA
+* FIP
+* career baseline
+* recent starts
+* expected innings
+* TTO performance
+* xSLG allowed by batter side
+* xwOBA
+* K%
+* BB%
+* uBB%
+* zone rate
+* first-pitch strike
+* chase generated
+* GB%
+* FB%
+* LD%
+* hard-hit allowed
+* barrels allowed
+* arsenal
+* velocity trend
+* movement
+* release point
+* pitch-level results
+
+Add an XBH vulnerability section:
+
+* doubles allowed
+* triples allowed
+* HR allowed
+* XBH allowed
+* XBH / BIP
+* XBH / PA against
+* line drives allowed
+* deep fly-ball profile
+* gap contact
+* handedness splits
+* park interaction
+
+Do not substitute ERA for XBH vulnerability.
+
+---
+
+# PARK FACTORS
+
+Store component park factors independently:
+
+* singles
+* doubles
+* triples
+* home runs
+* overall hits
+* handedness splits
+
+TB and XBH must not use the same park interpretation blindly.
+
+The existing TB heuristic may remain:
+
+TB PF =
+0.45 × hits factor
+
+* 0.30 × doubles factor
+* 0.25 × HR factor
+
+but it must be labeled HEURISTIC.
+
+XBH should receive its own future park logic built primarily from:
+
+* doubles factor
+* triples factor
+* HR factor
+
+Do not use the overall run factor as the primary XBH park metric.
+
+---
+
+# BULLPEN ROOM
+
+Preserve the existing individual-arm approach.
+
+Track:
+
+* role
+* handedness
+* pitch counts D-1 / D-2 / D-3
+* days rest
+* back-to-back
+* multi-inning use
+* availability
+* manager override
+* role changes
+* projected 7th
+* projected 8th
+* projected 9th
+* likely hitter-slot exposure
+
+Bullpen analysis eventually needs market-specific outputs:
+
+TB bullpen path
+XBH bullpen path
+WALK bullpen path
+HR bullpen path
+
+A bullpen can be favorable for walks but poor for XBH.
+
+Do not reduce the bullpen to one rating.
+
+---
+
+# BETTOR INTELLIGENCE - FUTURE PHASE
+
+External bettors should be treated as research evidence, never as voting authority.
+
+Store:
+
+* source
+* bettor
+* player
+* market
+* stated reasoning
+* timestamp
+* result
+* primary mechanism
+* source URL
+* whether reasoning appears copied/derived from another source
+
+Do NOT require odds or price.
+
+Score external bettors by:
+
+* hit rate
+* market hit rate
+* market specialization
+* mechanism accuracy
+* prediction accuracy by confidence
+* performance by player type
+* performance by pitcher type
+* performance by market
+* whether they add signal beyond our model
+* whether their information changed our research conclusion
+
+Consensus should count INDEPENDENT sources only.
+
+Five sites repeating one original pick do not equal five opinions.
+
+Add XBH to Bettor Intelligence from the beginning.
+
+---
+
+# AI ANALYST - FUTURE PHASE
+
+The AI Analyst must be able to query all four markets.
+
+Example questions:
+
+"Why is this player a better XBH pick than TB?"
+
+"Why is this doubles-heavy hitter ranked above a bigger HR hitter for XBH?"
+
+"Which hitters have multiple paths to an extra-base hit tonight?"
+
+"Challenge our XBH read."
+
+"Which pitchers allow dangerous gap contact but not many home runs?"
+
+"Which outside bettors are consistently good at XBH?"
+
+"What did the system miss yesterday on XBH predictions?"
+
+The AI must distinguish:
+
+VERIFIED
+SOURCED
+INFERENCE
+NOT FOUND
+
+It cannot rewrite:
+
+* frozen predictions
+* projection snapshots
+* official results
+* source records
+* historical model versions
+* prior research notes
+
+---
+
+# RESULTS AND POSTMORTEM
+
+Update the future settlement system for FOUR markets.
+
+## TB settlement
+
+Total bases from:
+1B + 2×2B + 3×3B + 4×HR
+
+## XBH settlement
+
+HIT if:
+
+2B + 3B + HR >= 1
+
+## Walk settlement
+
+Grade according to the defined full-game batter-walk market and stored event data.
+
+Keep intentional walks separately stored when data supports it.
+
+## HR settlement
+
+HIT if HR >= 1.
+
+---
+
+# PERFORMANCE METRICS
+
+Do not make sportsbook profitability the primary score.
+
+Track:
+
+* total predictions
+* hits
+* hit rate
+* model probability
+* calibration
+* Brier score
+* log loss
+* rank accuracy
+* probability bucket performance
+* performance by confidence
+* performance by lineup spot
+* performance by handedness
+* performance by pitcher profile
+* performance by park
+* performance by starter workload
+* performance by bullpen state
+* performance by model version
+* performance with/without external bettor support
+
+For XBH specifically also track:
+
+* doubles-led hits
+* triples-led hits
+* HR-led hits
+* predicted XBH route
+* realized XBH route
+* route accuracy
+
+---
+
+# POSTMORTEM CLASSIFICATION
+
+Every miss must be categorized:
+
+1. DATA FAILURE
+2. OPPORTUNITY FAILURE
+3. PROBABILITY FAILURE
+4. NORMAL VARIANCE
+
+Also preserve:
+
+**Won, but bad process**
+
+and
+
+**Lost, but correct process**
+
+Do not automatically change a model because yesterday lost.
+
+---
+
+# FINAL UPDATED BUILD ORDER
+
+Use this build sequence:
+
+## Phase 1
+
+Database foundation + official MLB ingestion
+
+## Phase 1B
+
+FantasyPros immutable projection / lineup / news ingestion + identity resolution + Data Health
+
+## Phase 2
+
+Statcast/FanGraphs Player Lab and Pitcher Lab
+
+## Phase 3
+
+Bullpen Room and persistent usage memory
+
+## Phase 4
+
+Independent market research engines:
+
+* TB
+* XBH
+* Walk
+* HR
+
+## Phase 5
+
+Model validation, calibration and versioning
+
+## Phase 6
+
+Automated settlement and postmortems
+
+## Phase 7
+
+Bettor Intelligence
+
+## Phase 8
+
+AI Analyst and autonomous research reports
+
+## Phase 9
+
+Production hardening, scheduling, alerts and full daily automation
+
+SPORTSBOOK PRICE / ODDS / CLV IS NOT A REQUIRED PHASE.
+
+---
+
+# CURRENT TASK
+
+For THIS Replit run:
+
+Complete only the current data-foundation phase.
+
+Also update the underlying architecture, types, enums, navigation language, documentation, database schema and future stubs so the product supports:
+
+**TB + XBH + WALK + HR**
+
+and no longer treats sportsbook pricing as necessary to the prediction system.
+
+Do not build fake XBH probabilities.
+
+Do not build an unvalidated XBH heuristic just to fill the UI.
+
+Prepare the architecture correctly now.
+
+---
+
+# ACCEPTANCE REPORT
+
+Stop when this phase is complete.
+
+Return:
+
+1. Tables created/changed.
+2. New four-market enum implementation.
+3. Any price-dependent code removed from core workflows.
+4. MLB endpoints implemented.
+5. FantasyPros endpoints implemented.
+6. Real test-date row counts.
+7. Player identity match rate.
+8. Unresolved identity conflicts.
+9. Projection snapshots stored.
+10. Lineup snapshots stored.
+11. Component projection fields available for future XBH research.
+12. Data Health screenshot.
+13. Today screenshot.
+14. Projection Center screenshot.
+15. Settings screenshot.
+16. Failed tests.
+17. Known API limitations.
+18. Any deviation from this prompt.
+19. Exact recommendation for Phase 2.
+
+Do NOT automatically proceed to Phase 2.
+
+Do NOT generate betting picks.
+
+Do NOT invent probabilities.
+
+Do NOT add sportsbook pricing back into the decision process.
+
+The next phase begins only after this acceptance report is reviewed.
