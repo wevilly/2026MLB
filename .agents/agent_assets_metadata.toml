@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "e5v_sja9ClQgREno7qHSk"
+uri = "file://reports/MLB_Analyst_Platform_Progress_and_Pick_Improvement_Report.docx"
+type = "word_document"
+title = "MLB Analyst Platform Progress Report"
+description = "A Word report covering completed work, current limitations, Phase 1 priorities, and the highest-impact improvements for producing better, more trustworthy MLB picks."
+logical_id = "aa5dfe0b-abd9-4571-b43b-c75214ae420d"
+content_hash = "sha256:a53730c42e4ecdb398cd8b274ce073df99b838d75de7f221f6b3caf96adb29a4"
+size = 6829
+mtime_ms = 1787252094709
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/aa5dfe0b-abd9-4571-b43b-c75214ae420d/a6692950-2b3a-4f17-8e79-bcf8f2bc8747"
+storage_version_token = "1787252101418227"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
