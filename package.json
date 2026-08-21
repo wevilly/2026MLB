@@ -7,7 +7,10 @@
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
-    "test:data-foundation": "node --test tests/data-foundation.test.mjs"
+    "test:data-foundation": "node --test tests/data-foundation.test.mjs",
+    "test:phase-2a": "node --test tests/phase-2a-acceptance.test.mjs",
+    "test:all": "node --test tests/data-foundation.test.mjs tests/phase-2a-acceptance.test.mjs",
+    "report:phase-2a": "node scripts/phase-2a-acceptance-report.mjs"
   },
   "private": true,
   "dependencies": {
