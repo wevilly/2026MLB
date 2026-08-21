@@ -1,1 +1,2 @@
 - [FantasyPros lineup state](fantasypros-lineup-state.md) — non-projected lineup responses can contain scheduled games with no hitters; only MLB can establish posted lineups.
+- [Research fallback acceptance](research-fallback-acceptance.md) — FanGraphs may be unavailable without blocking Phase 2A when verified Statcast split coverage and raw Savant park evidence are complete.

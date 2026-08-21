@@ -32,8 +32,10 @@ import type {
   ProjectionCenter,
   RefreshAnalystResearchParams,
   RefreshFantasyProsParams,
+  RefreshFullUniverseStatcastSplitsParams,
   RefreshMlbOfficialParams,
   ResearchIngestResult,
+  ResearchIngestSource,
   ResearchLab,
   TodayDashboard
 } from './api.schemas';
@@ -942,5 +944,83 @@ export const useRefreshAnalystResearch = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRefreshAnalystResearchMutationOptions(options));
+    }
+
+export const getRefreshFullUniverseStatcastSplitsUrl = (params?: RefreshFullUniverseStatcastSplitsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/research/splits-full?${stringifiedParams}` : `/api/analyst/refresh/research/splits-full`
+}
+
+/**
+ * @summary Run one resumable batch of full-universe Statcast handedness split ingestion
+ */
+export const refreshFullUniverseStatcastSplits = async (params?: RefreshFullUniverseStatcastSplitsParams, options?: Parameters<typeof customFetch>[1]): Promise<ResearchIngestSource> => {
+
+  return customFetch<ResearchIngestSource>(getRefreshFullUniverseStatcastSplitsUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshFullUniverseStatcastSplitsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshFullUniverseStatcastSplits>>, TError,{params?: RefreshFullUniverseStatcastSplitsParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshFullUniverseStatcastSplits>>, TError,{params?: RefreshFullUniverseStatcastSplitsParams}, TContext> => {
+
+const mutationKey = ['refreshFullUniverseStatcastSplits'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshFullUniverseStatcastSplits>>, {params?: RefreshFullUniverseStatcastSplitsParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshFullUniverseStatcastSplits(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshFullUniverseStatcastSplitsMutationResult = NonNullable<Awaited<ReturnType<typeof refreshFullUniverseStatcastSplits>>>
+
+    export type RefreshFullUniverseStatcastSplitsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run one resumable batch of full-universe Statcast handedness split ingestion
+ */
+export const useRefreshFullUniverseStatcastSplits = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshFullUniverseStatcastSplits>>, TError,{params?: RefreshFullUniverseStatcastSplitsParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshFullUniverseStatcastSplits>>,
+        TError,
+        {params?: RefreshFullUniverseStatcastSplitsParams},
+        TContext
+      > => {
+      return useMutation(getRefreshFullUniverseStatcastSplitsMutationOptions(options));
     }
 

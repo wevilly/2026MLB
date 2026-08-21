@@ -11,7 +11,7 @@ import {
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
-import { getPitcherLab, getPlayerLab, ingestResearch, researchHealth } from "../services/research-foundation";
+import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFallback, researchHealth } from "../services/research-foundation";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -66,8 +66,10 @@ async function sourceBadges() {
      ORDER BY source_id, started_at DESC`,
   );
   const bySource = new Map(runs.rows.map((row) => [row.source_id, row]));
-  const makeBadge = (sourceId: string, name: string, configured: boolean) => {
-    const run = bySource.get(sourceId);
+  const makeRunBadge = (name: string, run: {
+    status: string; finished_at: string | null; row_count: number | null; normalized_row_count: number | null;
+    rejected_row_count: number | null; http_status: number | null; duration_ms: number | null; error_message: string | null;
+  } | undefined, configured = true) => {
     if (!configured) return { name, status: "NOT CONFIGURED", freshness: "Credential missing", lastSuccess: null, rowCount: 0, detail: "A server-side credential is required." };
     if (!run) return { name, status: "NOT RUN", freshness: "No successful ingest", lastSuccess: null, rowCount: 0, detail: "No ingestion run has completed." };
     const status = run.status === "SUCCESS" ? "FRESH" : run.status === "PARTIAL" ? "PARTIAL" : "BLOCKED";
@@ -83,10 +85,20 @@ async function sourceBadges() {
       detail,
     };
   };
+  const splitRun = await pool.query<{
+    status: string; finished_at: string | null; row_count: number | null; normalized_row_count: number | null;
+    rejected_row_count: number | null; http_status: number | null; duration_ms: number | null; error_message: string | null;
+  }>(
+    `SELECT status, finished_at, row_count, normalized_row_count, rejected_row_count, http_status, duration_ms, error_message
+     FROM ingest_runs WHERE source_id = 'STATCAST' AND job_name = 'statcast_search_handedness_fallback'
+     ORDER BY started_at DESC LIMIT 1`,
+  );
+  const makeBadge = (sourceId: string, name: string, configured: boolean) => makeRunBadge(name, bySource.get(sourceId), configured);
   return [
     makeBadge("MLB_OFFICIAL", "MLB Official", true),
     makeBadge("FANTASYPROS", "FantasyPros", fantasyProsConfigured),
     makeBadge("STATCAST", "Baseball Savant / Statcast", true),
+    makeRunBadge("Statcast Search splits", splitRun.rows[0]),
     makeBadge("FANGRAPHS", "FanGraphs", true),
     makeBadge("PARK_FACTORS", "Statcast Park Factors", true),
     { name: "Weather", status: "NOT CONFIGURED", freshness: "No provider", lastSuccess: null, rowCount: 0, detail: "Optional source; no weather credential is configured." },
@@ -345,9 +357,15 @@ router.get("/analyst/data-health", async (_req, res, next) => {
       identityCoverage(date),
       researchHealth(),
     ]);
-    const sourceStatus = sources.some((source) => source.status === "BLOCKED" || source.status === "NOT RUN") ? "BLOCKED"
-      : sources.some((source) => source.status === "PARTIAL" || source.status === "NOT CONFIGURED") ? "PARTIAL"
-        : "READY";
+    const phaseTwoSources = sources.filter((source) => !["FanGraphs", "Weather"].includes(source.name));
+    const phaseTwoReady = research.handednessCoverageScope === "FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE"
+      && research.handednessIngestStatus === "SUCCESS"
+      && research.missingHandednessSplits === 0
+      && research.handednessTargetPlayers === research.handednessCoveredPlayers
+      && research.parkRequiredVenues > 0
+      && research.parkVenueCoverageGaps === 0;
+    const sourceStatus = !phaseTwoReady || phaseTwoSources.some((source) => source.status === "BLOCKED" || source.status === "NOT RUN") ? "BLOCKED"
+      : "READY";
     res.json(GetAnalystDataHealthResponse.parse({
       overall: sourceStatus,
       sources,
@@ -426,10 +444,9 @@ router.get("/analyst/game-lab", async (req, res, next) => {
       ["doubles_factor", "Doubles component", "2B component factor."],
       ["triples_factor", "Triples component", "3B component factor."],
       ["xbh_factor", "Extra-base hit component", "XBH component factor."],
-      ["total_bases_heuristic", "Total Bases heuristic", "Heuristic would require sourced park components; it is unavailable without them."],
     ].map(([key, label, definition]) => ({
       key, label, value: null, unit: "factor", denominator: null, sampleSize: null,
-       source: "NOT FOUND", definition, transformation: (key === "total_bases_heuristic" ? "HEURISTIC" : "RAW") as "HEURISTIC" | "RAW", status: "NOT_FOUND" as const, retrievedAt: "NOT FOUND",
+        source: "NOT FOUND", definition, transformation: "RAW" as const, status: "NOT_FOUND" as const, retrievedAt: "NOT FOUND",
     }));
     const parkSnapshot = selectedDb?.venue_id ? await pool.query<{
       span: string; retrieved_at: string; park_research_snapshot_id: string; batter_side: string | null;
@@ -465,7 +482,7 @@ router.get("/analyst/game-lab", async (req, res, next) => {
        parkResearch: selected ? { venue: selected.park, span: parkSnapshot.rows.map((snapshot) => snapshot.span).filter((span, index, spans) => spans.indexOf(span) === index).join(", ") || "NOT FOUND", factors: parkFactors } : null,
       notes: [
         "Game Lab exposes research-ready starter, lineup, park, and freshness context only.",
-        "Park values are raw Baseball Savant components when available. Total Bases remains HEURISTIC and unavailable without a documented source formula.",
+        "Park values are raw Baseball Savant components when available. No Total Bases composite or heuristic is presented.",
         "No market probability, recommendation, price, odds, EV, or CLV is calculated in Phase 2A.",
       ],
     }));
@@ -506,6 +523,14 @@ router.post("/analyst/refresh/fantasypros", async (req, res, next) => {
 router.post("/analyst/refresh/research", async (req, res, next) => {
   try {
     res.status(201).json(RefreshAnalystResearchResponse.parse(await ingestResearch(requestedDate(req.query.date))));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/refresh/research/splits-full", async (req, res, next) => {
+  try {
+    res.status(202).json(await ingestStatcastHandednessFallback(requestedDate(req.query.date), "FULL_UNIVERSE", 24));
   } catch (error) {
     next(error);
   }

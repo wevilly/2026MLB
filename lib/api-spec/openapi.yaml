@@ -209,6 +209,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResearchIngestResult"
+  /analyst/refresh/research/splits-full:
+    post:
+      operationId: refreshFullUniverseStatcastSplits
+      tags: [analyst]
+      summary: Run one resumable batch of full-universe Statcast handedness split ingestion
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "202":
+          description: A bounded full-universe Statcast split batch completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResearchIngestSource"
 components:
   schemas:
     HealthStatus:
@@ -389,7 +406,13 @@ components:
         sourceThresholdOrUnavailable: { type: number }
         identityOrEligibilityGaps: { type: number }
         roleGaps: { type: number }
-      required: [playerProfiles, pitcherProfiles, arsenalProfiles, parkProfiles, identityQuarantines, insufficientSamples, missingArsenal, missingHandednessSplits, metricDefinitionConflicts, staleWindows, eligibleHitterProfiles, eligiblePitcherProfiles, hitterProfilesMissingEvidence, pitcherProfilesMissingEvidence, noMlbSample, sourceThresholdOrUnavailable, identityOrEligibilityGaps, roleGaps]
+        handednessCoverageScope: { type: string, enum: [FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE] }
+        handednessIngestStatus: { type: string, enum: [RUNNING, SUCCESS, PARTIAL, FAILED, NOT_RUN] }
+        handednessTargetPlayers: { type: number }
+        handednessCoveredPlayers: { type: number }
+        parkRequiredVenues: { type: number }
+        parkVenueCoverageGaps: { type: number }
+      required: [playerProfiles, pitcherProfiles, arsenalProfiles, parkProfiles, identityQuarantines, insufficientSamples, missingArsenal, missingHandednessSplits, metricDefinitionConflicts, staleWindows, eligibleHitterProfiles, eligiblePitcherProfiles, hitterProfilesMissingEvidence, pitcherProfilesMissingEvidence, noMlbSample, sourceThresholdOrUnavailable, identityOrEligibilityGaps, roleGaps, handednessCoverageScope, handednessIngestStatus, handednessTargetPlayers, handednessCoveredPlayers, parkRequiredVenues, parkVenueCoverageGaps]
     ResearchMetric:
       type: object
       properties:

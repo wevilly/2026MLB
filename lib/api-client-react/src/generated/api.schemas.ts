@@ -108,6 +108,24 @@ export interface HealthIssue {
   severity: string;
 }
 
+export type ResearchHealthHandednessCoverageScope = typeof ResearchHealthHandednessCoverageScope[keyof typeof ResearchHealthHandednessCoverageScope];
+
+
+export const ResearchHealthHandednessCoverageScope = {
+  FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE: 'FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE',
+} as const;
+
+export type ResearchHealthHandednessIngestStatus = typeof ResearchHealthHandednessIngestStatus[keyof typeof ResearchHealthHandednessIngestStatus];
+
+
+export const ResearchHealthHandednessIngestStatus = {
+  RUNNING: 'RUNNING',
+  SUCCESS: 'SUCCESS',
+  PARTIAL: 'PARTIAL',
+  FAILED: 'FAILED',
+  NOT_RUN: 'NOT_RUN',
+} as const;
+
 export interface ResearchHealth {
   playerProfiles: number;
   pitcherProfiles: number;
@@ -127,6 +145,12 @@ export interface ResearchHealth {
   sourceThresholdOrUnavailable: number;
   identityOrEligibilityGaps: number;
   roleGaps: number;
+  handednessCoverageScope: ResearchHealthHandednessCoverageScope;
+  handednessIngestStatus: ResearchHealthHandednessIngestStatus;
+  handednessTargetPlayers: number;
+  handednessCoveredPlayers: number;
+  parkRequiredVenues: number;
+  parkVenueCoverageGaps: number;
 }
 
 export interface DataHealth {
@@ -336,6 +360,10 @@ date?: string;
 };
 
 export type RefreshAnalystResearchParams = {
+date?: string;
+};
+
+export type RefreshFullUniverseStatcastSplitsParams = {
 date?: string;
 };
 

@@ -179,7 +179,7 @@ test("Phase 2A correction keeps operational shells, explicit opponent splits, an
   assert.ok(service.includes("f.pitcher_side"), "hitter split panels must read the stored opponent-side dimension");
   assert.ok(service.includes("f.batter_side"), "pitcher split panels must read the stored batter-side dimension");
   assert.ok(service.includes("DISTINCT ON (s.source_id, opponent_side)"), "profile reads must retain the ordinary, vs-L, and vs-R snapshot per source");
-  assert.ok(service.includes('fangraphs.status === "FAILED"'), "a failed FanGraphs split source must make the aggregate refresh partial");
+  assert.ok(service.includes('ingestStatcastHandednessFallback'), "Statcast Search must remain an independently callable fallback source");
   assert.ok(service.includes('source.status === "FAILED"'), "refresh notes must disclose source-specific failures");
   assert.ok(apiSpec.includes("ResearchIngestSource"), "research-only source failure fields must not alter the shared MLB/FantasyPros ingest response contract");
   assert.ok(service.includes("statcast-park-factors"), "Park ingest must use canonical Statcast Park Factors route");
@@ -196,4 +196,12 @@ test("Phase 2A correction keeps operational shells, explicit opponent splits, an
   assert.ok(service.includes("COALESCE(p.primary_position, '') <> 'P'"), "hitter shells must exclude official pitcher positions");
   assert.ok(!service.includes("WITH current_date AS"), "research health must not use a reserved PostgreSQL identifier as a CTE name");
   assert.ok(routes.includes('makeBadge("PARK_FACTORS", "Statcast Park Factors", true)'), "Data Health must surface the actual park source run");
+  assert.ok(routes.includes('research.parkVenueCoverageGaps === 0'), "Phase 2A readiness must reject partial Savant park coverage for current-game venues");
+  assert.ok(service.includes('park_snapshot_quality'), "park acceptance must validate all raw components for the latest Park Factors side snapshots");
+  assert.ok(service.includes('FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE'), "Phase 2A acceptance must require full official eligible hitter and pitcher coverage");
+  assert.ok(routes.includes('/analyst/refresh/research/splits-full'), "full-universe split coverage must run through a dedicated resumable batch endpoint");
+  assert.ok(service.includes("ir.job_name = 'statcast_search_handedness_fallback'"), "split target selection must require the dedicated Statcast Search fallback run");
+  assert.ok(service.includes("ir.effective_date = $1 AND ir.status = 'SUCCESS'"), "historical split snapshots must not satisfy a current-day fallback target");
+  assert.ok(service.includes("handedness_ingest_status"), "research health must expose the dedicated split-ingest status");
+  assert.ok(routes.includes('makeRunBadge("Statcast Search splits"'), "Data Health must surface the Statcast Search split run independently from the generic leaderboard ingest");
 });

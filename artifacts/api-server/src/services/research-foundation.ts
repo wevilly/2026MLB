@@ -579,7 +579,38 @@ async function ingestStatcast(effectiveDate: string) {
   return { source: "Baseball Savant / Statcast", ingestRunId, rowCount, normalizedRowCount: normalized, rejectedRowCount: rejected, quarantinedRows: quarantined, status: failure ? "FAILED" : quarantined || rejected ? "PARTIAL" : "SUCCESS", error: failure };
 }
 
-async function statcastSplitTargets(effectiveDate: string) {
+async function statcastSplitTargets(effectiveDate: string, scope: "GAME_DAY" | "FULL_UNIVERSE", batchSize = 24) {
+  if (scope === "FULL_UNIVERSE") {
+    const [hitters, pitchers] = await Promise.all([
+      pool.query<{ player_id: number }>(
+        `SELECT pe.player_id
+         FROM player_eligibility pe JOIN players p ON p.player_id = pe.player_id
+         WHERE pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = $1
+           AND pe.eligible_today_research AND NOT pe.requires_identity_review AND NOT pe.quarantined_from_current_research
+           AND COALESCE(p.primary_position, '') <> 'P'
+           AND NOT (
+             EXISTS (SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id JOIN ingest_runs ir ON ir.ingest_run_id = s.ingest_run_id WHERE s.player_id = pe.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = $1 AND ir.job_name = 'statcast_search_handedness_fallback' AND ir.effective_date = $1 AND ir.status = 'SUCCESS' AND f.pitcher_side = 'L' AND f.transformation = 'DERIVED_FROM_STATCAST')
+             AND EXISTS (SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id JOIN ingest_runs ir ON ir.ingest_run_id = s.ingest_run_id WHERE s.player_id = pe.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = $1 AND ir.job_name = 'statcast_search_handedness_fallback' AND ir.effective_date = $1 AND ir.status = 'SUCCESS' AND f.pitcher_side = 'R' AND f.transformation = 'DERIVED_FROM_STATCAST')
+           )
+         ORDER BY pe.player_id LIMIT $2`,
+        [effectiveDate, batchSize],
+      ),
+      pool.query<{ player_id: number }>(
+        `SELECT pe.player_id
+         FROM player_eligibility pe JOIN players p ON p.player_id = pe.player_id
+         WHERE pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = $1
+           AND pe.eligible_pitcher_research AND NOT pe.requires_identity_review AND NOT pe.quarantined_from_current_research
+           AND p.primary_position = 'P'
+           AND NOT (
+             EXISTS (SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id JOIN ingest_runs ir ON ir.ingest_run_id = s.ingest_run_id WHERE s.player_id = pe.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = $1 AND ir.job_name = 'statcast_search_handedness_fallback' AND ir.effective_date = $1 AND ir.status = 'SUCCESS' AND f.batter_side = 'L' AND f.transformation = 'DERIVED_FROM_STATCAST')
+             AND EXISTS (SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id JOIN ingest_runs ir ON ir.ingest_run_id = s.ingest_run_id WHERE s.player_id = pe.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = $1 AND ir.job_name = 'statcast_search_handedness_fallback' AND ir.effective_date = $1 AND ir.status = 'SUCCESS' AND f.batter_side = 'R' AND f.transformation = 'DERIVED_FROM_STATCAST')
+           )
+         ORDER BY pe.player_id LIMIT $2`,
+        [effectiveDate, batchSize],
+      ),
+    ]);
+    return { hitters: hitters.rows.map((row) => row.player_id), pitchers: pitchers.rows.map((row) => row.player_id) };
+  }
   const [hitters, pitchers] = await Promise.all([
     pool.query<{ player_id: number }>(
       `WITH latest_projected AS (
@@ -597,8 +628,10 @@ async function statcastSplitTargets(effectiveDate: string) {
          AND pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = $1
          AND pe.eligible_today_research AND NOT pe.requires_identity_review AND NOT pe.quarantined_from_current_research
        WHERE le.player_id IS NOT NULL AND COALESCE(p.primary_position, '') <> 'P'
-         AND NOT EXISTS (SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id WHERE s.player_id = le.player_id AND f.pitcher_side = 'L' AND f.transformation = 'DERIVED_FROM_STATCAST')
-         AND NOT EXISTS (SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id WHERE s.player_id = le.player_id AND f.pitcher_side = 'R' AND f.transformation = 'DERIVED_FROM_STATCAST')
+         AND NOT (
+            EXISTS (SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id JOIN ingest_runs ir ON ir.ingest_run_id = s.ingest_run_id WHERE s.player_id = le.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = $1 AND ir.job_name = 'statcast_search_handedness_fallback' AND ir.effective_date = $1 AND ir.status = 'SUCCESS' AND f.pitcher_side = 'L' AND f.transformation = 'DERIVED_FROM_STATCAST')
+            AND EXISTS (SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id JOIN ingest_runs ir ON ir.ingest_run_id = s.ingest_run_id WHERE s.player_id = le.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = $1 AND ir.job_name = 'statcast_search_handedness_fallback' AND ir.effective_date = $1 AND ir.status = 'SUCCESS' AND f.pitcher_side = 'R' AND f.transformation = 'DERIVED_FROM_STATCAST')
+         )
        ORDER BY le.player_id`,
       [effectiveDate],
     ),
@@ -611,8 +644,10 @@ async function statcastSplitTargets(effectiveDate: string) {
          AND pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = $1
          AND pe.eligible_pitcher_research AND NOT pe.requires_identity_review AND NOT pe.quarantined_from_current_research
        WHERE s.source_id = 'MLB_OFFICIAL' AND g.game_date = $1 AND s.player_id IS NOT NULL AND p.primary_position = 'P'
-         AND NOT EXISTS (SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots ps ON ps.research_snapshot_id = f.research_snapshot_id WHERE ps.player_id = s.player_id AND f.batter_side = 'L' AND f.transformation = 'DERIVED_FROM_STATCAST')
-         AND NOT EXISTS (SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots ps ON ps.research_snapshot_id = f.research_snapshot_id WHERE ps.player_id = s.player_id AND f.batter_side = 'R' AND f.transformation = 'DERIVED_FROM_STATCAST')
+         AND NOT (
+            EXISTS (SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots ps ON ps.research_snapshot_id = f.research_snapshot_id JOIN ingest_runs ir ON ir.ingest_run_id = ps.ingest_run_id WHERE ps.player_id = s.player_id AND ps.source_id = 'STATCAST' AND ps.research_window = 'SEASON' AND ps.effective_to = $1 AND ir.job_name = 'statcast_search_handedness_fallback' AND ir.effective_date = $1 AND ir.status = 'SUCCESS' AND f.batter_side = 'L' AND f.transformation = 'DERIVED_FROM_STATCAST')
+            AND EXISTS (SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots ps ON ps.research_snapshot_id = f.research_snapshot_id JOIN ingest_runs ir ON ir.ingest_run_id = ps.ingest_run_id WHERE ps.player_id = s.player_id AND ps.source_id = 'STATCAST' AND ps.research_window = 'SEASON' AND ps.effective_to = $1 AND ir.job_name = 'statcast_search_handedness_fallback' AND ir.effective_date = $1 AND ir.status = 'SUCCESS' AND f.batter_side = 'R' AND f.transformation = 'DERIVED_FROM_STATCAST')
+         )
        ORDER BY s.player_id`,
       [effectiveDate],
     ),
@@ -620,7 +655,7 @@ async function statcastSplitTargets(effectiveDate: string) {
   return { hitters: hitters.rows.map((row) => row.player_id), pitchers: pitchers.rows.map((row) => row.player_id) };
 }
 
-async function ingestStatcastHandednessFallback(effectiveDate: string) {
+export async function ingestStatcastHandednessFallback(effectiveDate: string, targetScope: "GAME_DAY" | "FULL_UNIVERSE" = "GAME_DAY", batchSize = 24) {
   const started = Date.now();
   const ingestRunId = await startRun(STATCAST_SOURCE, "statcast_search_handedness_fallback", effectiveDate);
   const scope = windowScope("SEASON", effectiveDate);
@@ -630,13 +665,13 @@ async function ingestStatcastHandednessFallback(effectiveDate: string) {
   let lastStatus = 200;
   let failure: string | null = null;
   try {
-    const targets = await statcastSplitTargets(effectiveDate);
+    const targets = await statcastSplitTargets(effectiveDate, targetScope, batchSize);
     const work: Array<{ role: ResearchRole; playerId: number }> = [
       ...targets.hitters.map((playerId) => ({ role: "HITTER" as const, playerId })),
       ...targets.pitchers.map((playerId) => ({ role: "PITCHER" as const, playerId })),
     ];
-    for (let offset = 0; offset < work.length; offset += 24) {
-      await Promise.all(work.slice(offset, offset + 24).map(async ({ role, playerId }) => {
+    for (let offset = 0; offset < work.length; offset += batchSize) {
+      await Promise.all(work.slice(offset, offset + batchSize).map(async ({ role, playerId }) => {
         const endpoint = statcastSearchUrl(role, playerId, scope);
         try {
           const response = await fetch(endpoint, { headers: { accept: "text/csv,text/plain", "user-agent": "Mozilla/5.0 (compatible; MLBAnalystResearch/1.0)" } });
@@ -657,7 +692,6 @@ async function ingestStatcastHandednessFallback(effectiveDate: string) {
           const plates = terminalPlateAppearances(rows);
           for (const side of ["L", "R"] as const) {
             const sidePlates = plates.filter((row) => String(role === "HITTER" ? row.p_throws : row.stand).toUpperCase() === side);
-            if (!sidePlates.length) continue;
             const derived = statcastSplitRow(sidePlates, role);
             normalized += 1;
             if (role === "HITTER") await persistHitterSnapshot(playerId, STATCAST_SOURCE, ingestRunId, rawPayloadId, scope, derived, side, true);
@@ -670,7 +704,7 @@ async function ingestStatcastHandednessFallback(effectiveDate: string) {
     }
     await finishRun(ingestRunId, rejected ? "PARTIAL" : "SUCCESS", {
       rows: rowCount, normalized, rejected, httpStatus: lastStatus,
-      metadata: { targetHitters: targets.hitters.length, targetPitchers: targets.pitchers.length, identityGate: "projected lineup hitters and official/probable starters only", splitSource: "Statcast Search p_throws/stand" },
+       metadata: { targetHitters: targets.hitters.length, targetPitchers: targets.pitchers.length, targetScope, batchSize, identityGate: targetScope === "FULL_UNIVERSE" ? "all official eligible hitters and pitchers" : "projected lineup hitters and official/probable starters only", splitSource: "Statcast Search p_throws/stand" },
     }, started);
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
@@ -1103,7 +1137,8 @@ export async function researchHealth() {
     player_profiles: number; pitcher_profiles: number; arsenal_profiles: number; park_profiles: number; identity_quarantines: number;
     insufficient_samples: number; missing_arsenal: number; missing_handedness_splits: number; metric_definition_conflicts: number; stale_windows: number;
     eligible_hitter_profiles: number; eligible_pitcher_profiles: number; hitter_profiles_missing_evidence: number; pitcher_profiles_missing_evidence: number;
-    no_mlb_sample: number; source_threshold_or_unavailable: number; identity_or_eligibility_gaps: number; role_gaps: number;
+     no_mlb_sample: number; source_threshold_or_unavailable: number; identity_or_eligibility_gaps: number; role_gaps: number;
+     handedness_target_players: number; handedness_covered_players: number; handedness_ingest_status: string | null; park_required_venues: number; park_venue_coverage_gaps: number;
   }>(
     `WITH effective_day AS (
        SELECT max(effective_date) AS effective_date FROM player_eligibility WHERE source_id = 'MLB_OFFICIAL'
@@ -1121,6 +1156,39 @@ export async function researchHealth() {
        WHERE pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = d.effective_date
          AND pe.eligible_pitcher_research AND NOT pe.requires_identity_review AND NOT pe.quarantined_from_current_research
          AND p.primary_position = 'P'
+      ),
+      split_target_hitters AS (SELECT player_id FROM eligible_hitters),
+      split_target_pitchers AS (SELECT player_id FROM eligible_pitchers),
+      current_successful_split_runs AS (
+        SELECT ingest_run_id FROM ingest_runs
+        WHERE source_id = 'STATCAST' AND job_name = 'statcast_search_handedness_fallback'
+          AND effective_date = (SELECT effective_date FROM effective_day) AND status = 'SUCCESS'
+      ),
+      latest_split_run AS (
+        SELECT status FROM ingest_runs
+        WHERE source_id = 'STATCAST' AND job_name = 'statcast_search_handedness_fallback'
+          AND effective_date = (SELECT effective_date FROM effective_day)
+        ORDER BY started_at DESC LIMIT 1
+      ),
+      park_required_venues AS (
+        SELECT DISTINCT venue_id FROM games
+        WHERE game_date = (SELECT effective_date FROM effective_day) AND venue_id IS NOT NULL
+      ),
+      park_snapshot_quality AS (
+        SELECT ps.venue_id, ps.park_research_snapshot_id, ps.season, ps.retrieved_at, f.batter_side,
+          count(DISTINCT f.metric_key) FILTER (
+            WHERE f.metric_key IN ('singles_factor', 'doubles_factor', 'triples_factor', 'hits_factor', 'hr_factor')
+              AND f.value IS NOT NULL
+          )::int AS component_count
+        FROM park_research_snapshots ps
+        JOIN park_research_features f ON f.park_research_snapshot_id = ps.park_research_snapshot_id
+        WHERE ps.source_id = 'PARK_FACTORS'
+        GROUP BY ps.venue_id, ps.park_research_snapshot_id, ps.season, ps.retrieved_at, f.batter_side
+      ),
+      latest_park_side AS (
+        SELECT DISTINCT ON (venue_id, batter_side) venue_id, batter_side, season, component_count
+        FROM park_snapshot_quality
+        ORDER BY venue_id, batter_side NULLS FIRST, retrieved_at DESC
      )
      SELECT
       (SELECT count(DISTINCT player_id)::int FROM player_research_snapshots) AS player_profiles,
@@ -1131,20 +1199,20 @@ export async function researchHealth() {
       ((SELECT count(*) FROM player_research_features WHERE sample_status = 'INSUFFICIENT_SAMPLE') + (SELECT count(*) FROM pitcher_research_features WHERE sample_status = 'INSUFFICIENT_SAMPLE'))::int AS insufficient_samples,
       (SELECT count(*)::int FROM pitcher_research_snapshots ps WHERE NOT EXISTS (SELECT 1 FROM pitch_arsenal_features pa WHERE pa.research_snapshot_id = ps.research_snapshot_id)) AS missing_arsenal,
       (
-        (SELECT count(*) FROM eligible_hitters h WHERE NOT EXISTS (
+         (SELECT count(*) FROM split_target_hitters h WHERE NOT EXISTS (
           SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
-          WHERE s.player_id = h.player_id AND f.pitcher_side = 'L'
+           WHERE s.player_id = h.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = (SELECT effective_date FROM effective_day) AND s.ingest_run_id IN (SELECT ingest_run_id FROM current_successful_split_runs) AND f.pitcher_side = 'L' AND f.transformation = 'DERIVED_FROM_STATCAST'
         ) OR NOT EXISTS (
           SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
-          WHERE s.player_id = h.player_id AND f.pitcher_side = 'R'
+           WHERE s.player_id = h.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = (SELECT effective_date FROM effective_day) AND s.ingest_run_id IN (SELECT ingest_run_id FROM current_successful_split_runs) AND f.pitcher_side = 'R' AND f.transformation = 'DERIVED_FROM_STATCAST'
         ))
         +
-        (SELECT count(*) FROM eligible_pitchers p WHERE NOT EXISTS (
+         (SELECT count(*) FROM split_target_pitchers p WHERE NOT EXISTS (
           SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
-          WHERE s.player_id = p.player_id AND f.batter_side = 'L'
+           WHERE s.player_id = p.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = (SELECT effective_date FROM effective_day) AND s.ingest_run_id IN (SELECT ingest_run_id FROM current_successful_split_runs) AND f.batter_side = 'L' AND f.transformation = 'DERIVED_FROM_STATCAST'
         ) OR NOT EXISTS (
           SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
-          WHERE s.player_id = p.player_id AND f.batter_side = 'R'
+           WHERE s.player_id = p.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = (SELECT effective_date FROM effective_day) AND s.ingest_run_id IN (SELECT ingest_run_id FROM current_successful_split_runs) AND f.batter_side = 'R' AND f.transformation = 'DERIVED_FROM_STATCAST'
         ))
       )::int AS missing_handedness_splits,
       (SELECT count(*)::int FROM ingest_issues WHERE issue_type = 'METRIC_DEFINITION_CONFLICT' AND resolved_at IS NULL) AS metric_definition_conflicts,
@@ -1162,7 +1230,31 @@ export async function researchHealth() {
         + (SELECT count(*) FROM eligible_pitchers p WHERE NOT EXISTS (SELECT 1 FROM pitcher_research_snapshots s WHERE s.player_id = p.player_id))
       )::int AS source_threshold_or_unavailable,
       (SELECT count(*)::int FROM player_eligibility pe, effective_day d WHERE pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = d.effective_date AND (pe.requires_identity_review OR pe.quarantined_from_current_research)) AS identity_or_eligibility_gaps,
-      0::int AS role_gaps`,
+       0::int AS role_gaps,
+       COALESCE((SELECT status::text FROM latest_split_run), 'NOT_RUN') AS handedness_ingest_status,
+       ((SELECT count(*) FROM split_target_hitters) + (SELECT count(*) FROM split_target_pitchers))::int AS handedness_target_players,
+       (
+         (SELECT count(*) FROM split_target_hitters h WHERE EXISTS (
+           SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
+           WHERE s.player_id = h.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = (SELECT effective_date FROM effective_day) AND s.ingest_run_id IN (SELECT ingest_run_id FROM current_successful_split_runs) AND f.pitcher_side = 'L' AND f.transformation = 'DERIVED_FROM_STATCAST'
+         ) AND EXISTS (
+           SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
+           WHERE s.player_id = h.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = (SELECT effective_date FROM effective_day) AND s.ingest_run_id IN (SELECT ingest_run_id FROM current_successful_split_runs) AND f.pitcher_side = 'R' AND f.transformation = 'DERIVED_FROM_STATCAST'
+         ))
+         + (SELECT count(*) FROM split_target_pitchers p WHERE EXISTS (
+           SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
+           WHERE s.player_id = p.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = (SELECT effective_date FROM effective_day) AND s.ingest_run_id IN (SELECT ingest_run_id FROM current_successful_split_runs) AND f.batter_side = 'L' AND f.transformation = 'DERIVED_FROM_STATCAST'
+         ) AND EXISTS (
+           SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
+           WHERE s.player_id = p.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = (SELECT effective_date FROM effective_day) AND s.ingest_run_id IN (SELECT ingest_run_id FROM current_successful_split_runs) AND f.batter_side = 'R' AND f.transformation = 'DERIVED_FROM_STATCAST'
+         ))
+       )::int AS handedness_covered_players,
+       (SELECT count(*)::int FROM park_required_venues) AS park_required_venues,
+       (SELECT count(*)::int FROM park_required_venues v WHERE
+         NOT EXISTS (SELECT 1 FROM latest_park_side p WHERE p.venue_id = v.venue_id AND p.batter_side IS NULL AND p.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int AND p.component_count = 5)
+         OR NOT EXISTS (SELECT 1 FROM latest_park_side p WHERE p.venue_id = v.venue_id AND p.batter_side = 'L' AND p.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int AND p.component_count = 5)
+         OR NOT EXISTS (SELECT 1 FROM latest_park_side p WHERE p.venue_id = v.venue_id AND p.batter_side = 'R' AND p.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int AND p.component_count = 5)
+       ) AS park_venue_coverage_gaps`,
   );
   const row = result.rows[0];
   return {
@@ -1184,5 +1276,11 @@ export async function researchHealth() {
     sourceThresholdOrUnavailable: row?.source_threshold_or_unavailable ?? 0,
     identityOrEligibilityGaps: row?.identity_or_eligibility_gaps ?? 0,
     roleGaps: row?.role_gaps ?? 0,
+    handednessCoverageScope: "FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE",
+    handednessIngestStatus: row?.handedness_ingest_status ?? "NOT_RUN",
+    handednessTargetPlayers: row?.handedness_target_players ?? 0,
+    handednessCoveredPlayers: row?.handedness_covered_players ?? 0,
+    parkRequiredVenues: row?.park_required_venues ?? 0,
+    parkVenueCoverageGaps: row?.park_venue_coverage_gaps ?? 0,
   };
 }

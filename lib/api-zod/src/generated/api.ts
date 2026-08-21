@@ -153,7 +153,13 @@ export const GetAnalystDataHealthResponse = zod.object({
   "noMlbSample": zod.number(),
   "sourceThresholdOrUnavailable": zod.number(),
   "identityOrEligibilityGaps": zod.number(),
-  "roleGaps": zod.number()
+  "roleGaps": zod.number(),
+  "handednessCoverageScope": zod.enum(['FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE']),
+  "handednessIngestStatus": zod.enum(['RUNNING', 'SUCCESS', 'PARTIAL', 'FAILED', 'NOT_RUN']),
+  "handednessTargetPlayers": zod.number(),
+  "handednessCoveredPlayers": zod.number(),
+  "parkRequiredVenues": zod.number(),
+  "parkVenueCoverageGaps": zod.number()
 }),
   "lastRun": zod.string()
 })
@@ -443,6 +449,24 @@ export const RefreshAnalystResearchResponse = zod.object({
 })),
   "quarantinedRows": zod.number(),
   "notes": zod.array(zod.string())
+})
+
+
+/**
+ * @summary Run one resumable batch of full-universe Statcast handedness split ingestion
+ */
+export const RefreshFullUniverseStatcastSplitsQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
+export const RefreshFullUniverseStatcastSplitsResponse = zod.object({
+  "source": zod.string(),
+  "ingestRunId": zod.string(),
+  "rowCount": zod.number(),
+  "normalizedRowCount": zod.number(),
+  "rejectedRowCount": zod.number(),
+  "status": zod.enum(['SUCCESS', 'PARTIAL', 'FAILED']),
+  "error": zod.string().nullable()
 })
 
 

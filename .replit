@@ -11,6 +11,26 @@ env = { "CI" = "true" }
 [workflows]
 runButton = "Project"
 
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "MLB Analyst Full-Universe Split Backfill"
+
+[[workflows.workflow]]
+name = "MLB Analyst Full-Universe Split Backfill"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "while true; do response=$(curl --fail --max-time 240 -sS -X POST http://127.0.0.1:8080/api/analyst/refresh/research/splits-full || true); echo \"$response\"; if echo \"$response\" | grep -q '\"normalizedRowCount\":0'; then sleep 900; else sleep 1; fi; done"
+
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true

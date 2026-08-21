@@ -5,6 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { ResearchHealthHandednessCoverageScope } from './researchHealthHandednessCoverageScope';
+import type { ResearchHealthHandednessIngestStatus } from './researchHealthHandednessIngestStatus';
 
 export interface ResearchHealth {
   playerProfiles: number;
@@ -25,4 +27,10 @@ export interface ResearchHealth {
   sourceThresholdOrUnavailable: number;
   identityOrEligibilityGaps: number;
   roleGaps: number;
+  handednessCoverageScope: ResearchHealthHandednessCoverageScope;
+  handednessIngestStatus: ResearchHealthHandednessIngestStatus;
+  handednessTargetPlayers: number;
+  handednessCoveredPlayers: number;
+  parkRequiredVenues: number;
+  parkVenueCoverageGaps: number;
 }
