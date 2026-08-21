@@ -10,7 +10,8 @@
     "test:data-foundation": "node --test tests/data-foundation.test.mjs",
     "test:phase-2a": "node --test tests/phase-2a-acceptance.test.mjs",
     "test:phase-2b": "node --test tests/phase-2b-acceptance.test.mjs",
-    "test:all": "node --test tests/data-foundation.test.mjs tests/phase-2a-acceptance.test.mjs tests/phase-2b-acceptance.test.mjs",
+    "test:phase-3": "node --test tests/phase-3-acceptance.test.mjs",
+    "test:all": "node --test tests/data-foundation.test.mjs tests/phase-2a-acceptance.test.mjs tests/phase-2b-acceptance.test.mjs tests/phase-3-acceptance.test.mjs",
     "report:phase-2a": "node scripts/phase-2a-acceptance-report.mjs"
   },
   "private": true,

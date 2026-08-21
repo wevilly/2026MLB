@@ -226,6 +226,41 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResearchIngestSource"
+  /analyst/market-research:
+    get:
+      operationId: getAnalystMarketResearch
+      tags: [analyst]
+      summary: Get market research candidates for a given date and market
+      description: |
+        Returns the market research candidate board for one or all markets on the given date.
+        The board is populated by the Phase 3A–3D market engines; it is empty until at least
+        one engine has completed a research pass.
+
+        RANK, DON'T GATE rule: research_rank is an ordinal integer only. No state value
+        removes a candidate from the board. The prohibitedFields array in the response
+        documents which fields are permanently absent from this contract.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: market
+          in: query
+          required: false
+          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+          description: Filter to one market (TB=2+Total Bases, XBH=Extra Base Hit, WALK=Batter Walk, HR=Home Run)
+        - name: gameId
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter to a specific game by game_pk
+      responses:
+        "200":
+          description: Market research board
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketResearch"
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -636,4 +671,49 @@ components:
         teamsComputed: { type: integer }
         error: { type: ["string", "null"] }
       required: [source, slateDate, gamesProcessed, appearancesNormalized, appearancesRejected, teamsComputed, error]
+    MarketResearchCandidate:
+      type: object
+      description: |
+        One research candidate for a player-market-slate_date-game combination.
+        RANK_DONT_GATE: research_rank is ordinal only; it implies no threshold, gate, or probability.
+        Ties share the same integer rank and are never collapsed.
+        Prohibited fields absent from this schema: ev, clv, odds, impliedProbability, vigJuice,
+        edgePercent, kellyFraction, expectedValue.
+      properties:
+        candidateId: { type: string }
+        slateDate: { type: string, format: date }
+        gamePk: { type: integer }
+        playerId: { type: integer }
+        playerName: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        researchRank: { type: ["integer", "null"] }
+        researchState: { type: string, enum: [STRONG, POSITIVE, NEUTRAL, NEGATIVE, BLOCKED] }
+        primaryMechanism: { type: ["string", "null"] }
+        secondaryMechanism: { type: ["string", "null"] }
+        opportunityEvidence: { type: object }
+        starterMatchupEvidence: { type: object }
+        bullpenPathEvidence: { type: object }
+        parkEvidence: { type: object }
+        recentVsSeasonVsCareer: { type: object }
+        counterEvidence: { type: object }
+        missingStaleEvidence: { type: ["string", "null"] }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+      required: [candidateId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, secondaryMechanism, opportunityEvidence, starterMatchupEvidence, bullpenPathEvidence, parkEvidence, recentVsSeasonVsCareer, counterEvidence, missingStaleEvidence, createdAt, updatedAt]
+    MarketResearch:
+      type: object
+      description: |
+        Market research board for a given date/market/game.
+        Populated by Phase 3A–3D engines. Empty until at least one engine has run.
+        The prohibitedFields array documents which analytics are permanently absent from this contract.
+      properties:
+        date: { type: string, format: date }
+        market: { type: ["string", "null"] }
+        gameId: { type: ["string", "null"] }
+        rankSemantics: { type: string }
+        prohibitedFields: { type: array, items: { type: string } }
+        candidates: { type: array, items: { $ref: "#/components/schemas/MarketResearchCandidate" } }
+        candidateCount: { type: integer }
+        systemNote: { type: string }
+      required: [date, market, gameId, rankSemantics, prohibitedFields, candidates, candidateCount, systemNote]
 

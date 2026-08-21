@@ -1,7 +1,8 @@
 import { type ReactNode, useMemo, useState } from 'react';
+import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useGetAnalystDataHealth, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen } from '@workspace/api-client-react';
-import type { AnalystSettings, BullpenArm, BullpenRoom, BullpenTeam, DataHealth, HealthIssue, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile } from '@workspace/api-client-react';
+import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen } from '@workspace/api-client-react';
+import type { AnalystSettings, BullpenArm, BullpenRoom, BullpenTeam, DataHealth, HealthIssue, MarketResearch, MarketResearchCandidate, MarketShortCode, ProjectionCenter, ProjectionRow, ResearchState, SlateGame, SourceBadge, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useSearch, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -29,7 +30,8 @@ const navGroups: { label: string; items: Array<{ href: string; label: string; ic
       { href: '/player-lab', label: 'Player lab', icon: Target },
       { href: '/pitcher-lab', label: 'Pitcher lab', icon: Activity },
       { href: '/bullpen-room', label: 'Bullpen room', icon: ShieldCheck },
-      { href: '/bettor-intelligence', label: 'Bettor intelligence', icon: BarChart3, future: true },
+      { href: '/market-board', label: 'Market board', icon: BarChart3 },
+      { href: '/bettor-intelligence', label: 'Bettor intelligence', icon: Gauge, future: true },
       { href: '/model-lab', label: 'Model lab', icon: GitBranch, future: true },
       { href: '/ai-analyst', label: 'AI analyst', icon: Sparkles, future: true },
       { href: '/results', label: 'Results', icon: Table2, future: true },
@@ -1228,6 +1230,215 @@ function BullpenRoomPage() {
   );
 }
 
+// ─── Phase 3 – Market Board ──────────────────────────────────────────────────
+
+const MARKET_LABELS: Record<string, string> = {
+  TB: '2+ Total Bases',
+  XBH: '1+ Extra Base Hit',
+  WALK: 'Batter Walk',
+  HR: 'Home Run',
+};
+
+const RESEARCH_STATE_TONE: Record<string, Tone> = {
+  STRONG: 'good',
+  POSITIVE: 'good',
+  NEUTRAL: 'neutral',
+  NEGATIVE: 'warn',
+  BLOCKED: 'bad',
+};
+
+function MarketBoardPage() {
+  const [dateParam, setDateParam] = useState('');
+  const [marketParam, setMarketParam] = useState<MarketShortCode | ''>('');
+  const [gameIdParam, setGameIdParam] = useState('');
+
+  const effectiveDate = dateParam || new Date().toISOString().slice(0, 10);
+  const params = {
+    date: effectiveDate,
+    ...(marketParam ? { market: marketParam as MarketShortCode } : {}),
+    ...(gameIdParam ? { gameId: gameIdParam } : {}),
+  };
+
+  const query = useGetAnalystMarketResearch(params);
+  const data = query.data as MarketResearch | undefined;
+
+  return (
+    <div className="page-content rise-in">
+      <div className="page-intro">
+        <div>
+          <Kicker>Market research / Phase 3</Kicker>
+          <h1>Market <span className="slash">//</span> board</h1>
+          <p>
+            Four independent hitter markets: 2+ Total Bases, Extra Base Hit, Batter Walk, Home Run.
+            Populated by engines 3A–3D. Empty until at least one engine has completed a research pass.
+          </p>
+        </div>
+        <button
+          className="button button-dark"
+          onClick={() => query.refetch()}
+          disabled={query.isLoading}
+          data-testid="button-refresh-market-board"
+        >
+          <RefreshCw size={15} /> {query.isLoading ? 'Loading…' : 'Refresh'}
+        </button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-2 items-center flex-wrap mb-6">
+        <input
+          type="date"
+          className="search-input !h-[35px] !w-auto"
+          value={dateParam}
+          onChange={(e) => setDateParam(e.target.value)}
+          data-testid="input-market-board-date"
+        />
+        <select
+          className="search-input !h-[35px]"
+          value={marketParam}
+          onChange={(e) => setMarketParam(e.target.value as MarketShortCode | '')}
+          data-testid="select-market-board-market"
+        >
+          <option value="">All markets</option>
+          {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
+            <option key={m} value={m}>{MARKET_LABELS[m]}</option>
+          ))}
+        </select>
+        <input
+          type="text"
+          className="search-input !h-[35px] !w-[120px]"
+          value={gameIdParam}
+          onChange={(e) => setGameIdParam(e.target.value.trim())}
+          placeholder="Game ID"
+          data-testid="input-market-board-gameid"
+        />
+      </div>
+
+      {/* Contract banner — always visible */}
+      <Panel className="mb-6 bg-accent/5 border-accent/20">
+        <div className="p-4 space-y-3">
+          <Kicker>Phase 3 contract</Kicker>
+          {data && (
+            <p className="text-xs font-mono text-muted-foreground" data-testid="rank-semantics">
+              {data.rankSemantics}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-3 mt-3">
+            {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
+              <button
+                key={m}
+                className={`button button-quiet text-xs ${marketParam === m ? 'button-dark' : ''}`}
+                onClick={() => setMarketParam(marketParam === m ? '' : m)}
+                data-testid={`market-filter-${m}`}
+              >
+                {MARKET_LABELS[m]}
+              </button>
+            ))}
+          </div>
+          {data && (
+            <div className="mt-2">
+              <span className="text-xs text-muted-foreground">Prohibited fields (absent from contract): </span>
+              <span className="font-mono text-xs text-muted-foreground" data-testid="prohibited-fields">
+                {data.prohibitedFields.join(', ')}
+              </span>
+            </div>
+          )}
+        </div>
+      </Panel>
+
+      {/* Summary metrics */}
+      {data && (
+        <div className="metric-grid mb-6">
+          <Metric label="Candidates" value={data.candidateCount} note={`${marketParam ? MARKET_LABELS[marketParam] : 'all markets'} · ${effectiveDate}`} tone="accent" />
+          <Metric label="Market" value={marketParam ? MARKET_LABELS[marketParam] : 'All 4 markets'} note="TB / XBH / WALK / HR are independent" tone="neutral" />
+          <Metric
+            label="STRONG / POSITIVE"
+            value={data.candidates.filter((c) => c.researchState === 'STRONG' || c.researchState === 'POSITIVE').length}
+            note="Positive research state"
+            tone={data.candidates.some((c) => c.researchState === 'STRONG' || c.researchState === 'POSITIVE') ? 'good' : 'neutral'}
+          />
+          <Metric
+            label="BLOCKED"
+            value={data.candidates.filter((c) => c.researchState === 'BLOCKED').length}
+            note="Evidence structurally absent"
+            tone={data.candidates.some((c) => c.researchState === 'BLOCKED') ? 'bad' : 'good'}
+          />
+        </div>
+      )}
+
+      {query.isLoading ? (
+        <LoadingPanel rows={5} />
+      ) : query.isError ? (
+        <QueryMessage kind="error" onRetry={() => query.refetch()} />
+      ) : !data || data.candidateCount === 0 ? (
+        <Panel>
+          <div className="p-8 text-center space-y-3">
+            <Kicker>No candidates yet</Kicker>
+            <h2 className="text-lg">Market engines 3A–3D will populate this board</h2>
+            <p className="text-sm text-muted-foreground max-w-lg mx-auto">
+              The shared contract is ready. Once Total Bases (3A), Extra Base Hit (3B),
+              Batter Walk (3C), and Home Run (3D) engines are built, their research
+              candidates will appear here ordered by research_rank.
+            </p>
+            <div className="flex justify-center gap-2 mt-4">
+              {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
+                <span key={m} className="badge badge-neutral font-mono text-xs" data-testid={`market-contract-badge-${m}`}>{m}</span>
+              ))}
+            </div>
+            {data && (
+              <p className="text-xs font-mono text-muted-foreground mt-3" data-testid="system-note">
+                {data.systemNote}
+              </p>
+            )}
+          </div>
+        </Panel>
+      ) : (
+        <Panel>
+          <SectionHeading
+            eyebrow={`${data.candidateCount} candidates · ${effectiveDate}`}
+            title="Research board"
+            detail="Ordered by research_rank ASC (1 = highest). Ties share the same rank value."
+          />
+          <div className="table-wrap">
+            <table className="data-table" data-testid="market-board-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Player</th>
+                  <th>Market</th>
+                  <th>State</th>
+                  <th>Game</th>
+                  <th>Primary Mechanism</th>
+                  <th>Missing/Stale</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.candidates.map((c, i) => (
+                  <CandidateRow key={c.candidateId} candidate={c} index={i} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+function CandidateRow({ candidate: c, index }: { candidate: MarketResearchCandidate; index: number }) {
+  const tone = RESEARCH_STATE_TONE[c.researchState] ?? 'neutral';
+  return (
+    <tr data-testid={`candidate-row-${index}`}>
+      <td className="number font-mono">{c.researchRank ?? '—'}</td>
+      <td><strong>{c.playerName}</strong></td>
+      <td><span className="badge badge-neutral font-mono text-xs">{c.market}</span></td>
+      <td><Badge tone={tone}>{c.researchState}</Badge></td>
+      <td className="font-mono text-xs">{c.gamePk}</td>
+      <td>{c.primaryMechanism ?? <em className="text-muted-foreground">—</em>}</td>
+      <td className="text-xs text-muted-foreground">{c.missingStaleEvidence ?? '—'}</td>
+    </tr>
+  );
+}
+
 function Router() {
   return (
     <AppShell>
@@ -1241,6 +1452,7 @@ function Router() {
           <Route path="/player-lab" component={PlayerLabPage} />
           <Route path="/pitcher-lab" component={PitcherLabPage} />
           <Route path="/bullpen-room" component={BullpenRoomPage} />
+          <Route path="/market-board" component={MarketBoardPage} />
           <Route path="/bettor-intelligence">{() => <FuturePage label="Bettor intelligence" />}</Route>
           <Route path="/model-lab">{() => <FuturePage label="Model lab" />}</Route>
           <Route path="/ai-analyst">{() => <FuturePage label="AI analyst" />}</Route>

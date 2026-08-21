@@ -788,6 +788,138 @@ export const futureMarketPredictions = pgTable("future_market_predictions", {
   frozenAt: timestamp("frozen_at", { withTimezone: true }),
 });
 
+// ─── Phase 3 – Shared Market Research Contract ───────────────────────────────
+
+/**
+ * Research state taxonomy for market research candidates.
+ *
+ * RANK, DON'T GATE rule: engines assign an ordinal rank and a research state.
+ * No state value removes a candidate from the board — all states remain visible
+ * to the analyst. BLOCKED means evidence is structurally absent or contradictory,
+ * not that the player should be excluded.
+ *
+ * Prohibited: No sportsbook price, odds, implied probability, EV, CLV, vig,
+ * juice, kelly fraction, or edge-percent columns may appear in this schema or
+ * in any derived output.
+ */
+export const researchStateEnum = pgEnum("research_state", [
+  "STRONG",
+  "POSITIVE",
+  "NEUTRAL",
+  "NEGATIVE",
+  "BLOCKED",
+]);
+
+/**
+ * Structured evidence block types used in market_research_evidence_blocks.
+ * Each block represents one atomic research dimension from one source.
+ */
+export const evidenceBlockTypeEnum = pgEnum("evidence_block_type", [
+  "OPPORTUNITY",
+  "STARTER_MATCHUP",
+  "BULLPEN_PATH",
+  "PARK",
+  "RECENT_VS_SEASON_VS_CAREER",
+  "COUNTER",
+  "MISSING_STALE",
+]);
+
+/**
+ * One row per player-market-slate_date-game.
+ *
+ * Ranking semantics:
+ *   research_rank is an ordinal integer (1 = highest-ranked candidate for this
+ *   market+date). Ties are surfaced with the same integer value — they are never
+ *   collapsed or hidden. The rank describes relative evidence quality only; it is
+ *   NOT a gate, threshold, probability estimate, or recommendation.
+ *
+ * Prohibited columns (may NEVER be added): ev, clv, odds, implied_probability,
+ *   vig, juice, kelly_fraction, edge_percent, expected_value, recommendation.
+ */
+export const marketResearchCandidates = pgTable(
+  "market_research_candidates",
+  {
+    candidateId: uuid("candidate_id").primaryKey().defaultRandom(),
+    slateDate: date("slate_date").notNull(),
+    gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
+    playerId: integer("player_id").notNull().references(() => players.playerId),
+    market: marketTypeEnum("market").notNull(),
+    researchRank: integer("research_rank"),
+    researchState: researchStateEnum("research_state").notNull().default("NEUTRAL"),
+    primaryMechanism: text("primary_mechanism"),
+    secondaryMechanism: text("secondary_mechanism"),
+    // Evidence containers — engines write JSON objects keyed by metric
+    opportunityEvidence: jsonb("opportunity_evidence").notNull().default({}),
+    starterMatchupEvidence: jsonb("starter_matchup_evidence").notNull().default({}),
+    bullpenPathEvidence: jsonb("bullpen_path_evidence").notNull().default({}),
+    parkEvidence: jsonb("park_evidence").notNull().default({}),
+    recentVsSeasonVsCareer: jsonb("recent_vs_season_vs_career").notNull().default({}),
+    counterEvidence: jsonb("counter_evidence").notNull().default({}),
+    missingStaleEvidence: text("missing_stale_evidence"),
+    // Durable annotation of ranking semantics — readable in every row
+    rankSemantics: text("rank_semantics")
+      .notNull()
+      .default("RANK_DONT_GATE: ordinal rank with transparent feature evidence; ties surfaced not collapsed; no threshold or gate implied"),
+    ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    mrcUniqIdx: uniqueIndex("mrc_slate_market_player_game_idx").on(
+      table.slateDate, table.market, table.playerId, table.gamePk,
+    ),
+  }),
+);
+
+/**
+ * Structured evidence blocks for a candidate, keyed by block type and metric.
+ * Each block is one atomic evidence item from one source.
+ *
+ * Prohibited: raw_evidence must never contain ev, clv, odds, implied_probability,
+ * vig, juice, kelly_fraction, or edge_percent values.
+ */
+export const marketResearchEvidenceBlocks = pgTable(
+  "market_research_evidence_blocks",
+  {
+    evidenceBlockId: uuid("evidence_block_id").primaryKey().defaultRandom(),
+    candidateId: uuid("candidate_id").notNull().references(() => marketResearchCandidates.candidateId, { onDelete: "cascade" }),
+    blockType: evidenceBlockTypeEnum("block_type").notNull(),
+    sourceId: text("source_id").references(() => sourceRegistry.sourceId),
+    metricKey: text("metric_key"),
+    metricLabel: text("metric_label"),
+    value: numeric("value"),
+    unit: text("unit"),
+    sampleSize: integer("sample_size"),
+    direction: text("direction"),
+    strength: text("strength"),
+    narrative: text("narrative"),
+    rawEvidence: jsonb("raw_evidence").notNull().default({}),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    mrebCandidateTypeMetricIdx: uniqueIndex("mreb_candidate_block_type_metric_idx").on(
+      table.candidateId, table.blockType, table.metricKey,
+    ),
+  }),
+);
+
+/**
+ * Source provenance for every evidence block.
+ * Tracks ingest lineage for each atomic piece of research evidence.
+ */
+export const marketResearchProvenance = pgTable("market_research_provenance", {
+  provenanceId: uuid("provenance_id").primaryKey().defaultRandom(),
+  evidenceBlockId: uuid("evidence_block_id").notNull().references(() => marketResearchEvidenceBlocks.evidenceBlockId, { onDelete: "cascade" }),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  sourceVersion: text("source_version"),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull().defaultNow(),
+  ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+  rawChecksum: text("raw_checksum"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /**
  * PLACEHOLDER — extended by Phase 4B (Official Settlement and Postmortem Engine).
  *

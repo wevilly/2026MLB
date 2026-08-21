@@ -559,3 +559,45 @@ export const RefreshBullpenResponse = zod.object({
 })
 
 
+/**
+ * Phase 3 – Shared Market Research Contract
+ * @summary Get market research candidates for a given date and market
+ */
+export const GetAnalystMarketResearchQueryParams = zod.object({
+  "date": zod.string().optional(),
+  "market": zod.enum(["TB", "XBH", "WALK", "HR"]).optional(),
+  "gameId": zod.string().optional()
+})
+
+export const GetAnalystMarketResearchResponse = zod.object({
+  "date": zod.string(),
+  "market": zod.string().nullable(),
+  "gameId": zod.string().nullable(),
+  "rankSemantics": zod.string(),
+  "prohibitedFields": zod.array(zod.string()),
+  "candidates": zod.array(zod.object({
+    "candidateId": zod.string(),
+    "slateDate": zod.string(),
+    "gamePk": zod.number(),
+    "playerId": zod.number(),
+    "playerName": zod.string(),
+    "market": zod.enum(["TB", "XBH", "WALK", "HR"]),
+    "researchRank": zod.number().nullable(),
+    "researchState": zod.enum(["STRONG", "POSITIVE", "NEUTRAL", "NEGATIVE", "BLOCKED"]),
+    "primaryMechanism": zod.string().nullable(),
+    "secondaryMechanism": zod.string().nullable(),
+    "opportunityEvidence": zod.record(zod.unknown()),
+    "starterMatchupEvidence": zod.record(zod.unknown()),
+    "bullpenPathEvidence": zod.record(zod.unknown()),
+    "parkEvidence": zod.record(zod.unknown()),
+    "recentVsSeasonVsCareer": zod.record(zod.unknown()),
+    "counterEvidence": zod.record(zod.unknown()),
+    "missingStaleEvidence": zod.string().nullable(),
+    "createdAt": zod.string(),
+    "updatedAt": zod.string()
+  })),
+  "candidateCount": zod.number(),
+  "systemNote": zod.string()
+})
+
+

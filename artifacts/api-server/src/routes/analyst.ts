@@ -3,6 +3,7 @@ import {
   GetAnalystBullpenRoomResponse,
   GetAnalystDataHealthResponse,
   GetAnalystGameLabResponse,
+  GetAnalystMarketResearchResponse,
   GetAnalystPitcherLabResponse,
   GetAnalystPlayerLabResponse,
   GetAnalystProjectionsResponse,
@@ -535,6 +536,176 @@ router.post("/analyst/refresh/research", async (req, res, next) => {
 router.post("/analyst/refresh/research/splits-full", async (req, res, next) => {
   try {
     res.status(202).json(await ingestStatcastHandednessFallback(requestedDate(req.query.date), "FULL_UNIVERSE", 24));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ─── Phase 3 – Market Research Contract ──────────────────────────────────────
+
+/**
+ * Maps API short-code market identifiers to the DB enum values stored in
+ * market_research_candidates.market (marketTypeEnum).
+ * Engines 3A–3D write using the DB enum; the API exposes short codes.
+ */
+const MARKET_SHORTCODE_TO_DB: Record<string, string> = {
+  TB: "TOTAL_BASES_2_PLUS",
+  XBH: "EXTRA_BASE_HIT",
+  WALK: "BATTER_WALK",
+  HR: "HOME_RUN",
+};
+const MARKET_DB_TO_SHORTCODE: Record<string, string> = {
+  TOTAL_BASES_2_PLUS: "TB",
+  EXTRA_BASE_HIT: "XBH",
+  BATTER_WALK: "WALK",
+  HOME_RUN: "HR",
+};
+
+const RANK_DONT_GATE_SEMANTICS =
+  "RANK_DONT_GATE: research_rank is an ordinal integer only; " +
+  "1 = highest-ranked candidate for this market+date. " +
+  "Ties share the same integer value and are never collapsed. " +
+  "No state value removes a candidate from the board. " +
+  "This rank implies no threshold, gate, probability, or recommendation.";
+
+const PROHIBITED_FIELDS = [
+  "ev", "clv", "odds", "impliedProbability", "vigJuice",
+  "edgePercent", "kellyFraction", "expectedValue",
+];
+
+/**
+ * Canonical set of prohibited key names checked case-insensitively.
+ * Any JSONB evidence payload that contains one of these keys at any depth
+ * is sanitized before leaving the API layer. This is a defense-in-depth
+ * measure; engines 3A–3D must also never write these keys.
+ */
+const PROHIBITED_KEY_SET = new Set<string>(PROHIBITED_FIELDS.map((k) => k.toLowerCase()));
+
+/**
+ * Recursively strips any object key whose lowercase form appears in
+ * PROHIBITED_KEY_SET from an arbitrary value. Arrays are traversed
+ * element-by-element; primitives are returned unchanged.
+ */
+function stripProhibitedKeys(val: unknown): unknown {
+  if (Array.isArray(val)) return val.map(stripProhibitedKeys);
+  if (val !== null && typeof val === "object") {
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+      if (!PROHIBITED_KEY_SET.has(k.toLowerCase())) {
+        cleaned[k] = stripProhibitedKeys(v);
+      }
+    }
+    return cleaned;
+  }
+  return val;
+}
+
+router.get("/analyst/market-research", async (req, res, next) => {
+  try {
+    const date = requestedDate(req.query.date);
+    const marketParam = typeof req.query.market === "string"
+      ? req.query.market.trim().toUpperCase()
+      : null;
+    const gameId = typeof req.query.gameId === "string" && req.query.gameId.trim()
+      ? req.query.gameId.trim()
+      : null;
+
+    // Validate market short code if provided
+    if (marketParam && !MARKET_SHORTCODE_TO_DB[marketParam]) {
+      res.status(400).json({ error: `Invalid market '${marketParam}'. Valid values: TB, XBH, WALK, HR` });
+      return;
+    }
+
+    const dbMarket = marketParam ? MARKET_SHORTCODE_TO_DB[marketParam] : null;
+
+    // Validate gameId is a safe positive integer
+    let gameIdNum: number | null = null;
+    if (gameId) {
+      const parsed = parseInt(gameId, 10);
+      if (isNaN(parsed) || parsed <= 0 || String(parsed) !== gameId) {
+        res.status(400).json({ error: `Invalid gameId '${gameId}'. Must be a positive integer (e.g. the MLB game_pk).` });
+        return;
+      }
+      gameIdNum = parsed;
+    }
+
+    // Build parameterized query with conditional filters
+    const sqlParams: (string | number)[] = [date];
+    const conditions: string[] = ["mrc.slate_date = $1"];
+    if (dbMarket) { sqlParams.push(dbMarket); conditions.push(`mrc.market = $${sqlParams.length}`); }
+    if (gameIdNum !== null) { sqlParams.push(gameIdNum); conditions.push(`mrc.game_pk = $${sqlParams.length}`); }
+
+    const candidateResult = await pool.query<{
+      candidate_id: string;
+      slate_date: string;
+      game_pk: number;
+      player_id: number;
+      player_name: string;
+      market: string;
+      research_rank: number | null;
+      research_state: string;
+      primary_mechanism: string | null;
+      secondary_mechanism: string | null;
+      opportunity_evidence: Record<string, unknown>;
+      starter_matchup_evidence: Record<string, unknown>;
+      bullpen_path_evidence: Record<string, unknown>;
+      park_evidence: Record<string, unknown>;
+      recent_vs_season_vs_career: Record<string, unknown>;
+      counter_evidence: Record<string, unknown>;
+      missing_stale_evidence: string | null;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `SELECT mrc.candidate_id, mrc.slate_date::text, mrc.game_pk::bigint,
+              mrc.player_id, COALESCE(p.full_name, 'Unknown') AS player_name,
+              mrc.market, mrc.research_rank, mrc.research_state,
+              mrc.primary_mechanism, mrc.secondary_mechanism,
+              mrc.opportunity_evidence, mrc.starter_matchup_evidence,
+              mrc.bullpen_path_evidence, mrc.park_evidence,
+              mrc.recent_vs_season_vs_career, mrc.counter_evidence,
+              mrc.missing_stale_evidence,
+              mrc.created_at::text, mrc.updated_at::text
+       FROM market_research_candidates mrc
+       LEFT JOIN players p ON p.player_id = mrc.player_id
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY mrc.research_rank ASC NULLS LAST, mrc.research_state, player_name`,
+      sqlParams,
+    );
+
+    const candidates = candidateResult.rows.map((row) => ({
+      candidateId: row.candidate_id,
+      slateDate: row.slate_date,
+      gamePk: Number(row.game_pk),
+      playerId: row.player_id,
+      playerName: row.player_name,
+      market: MARKET_DB_TO_SHORTCODE[row.market] ?? row.market,
+      researchRank: row.research_rank,
+      researchState: row.research_state,
+      primaryMechanism: row.primary_mechanism,
+      secondaryMechanism: row.secondary_mechanism,
+      // Defensive sanitization: strip any prohibited keys from JSONB payloads
+      // before they leave the API layer. Engines must also never write them.
+      opportunityEvidence: stripProhibitedKeys(row.opportunity_evidence ?? {}),
+      starterMatchupEvidence: stripProhibitedKeys(row.starter_matchup_evidence ?? {}),
+      bullpenPathEvidence: stripProhibitedKeys(row.bullpen_path_evidence ?? {}),
+      parkEvidence: stripProhibitedKeys(row.park_evidence ?? {}),
+      recentVsSeasonVsCareer: stripProhibitedKeys(row.recent_vs_season_vs_career ?? {}),
+      counterEvidence: stripProhibitedKeys(row.counter_evidence ?? {}),
+      missingStaleEvidence: row.missing_stale_evidence,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+
+    res.json(GetAnalystMarketResearchResponse.parse({
+      date,
+      market: marketParam,
+      gameId,
+      rankSemantics: RANK_DONT_GATE_SEMANTICS,
+      prohibitedFields: PROHIBITED_FIELDS,
+      candidates,
+      candidateCount: candidates.length,
+      systemNote: "Market engines 3A–3D populate this board. Candidates appear here once at least one engine has completed a research pass for this date.",
+    }));
   } catch (error) {
     next(error);
   }

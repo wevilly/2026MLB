@@ -454,6 +454,71 @@ export interface BullpenRoom {
   };
 }
 
+// ─── Phase 3 – Shared Market Research Contract ───────────────────────────────
+
+/** Short-code identifiers for the four independent hitter markets. */
+export type MarketShortCode = 'TB' | 'XBH' | 'WALK' | 'HR';
+
+/**
+ * Research state taxonomy.
+ * RANK_DONT_GATE rule: no state removes a candidate from the board.
+ * BLOCKED means evidence is structurally absent or contradictory.
+ * Ties share the same researchRank integer and are never collapsed.
+ */
+export type ResearchState = 'STRONG' | 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE' | 'BLOCKED';
+
+/**
+ * One research candidate for a player-market-slate_date-game combination.
+ *
+ * Prohibited fields — permanently absent from this type and all derived outputs:
+ * ev, clv, odds, impliedProbability, vigJuice, edgePercent, kellyFraction, expectedValue.
+ */
+export interface MarketResearchCandidate {
+  candidateId: string;
+  slateDate: string;
+  gamePk: number;
+  playerId: number;
+  playerName: string;
+  market: MarketShortCode;
+  /** Ordinal rank; 1 = highest-ranked for this market+date. Ties share the same value. */
+  researchRank: number | null;
+  researchState: ResearchState;
+  primaryMechanism: string | null;
+  secondaryMechanism: string | null;
+  opportunityEvidence: Record<string, unknown>;
+  starterMatchupEvidence: Record<string, unknown>;
+  bullpenPathEvidence: Record<string, unknown>;
+  parkEvidence: Record<string, unknown>;
+  recentVsSeasonVsCareer: Record<string, unknown>;
+  counterEvidence: Record<string, unknown>;
+  missingStaleEvidence: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Market research board response.
+ * Populated by Phase 3A–3D engines; empty until at least one engine has run.
+ */
+export interface MarketResearch {
+  date: string;
+  market: string | null;
+  gameId: string | null;
+  /** RANK_DONT_GATE semantics statement embedded in every response. */
+  rankSemantics: string;
+  /** Permanently absent analytics fields — documented for contract clarity. */
+  prohibitedFields: string[];
+  candidates: MarketResearchCandidate[];
+  candidateCount: number;
+  systemNote: string;
+}
+
+export type GetAnalystMarketResearchParams = {
+  date?: string;
+  market?: MarketShortCode;
+  gameId?: string;
+};
+
 export interface BullpenIngestResult {
   source: string;
   slateDate: string;

@@ -27,11 +27,13 @@ import type {
   GameLab,
   GetAnalystBullpenRoomParams,
   GetAnalystGameLabParams,
+  GetAnalystMarketResearchParams,
   GetAnalystPitcherLabParams,
   GetAnalystPlayerLabParams,
   GetAnalystProjectionsParams,
   HealthStatus,
   IngestResult,
+  MarketResearch,
   ProjectionCenter,
   RefreshAnalystResearchParams,
   RefreshBullpenParams,
@@ -1089,6 +1091,73 @@ export function useGetAnalystBullpenRoom<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetAnalystBullpenRoomQueryOptions(params, options);
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+// ─── Phase 3 – Market Research ───────────────────────────────────────────────
+
+export const getGetAnalystMarketResearchUrl = (params?: GetAnalystMarketResearchParams) => {
+  const normalizedParams = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) normalizedParams.append(key, String(value));
+  });
+  const stringifiedParams = normalizedParams.toString();
+  return stringifiedParams.length > 0
+    ? `/api/analyst/market-research?${stringifiedParams}`
+    : `/api/analyst/market-research`;
+};
+
+/**
+ * @summary Get market research candidates for a given date and market
+ */
+export const getAnalystMarketResearch = async (
+  params?: GetAnalystMarketResearchParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<MarketResearch> =>
+  customFetch<MarketResearch>(getGetAnalystMarketResearchUrl(params), { ...options, method: 'GET' });
+
+export const getGetAnalystMarketResearchQueryKey = (params?: GetAnalystMarketResearchParams) =>
+  [`/api/analyst/market-research`, ...(params ? [params] : [])] as const;
+
+export const getGetAnalystMarketResearchQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAnalystMarketResearch>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetAnalystMarketResearchParams,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof getAnalystMarketResearch>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+  const queryKey = queryOptions?.queryKey ?? getGetAnalystMarketResearchQueryKey(params);
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystMarketResearch>>> = ({ signal }) =>
+    getAnalystMarketResearch(params, { signal, ...requestOptions });
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAnalystMarketResearch>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAnalystMarketResearchQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystMarketResearch>>>;
+export type GetAnalystMarketResearchQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get market research candidates for a given date and market
+ */
+export function useGetAnalystMarketResearch<
+  TData = Awaited<ReturnType<typeof getAnalystMarketResearch>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetAnalystMarketResearchParams,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof getAnalystMarketResearch>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAnalystMarketResearchQueryOptions(params, options);
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
   return withQueryKey(query, queryOptions.queryKey);
 }
