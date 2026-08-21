@@ -135,6 +135,18 @@ export const GetAnalystDataHealthResponse = zod.object({
   "teamAssignmentConflicts": zod.number(),
   "blockingProjectedLineupIssues": zod.number()
 }),
+  "researchHealth": zod.object({
+  "playerProfiles": zod.number(),
+  "pitcherProfiles": zod.number(),
+  "arsenalProfiles": zod.number(),
+  "parkProfiles": zod.number(),
+  "identityQuarantines": zod.number(),
+  "insufficientSamples": zod.number(),
+  "missingArsenal": zod.number(),
+  "missingHandednessSplits": zod.number(),
+  "metricDefinitionConflicts": zod.number(),
+  "staleWindows": zod.number()
+}),
   "lastRun": zod.string()
 })
 
@@ -151,6 +163,223 @@ export const GetAnalystSettingsResponse = zod.object({
   "timezone": zod.string(),
   "defaultMarket": zod.string(),
   "refreshCadence": zod.string()
+})
+
+
+/**
+ * @summary Get canonical hitter research profile
+ */
+export const GetAnalystPlayerLabQueryParams = zod.object({
+  "playerId": zod.coerce.number().int().optional(),
+  "search": zod.coerce.string().optional(),
+  "window": zod.enum(['SEASON', 'CAREER', 'ROLLING_7', 'ROLLING_14', 'ROLLING_30', 'ROLLING_60']).optional(),
+  "date": zod.date().optional()
+})
+
+export const GetAnalystPlayerLabResponse = zod.object({
+  "sourceStatus": zod.string(),
+  "searchResults": zod.array(zod.object({
+  "playerId": zod.number(),
+  "name": zod.string(),
+  "team": zod.string(),
+  "position": zod.string(),
+  "role": zod.string()
+})),
+  "profile": zod.union([zod.object({
+  "identity": zod.object({
+  "playerId": zod.number(),
+  "name": zod.string(),
+  "team": zod.string(),
+  "bats": zod.string(),
+  "throws": zod.string(),
+  "position": zod.string(),
+  "rosterState": zod.string()
+}),
+  "window": zod.string(),
+  "effectiveFrom": zod.string(),
+  "effectiveTo": zod.string(),
+  "freshness": zod.string(),
+  "role": zod.string(),
+  "panels": zod.array(zod.object({
+  "title": zod.string(),
+  "metrics": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "value": zod.number().nullable(),
+  "unit": zod.string(),
+  "denominator": zod.number().nullable(),
+  "sampleSize": zod.number().nullable(),
+  "source": zod.string(),
+  "definition": zod.string(),
+  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'HEURISTIC']),
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND', 'QUARANTINED']),
+  "retrievedAt": zod.string()
+}))
+})),
+  "arsenal": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "value": zod.number().nullable(),
+  "unit": zod.string(),
+  "denominator": zod.number().nullable(),
+  "sampleSize": zod.number().nullable(),
+  "source": zod.string(),
+  "definition": zod.string(),
+  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'HEURISTIC']),
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND', 'QUARANTINED']),
+  "retrievedAt": zod.string()
+})),
+  "notes": zod.array(zod.string())
+}),zod.null()]),
+  "notices": zod.array(zod.string())
+})
+
+
+/**
+ * @summary Get canonical pitcher research profile
+ */
+export const GetAnalystPitcherLabQueryParams = zod.object({
+  "playerId": zod.coerce.number().int().optional(),
+  "search": zod.coerce.string().optional(),
+  "window": zod.enum(['SEASON', 'CAREER', 'ROLLING_7', 'ROLLING_14', 'ROLLING_30', 'ROLLING_60']).optional(),
+  "date": zod.date().optional()
+})
+
+export const GetAnalystPitcherLabResponse = zod.object({
+  "sourceStatus": zod.string(),
+  "searchResults": zod.array(zod.object({
+  "playerId": zod.number(),
+  "name": zod.string(),
+  "team": zod.string(),
+  "position": zod.string(),
+  "role": zod.string()
+})),
+  "profile": zod.union([zod.object({
+  "identity": zod.object({
+  "playerId": zod.number(),
+  "name": zod.string(),
+  "team": zod.string(),
+  "bats": zod.string(),
+  "throws": zod.string(),
+  "position": zod.string(),
+  "rosterState": zod.string()
+}),
+  "window": zod.string(),
+  "effectiveFrom": zod.string(),
+  "effectiveTo": zod.string(),
+  "freshness": zod.string(),
+  "role": zod.string(),
+  "panels": zod.array(zod.object({
+  "title": zod.string(),
+  "metrics": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "value": zod.number().nullable(),
+  "unit": zod.string(),
+  "denominator": zod.number().nullable(),
+  "sampleSize": zod.number().nullable(),
+  "source": zod.string(),
+  "definition": zod.string(),
+  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'HEURISTIC']),
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND', 'QUARANTINED']),
+  "retrievedAt": zod.string()
+}))
+})),
+  "arsenal": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "value": zod.number().nullable(),
+  "unit": zod.string(),
+  "denominator": zod.number().nullable(),
+  "sampleSize": zod.number().nullable(),
+  "source": zod.string(),
+  "definition": zod.string(),
+  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'HEURISTIC']),
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND', 'QUARANTINED']),
+  "retrievedAt": zod.string()
+})),
+  "notes": zod.array(zod.string())
+}),zod.null()]),
+  "notices": zod.array(zod.string())
+})
+
+
+/**
+ * @summary Get research-ready game and park context without a matchup score
+ */
+export const GetAnalystGameLabQueryParams = zod.object({
+  "date": zod.date().optional(),
+  "gameId": zod.coerce.string().optional()
+})
+
+export const GetAnalystGameLabResponse = zod.object({
+  "date": zod.string(),
+  "games": zod.array(zod.object({
+  "id": zod.string(),
+  "time": zod.string(),
+  "away": zod.string(),
+  "home": zod.string(),
+  "park": zod.string(),
+  "roof": zod.string(),
+  "weather": zod.string(),
+  "awayStarter": zod.object({
+  "name": zod.string(),
+  "hand": zod.string(),
+  "state": zod.string(),
+  "note": zod.string()
+}),
+  "homeStarter": zod.object({
+  "name": zod.string(),
+  "hand": zod.string(),
+  "state": zod.string(),
+  "note": zod.string()
+}),
+  "lineupState": zod.string(),
+  "state": zod.enum(['READY', 'PARTIAL', 'BLOCKED']),
+  "flag": zod.string().nullable()
+})),
+  "selectedGame": zod.union([zod.object({
+  "id": zod.string(),
+  "time": zod.string(),
+  "away": zod.string(),
+  "home": zod.string(),
+  "park": zod.string(),
+  "roof": zod.string(),
+  "weather": zod.string(),
+  "awayStarter": zod.object({
+  "name": zod.string(),
+  "hand": zod.string(),
+  "state": zod.string(),
+  "note": zod.string()
+}),
+  "homeStarter": zod.object({
+  "name": zod.string(),
+  "hand": zod.string(),
+  "state": zod.string(),
+  "note": zod.string()
+}),
+  "lineupState": zod.string(),
+  "state": zod.enum(['READY', 'PARTIAL', 'BLOCKED']),
+  "flag": zod.string().nullable()
+}),zod.null()]),
+  "parkResearch": zod.union([zod.object({
+  "venue": zod.string(),
+  "span": zod.string(),
+  "factors": zod.array(zod.object({
+  "key": zod.string(),
+  "label": zod.string(),
+  "value": zod.number().nullable(),
+  "unit": zod.string(),
+  "denominator": zod.number().nullable(),
+  "sampleSize": zod.number().nullable(),
+  "source": zod.string(),
+  "definition": zod.string(),
+  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'HEURISTIC']),
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND', 'QUARANTINED']),
+  "retrievedAt": zod.string()
+}))
+}),zod.null()]),
+  "notes": zod.array(zod.string())
 })
 
 
@@ -183,6 +412,27 @@ export const RefreshFantasyProsResponse = zod.object({
   "rowCount": zod.number(),
   "normalizedRowCount": zod.number(),
   "rejectedRowCount": zod.number()
+})
+
+
+/**
+ * @summary Retrieve and normalize public Statcast and FanGraphs research evidence
+ */
+export const RefreshAnalystResearchQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
+export const RefreshAnalystResearchResponse = zod.object({
+  "status": zod.string(),
+  "sources": zod.array(zod.object({
+  "source": zod.string(),
+  "ingestRunId": zod.string(),
+  "rowCount": zod.number(),
+  "normalizedRowCount": zod.number(),
+  "rejectedRowCount": zod.number()
+})),
+  "quarantinedRows": zod.number(),
+  "notes": zod.array(zod.string())
 })
 
 

@@ -22,12 +22,19 @@ import type {
 import type {
   AnalystSettings,
   DataHealth,
+  GameLab,
+  GetAnalystGameLabParams,
+  GetAnalystPitcherLabParams,
+  GetAnalystPlayerLabParams,
   GetAnalystProjectionsParams,
   HealthStatus,
   IngestResult,
   ProjectionCenter,
+  RefreshAnalystResearchParams,
   RefreshFantasyProsParams,
   RefreshMlbOfficialParams,
+  ResearchIngestResult,
+  ResearchLab,
   TodayDashboard
 } from './api.schemas';
 
@@ -451,6 +458,258 @@ export function useGetAnalystSettings<TData = Awaited<ReturnType<typeof getAnaly
 
 
 
+export const getGetAnalystPlayerLabUrl = (params?: GetAnalystPlayerLabParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/player-lab?${stringifiedParams}` : `/api/analyst/player-lab`
+}
+
+/**
+ * @summary Get canonical hitter research profile
+ */
+export const getAnalystPlayerLab = async (params?: GetAnalystPlayerLabParams, options?: Parameters<typeof customFetch>[1]): Promise<ResearchLab> => {
+
+  return customFetch<ResearchLab>(getGetAnalystPlayerLabUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystPlayerLabQueryKey = (params?: GetAnalystPlayerLabParams,) => {
+    return [
+    `/api/analyst/player-lab`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystPlayerLabQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError = ErrorType<unknown>>(params?: GetAnalystPlayerLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystPlayerLabQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystPlayerLab>>> = ({ signal }) => getAnalystPlayerLab(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystPlayerLabQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystPlayerLab>>>
+export type GetAnalystPlayerLabQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get canonical hitter research profile
+ */
+
+export function useGetAnalystPlayerLab<TData = Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystPlayerLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystPlayerLabQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAnalystPitcherLabUrl = (params?: GetAnalystPitcherLabParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/pitcher-lab?${stringifiedParams}` : `/api/analyst/pitcher-lab`
+}
+
+/**
+ * @summary Get canonical pitcher research profile
+ */
+export const getAnalystPitcherLab = async (params?: GetAnalystPitcherLabParams, options?: Parameters<typeof customFetch>[1]): Promise<ResearchLab> => {
+
+  return customFetch<ResearchLab>(getGetAnalystPitcherLabUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystPitcherLabQueryKey = (params?: GetAnalystPitcherLabParams,) => {
+    return [
+    `/api/analyst/pitcher-lab`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystPitcherLabQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError = ErrorType<unknown>>(params?: GetAnalystPitcherLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystPitcherLabQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystPitcherLab>>> = ({ signal }) => getAnalystPitcherLab(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystPitcherLabQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystPitcherLab>>>
+export type GetAnalystPitcherLabQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get canonical pitcher research profile
+ */
+
+export function useGetAnalystPitcherLab<TData = Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystPitcherLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystPitcherLabQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAnalystGameLabUrl = (params?: GetAnalystGameLabParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/game-lab?${stringifiedParams}` : `/api/analyst/game-lab`
+}
+
+/**
+ * @summary Get research-ready game and park context without a matchup score
+ */
+export const getAnalystGameLab = async (params?: GetAnalystGameLabParams, options?: Parameters<typeof customFetch>[1]): Promise<GameLab> => {
+
+  return customFetch<GameLab>(getGetAnalystGameLabUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystGameLabQueryKey = (params?: GetAnalystGameLabParams,) => {
+    return [
+    `/api/analyst/game-lab`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystGameLabQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystGameLab>>, TError = ErrorType<unknown>>(params?: GetAnalystGameLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystGameLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystGameLabQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystGameLab>>> = ({ signal }) => getAnalystGameLab(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystGameLab>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystGameLabQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystGameLab>>>
+export type GetAnalystGameLabQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get research-ready game and park context without a matchup score
+ */
+
+export function useGetAnalystGameLab<TData = Awaited<ReturnType<typeof getAnalystGameLab>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystGameLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystGameLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystGameLabQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
 export const getRefreshMlbOfficialUrl = (params?: RefreshMlbOfficialParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -605,5 +864,83 @@ export const useRefreshFantasyPros = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRefreshFantasyProsMutationOptions(options));
+    }
+
+export const getRefreshAnalystResearchUrl = (params?: RefreshAnalystResearchParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/research?${stringifiedParams}` : `/api/analyst/refresh/research`
+}
+
+/**
+ * @summary Retrieve and normalize public Statcast and FanGraphs research evidence
+ */
+export const refreshAnalystResearch = async (params?: RefreshAnalystResearchParams, options?: Parameters<typeof customFetch>[1]): Promise<ResearchIngestResult> => {
+
+  return customFetch<ResearchIngestResult>(getRefreshAnalystResearchUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshAnalystResearchMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshAnalystResearch>>, TError,{params?: RefreshAnalystResearchParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshAnalystResearch>>, TError,{params?: RefreshAnalystResearchParams}, TContext> => {
+
+const mutationKey = ['refreshAnalystResearch'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshAnalystResearch>>, {params?: RefreshAnalystResearchParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshAnalystResearch(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshAnalystResearchMutationResult = NonNullable<Awaited<ReturnType<typeof refreshAnalystResearch>>>
+
+    export type RefreshAnalystResearchMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Retrieve and normalize public Statcast and FanGraphs research evidence
+ */
+export const useRefreshAnalystResearch = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshAnalystResearch>>, TError,{params?: RefreshAnalystResearchParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshAnalystResearch>>,
+        TError,
+        {params?: RefreshAnalystResearchParams},
+        TContext
+      > => {
+      return useMutation(getRefreshAnalystResearchMutationOptions(options));
     }
 

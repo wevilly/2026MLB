@@ -7,6 +7,7 @@
  */
 import type { HealthIssue } from './healthIssue';
 import type { IdentityCoverage } from './identityCoverage';
+import type { ResearchHealth } from './researchHealth';
 import type { SourceBadge } from './sourceBadge';
 
 export interface DataHealth {
@@ -14,5 +15,6 @@ export interface DataHealth {
   sources: SourceBadge[];
   issues: HealthIssue[];
   identityCoverage: IdentityCoverage;
+  researchHealth: ResearchHealth;
   lastRun: string;
 }

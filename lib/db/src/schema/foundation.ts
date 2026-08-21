@@ -71,6 +71,36 @@ export const marketTypeEnum = pgEnum("market_type", [
   "HOME_RUN",
 ]);
 
+export const researchWindowEnum = pgEnum("research_window", [
+  "SEASON",
+  "CAREER",
+  "ROLLING_7",
+  "ROLLING_14",
+  "ROLLING_30",
+  "ROLLING_60",
+]);
+
+export const researchTransformEnum = pgEnum("research_transform", [
+  "RAW",
+  "NORMALIZED",
+  "DERIVED",
+  "HEURISTIC",
+]);
+
+export const researchSampleStatusEnum = pgEnum("research_sample_status", [
+  "AVAILABLE",
+  "INSUFFICIENT_SAMPLE",
+  "NOT_FOUND",
+  "QUARANTINED",
+]);
+
+export const pitcherRoleEnum = pgEnum("pitcher_research_role", [
+  "STARTER",
+  "RELIEVER",
+  "MIXED",
+  "UNKNOWN",
+]);
+
 export const sourceRegistry = pgTable("source_registry", {
   sourceId: text("source_id").primaryKey(),
   name: text("name").notNull(),
@@ -404,6 +434,146 @@ export const researchFiles = pgTable("research_files", {
   tags: jsonb("tags").notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const researchIdentityQuarantine = pgTable("research_identity_quarantine", {
+  quarantineId: uuid("quarantine_id").primaryKey().defaultRandom(),
+  ingestRunId: uuid("ingest_run_id").notNull().references(() => ingestRuns.ingestRunId),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  externalPlayerId: text("external_player_id"),
+  rawName: text("raw_name"),
+  reason: text("reason").notNull(),
+  rawEvidence: jsonb("raw_evidence").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const playerResearchSnapshots = pgTable("player_research_snapshots", {
+  researchSnapshotId: uuid("research_snapshot_id").primaryKey().defaultRandom(),
+  playerId: integer("player_id").notNull().references(() => players.playerId),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+  rawPayloadId: uuid("raw_payload_id").references(() => rawPayloads.rawPayloadId),
+  researchWindow: researchWindowEnum("research_window").notNull(),
+  effectiveFrom: date("effective_from").notNull(),
+  effectiveTo: date("effective_to").notNull(),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull().defaultNow(),
+  sampleSize: integer("sample_size"),
+  denominatorType: text("denominator_type"),
+  denominator: numeric("denominator"),
+  contentChecksum: text("content_checksum").notNull(),
+  unchangedFromPrior: boolean("unchanged_from_prior").notNull().default(false),
+  provenance: jsonb("provenance").notNull().default({}),
+});
+
+export const playerResearchFeatures = pgTable("player_research_features", {
+  playerResearchFeatureId: uuid("player_research_feature_id").primaryKey().defaultRandom(),
+  researchSnapshotId: uuid("research_snapshot_id").notNull().references(() => playerResearchSnapshots.researchSnapshotId, { onDelete: "cascade" }),
+  family: text("family").notNull(),
+  metricKey: text("metric_key").notNull(),
+  metricLabel: text("metric_label").notNull(),
+  value: numeric("value"),
+  unit: text("unit"),
+  denominator: numeric("denominator"),
+  sampleSize: integer("sample_size"),
+  transformation: researchTransformEnum("transformation").notNull().default("NORMALIZED"),
+  sampleStatus: researchSampleStatusEnum("sample_status").notNull().default("AVAILABLE"),
+  definition: text("definition").notNull(),
+  provenance: jsonb("provenance").notNull().default({}),
+}, (table) => ({
+  snapshotMetricIdx: uniqueIndex("player_research_snapshot_metric_idx").on(table.researchSnapshotId, table.metricKey),
+}));
+
+export const pitcherResearchSnapshots = pgTable("pitcher_research_snapshots", {
+  researchSnapshotId: uuid("research_snapshot_id").primaryKey().defaultRandom(),
+  playerId: integer("player_id").notNull().references(() => players.playerId),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+  rawPayloadId: uuid("raw_payload_id").references(() => rawPayloads.rawPayloadId),
+  researchWindow: researchWindowEnum("research_window").notNull(),
+  role: pitcherRoleEnum("role").notNull().default("UNKNOWN"),
+  effectiveFrom: date("effective_from").notNull(),
+  effectiveTo: date("effective_to").notNull(),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull().defaultNow(),
+  sampleSize: integer("sample_size"),
+  denominatorType: text("denominator_type"),
+  denominator: numeric("denominator"),
+  contentChecksum: text("content_checksum").notNull(),
+  unchangedFromPrior: boolean("unchanged_from_prior").notNull().default(false),
+  provenance: jsonb("provenance").notNull().default({}),
+});
+
+export const pitcherResearchFeatures = pgTable("pitcher_research_features", {
+  pitcherResearchFeatureId: uuid("pitcher_research_feature_id").primaryKey().defaultRandom(),
+  researchSnapshotId: uuid("research_snapshot_id").notNull().references(() => pitcherResearchSnapshots.researchSnapshotId, { onDelete: "cascade" }),
+  family: text("family").notNull(),
+  metricKey: text("metric_key").notNull(),
+  metricLabel: text("metric_label").notNull(),
+  value: numeric("value"),
+  unit: text("unit"),
+  denominator: numeric("denominator"),
+  sampleSize: integer("sample_size"),
+  batterSide: text("batter_side"),
+  transformation: researchTransformEnum("transformation").notNull().default("NORMALIZED"),
+  sampleStatus: researchSampleStatusEnum("sample_status").notNull().default("AVAILABLE"),
+  definition: text("definition").notNull(),
+  provenance: jsonb("provenance").notNull().default({}),
+}, (table) => ({
+  snapshotMetricSideIdx: uniqueIndex("pitcher_research_snapshot_metric_side_idx").on(table.researchSnapshotId, table.metricKey, table.batterSide),
+}));
+
+export const pitchArsenalFeatures = pgTable("pitch_arsenal_features", {
+  arsenalFeatureId: uuid("arsenal_feature_id").primaryKey().defaultRandom(),
+  researchSnapshotId: uuid("research_snapshot_id").notNull().references(() => pitcherResearchSnapshots.researchSnapshotId, { onDelete: "cascade" }),
+  pitchType: text("pitch_type").notNull(),
+  pitchName: text("pitch_name").notNull(),
+  usagePercent: numeric("usage_percent"),
+  velocity: numeric("velocity"),
+  horizontalMovement: numeric("horizontal_movement"),
+  verticalMovement: numeric("vertical_movement"),
+  spinRate: numeric("spin_rate"),
+  releaseHeight: numeric("release_height"),
+  releaseSide: numeric("release_side"),
+  extension: numeric("extension"),
+  zonePercent: numeric("zone_percent"),
+  whiffPercent: numeric("whiff_percent"),
+  chasePercent: numeric("chase_percent"),
+  xSlgAllowed: numeric("x_slg_allowed"),
+  xWobaAllowed: numeric("x_woba_allowed"),
+  hardHitPercent: numeric("hard_hit_percent"),
+  barrelPercent: numeric("barrel_percent"),
+  sampleSize: integer("sample_size"),
+  sampleStatus: researchSampleStatusEnum("sample_status").notNull().default("NOT_FOUND"),
+  provenance: jsonb("provenance").notNull().default({}),
+}, (table) => ({
+  snapshotPitchIdx: uniqueIndex("pitch_arsenal_snapshot_pitch_idx").on(table.researchSnapshotId, table.pitchType),
+}));
+
+export const parkResearchSnapshots = pgTable("park_research_snapshots", {
+  parkResearchSnapshotId: uuid("park_research_snapshot_id").primaryKey().defaultRandom(),
+  venueId: integer("venue_id").notNull().references(() => venues.venueId),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+  rawPayloadId: uuid("raw_payload_id").references(() => rawPayloads.rawPayloadId),
+  season: integer("season").notNull(),
+  span: text("span").notNull(),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull().defaultNow(),
+  contentChecksum: text("content_checksum").notNull(),
+  provenance: jsonb("provenance").notNull().default({}),
+});
+
+export const parkResearchFeatures = pgTable("park_research_features", {
+  parkResearchFeatureId: uuid("park_research_feature_id").primaryKey().defaultRandom(),
+  parkResearchSnapshotId: uuid("park_research_snapshot_id").notNull().references(() => parkResearchSnapshots.parkResearchSnapshotId, { onDelete: "cascade" }),
+  metricKey: text("metric_key").notNull(),
+  metricLabel: text("metric_label").notNull(),
+  value: numeric("value"),
+  batterSide: text("batter_side"),
+  transformation: researchTransformEnum("transformation").notNull().default("RAW"),
+  sampleStatus: researchSampleStatusEnum("sample_status").notNull().default("AVAILABLE"),
+  definition: text("definition").notNull(),
+  provenance: jsonb("provenance").notNull().default({}),
+}, (table) => ({
+  parkSnapshotMetricIdx: uniqueIndex("park_research_snapshot_metric_idx").on(table.parkResearchSnapshotId, table.metricKey, table.batterSide),
+}));
 
 export const futureMarketPredictions = pgTable("future_market_predictions", {
   predictionId: uuid("prediction_id").primaryKey().defaultRandom(),

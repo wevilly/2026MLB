@@ -108,11 +108,25 @@ export interface HealthIssue {
   severity: string;
 }
 
+export interface ResearchHealth {
+  playerProfiles: number;
+  pitcherProfiles: number;
+  arsenalProfiles: number;
+  parkProfiles: number;
+  identityQuarantines: number;
+  insufficientSamples: number;
+  missingArsenal: number;
+  missingHandednessSplits: number;
+  metricDefinitionConflicts: number;
+  staleWindows: number;
+}
+
 export interface DataHealth {
   overall: string;
   sources: SourceBadge[];
   issues: HealthIssue[];
   identityCoverage: IdentityCoverage;
+  researchHealth: ResearchHealth;
   lastRun: string;
 }
 
@@ -137,8 +151,151 @@ export interface IngestResult {
   rejectedRowCount: number;
 }
 
+export type ResearchMetricTransformation = typeof ResearchMetricTransformation[keyof typeof ResearchMetricTransformation];
+
+
+export const ResearchMetricTransformation = {
+  RAW: 'RAW',
+  NORMALIZED: 'NORMALIZED',
+  DERIVED: 'DERIVED',
+  HEURISTIC: 'HEURISTIC',
+} as const;
+
+export type ResearchMetricStatus = typeof ResearchMetricStatus[keyof typeof ResearchMetricStatus];
+
+
+export const ResearchMetricStatus = {
+  AVAILABLE: 'AVAILABLE',
+  INSUFFICIENT_SAMPLE: 'INSUFFICIENT_SAMPLE',
+  NOT_FOUND: 'NOT_FOUND',
+  QUARANTINED: 'QUARANTINED',
+} as const;
+
+export interface ResearchMetric {
+  key: string;
+  label: string;
+  /** @nullable */
+  value: number | null;
+  unit: string;
+  /** @nullable */
+  denominator: number | null;
+  /** @nullable */
+  sampleSize: number | null;
+  source: string;
+  definition: string;
+  transformation: ResearchMetricTransformation;
+  status: ResearchMetricStatus;
+  retrievedAt: string;
+}
+
+export interface ResearchPanel {
+  title: string;
+  metrics: ResearchMetric[];
+}
+
+export interface ResearchIdentity {
+  playerId: number;
+  name: string;
+  team: string;
+  bats: string;
+  throws: string;
+  position: string;
+  rosterState: string;
+}
+
+export interface ResearchProfile {
+  identity: ResearchIdentity;
+  window: string;
+  effectiveFrom: string;
+  effectiveTo: string;
+  freshness: string;
+  role: string;
+  panels: ResearchPanel[];
+  arsenal: ResearchMetric[];
+  notes: string[];
+}
+
+export interface ResearchSearchResult {
+  playerId: number;
+  name: string;
+  team: string;
+  position: string;
+  role: string;
+}
+
+export interface ResearchLab {
+  sourceStatus: string;
+  searchResults: ResearchSearchResult[];
+  profile: ResearchProfile | null;
+  notices: string[];
+}
+
+export interface ParkResearch {
+  venue: string;
+  span: string;
+  factors: ResearchMetric[];
+}
+
+export interface GameLab {
+  date: string;
+  games: SlateGame[];
+  selectedGame: SlateGame | null;
+  parkResearch: ParkResearch | null;
+  notes: string[];
+}
+
+export interface ResearchIngestResult {
+  status: string;
+  sources: IngestResult[];
+  quarantinedRows: number;
+  notes: string[];
+}
+
 export type GetAnalystProjectionsParams = {
 date?: string;
+};
+
+export type GetAnalystPlayerLabParams = {
+playerId?: number;
+search?: string;
+window?: GetAnalystPlayerLabWindow;
+date?: string;
+};
+
+export type GetAnalystPlayerLabWindow = typeof GetAnalystPlayerLabWindow[keyof typeof GetAnalystPlayerLabWindow];
+
+
+export const GetAnalystPlayerLabWindow = {
+  SEASON: 'SEASON',
+  CAREER: 'CAREER',
+  ROLLING_7: 'ROLLING_7',
+  ROLLING_14: 'ROLLING_14',
+  ROLLING_30: 'ROLLING_30',
+  ROLLING_60: 'ROLLING_60',
+} as const;
+
+export type GetAnalystPitcherLabParams = {
+playerId?: number;
+search?: string;
+window?: GetAnalystPitcherLabWindow;
+date?: string;
+};
+
+export type GetAnalystPitcherLabWindow = typeof GetAnalystPitcherLabWindow[keyof typeof GetAnalystPitcherLabWindow];
+
+
+export const GetAnalystPitcherLabWindow = {
+  SEASON: 'SEASON',
+  CAREER: 'CAREER',
+  ROLLING_7: 'ROLLING_7',
+  ROLLING_14: 'ROLLING_14',
+  ROLLING_30: 'ROLLING_30',
+  ROLLING_60: 'ROLLING_60',
+} as const;
+
+export type GetAnalystGameLabParams = {
+date?: string;
+gameId?: string;
 };
 
 export type RefreshMlbOfficialParams = {
@@ -146,6 +303,10 @@ date?: string;
 };
 
 export type RefreshFantasyProsParams = {
+date?: string;
+};
+
+export type RefreshAnalystResearchParams = {
 date?: string;
 };
 

@@ -79,6 +79,85 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AnalystSettings"
+  /analyst/player-lab:
+    get:
+      operationId: getAnalystPlayerLab
+      tags: [analyst]
+      summary: Get canonical hitter research profile
+      parameters:
+        - name: playerId
+          in: query
+          required: false
+          schema: { type: integer }
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+        - name: window
+          in: query
+          required: false
+          schema: { type: string, enum: [SEASON, CAREER, ROLLING_7, ROLLING_14, ROLLING_30, ROLLING_60] }
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Hitter research profile and canonical search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResearchLab"
+  /analyst/pitcher-lab:
+    get:
+      operationId: getAnalystPitcherLab
+      tags: [analyst]
+      summary: Get canonical pitcher research profile
+      parameters:
+        - name: playerId
+          in: query
+          required: false
+          schema: { type: integer }
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+        - name: window
+          in: query
+          required: false
+          schema: { type: string, enum: [SEASON, CAREER, ROLLING_7, ROLLING_14, ROLLING_30, ROLLING_60] }
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Pitcher research profile and canonical search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResearchLab"
+  /analyst/game-lab:
+    get:
+      operationId: getAnalystGameLab
+      tags: [analyst]
+      summary: Get research-ready game and park context without a matchup score
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: gameId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Game and park research preparation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GameLab"
   /analyst/refresh/mlb:
     post:
       operationId: refreshMlbOfficial
@@ -113,6 +192,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/IngestResult"
+  /analyst/refresh/research:
+    post:
+      operationId: refreshAnalystResearch
+      tags: [analyst]
+      summary: Retrieve and normalize public Statcast and FanGraphs research evidence
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Research ingest completed or partially completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResearchIngestResult"
 components:
   schemas:
     HealthStatus:
@@ -234,8 +330,9 @@ components:
         sources: { type: array, items: { $ref: "#/components/schemas/SourceBadge" } }
         issues: { type: array, items: { $ref: "#/components/schemas/HealthIssue" } }
         identityCoverage: { $ref: "#/components/schemas/IdentityCoverage" }
+        researchHealth: { $ref: "#/components/schemas/ResearchHealth" }
         lastRun: { type: string }
-      required: [overall, sources, issues, identityCoverage, lastRun]
+      required: [overall, sources, issues, identityCoverage, researchHealth, lastRun]
     ConnectionStatus:
       type: object
       properties:
@@ -260,4 +357,104 @@ components:
         normalizedRowCount: { type: number }
         rejectedRowCount: { type: number }
       required: [source, ingestRunId, rowCount, normalizedRowCount, rejectedRowCount]
+    ResearchHealth:
+      type: object
+      properties:
+        playerProfiles: { type: number }
+        pitcherProfiles: { type: number }
+        arsenalProfiles: { type: number }
+        parkProfiles: { type: number }
+        identityQuarantines: { type: number }
+        insufficientSamples: { type: number }
+        missingArsenal: { type: number }
+        missingHandednessSplits: { type: number }
+        metricDefinitionConflicts: { type: number }
+        staleWindows: { type: number }
+      required: [playerProfiles, pitcherProfiles, arsenalProfiles, parkProfiles, identityQuarantines, insufficientSamples, missingArsenal, missingHandednessSplits, metricDefinitionConflicts, staleWindows]
+    ResearchMetric:
+      type: object
+      properties:
+        key: { type: string }
+        label: { type: string }
+        value: { type: ["number", "null"] }
+        unit: { type: string }
+        denominator: { type: ["number", "null"] }
+        sampleSize: { type: ["number", "null"] }
+        source: { type: string }
+        definition: { type: string }
+        transformation: { type: string, enum: [RAW, NORMALIZED, DERIVED, HEURISTIC] }
+        status: { type: string, enum: [AVAILABLE, INSUFFICIENT_SAMPLE, NOT_FOUND, QUARANTINED] }
+        retrievedAt: { type: string }
+      required: [key, label, value, unit, denominator, sampleSize, source, definition, transformation, status, retrievedAt]
+    ResearchPanel:
+      type: object
+      properties:
+        title: { type: string }
+        metrics: { type: array, items: { $ref: "#/components/schemas/ResearchMetric" } }
+      required: [title, metrics]
+    ResearchIdentity:
+      type: object
+      properties:
+        playerId: { type: number }
+        name: { type: string }
+        team: { type: string }
+        bats: { type: string }
+        throws: { type: string }
+        position: { type: string }
+        rosterState: { type: string }
+      required: [playerId, name, team, bats, throws, position, rosterState]
+    ResearchProfile:
+      type: object
+      properties:
+        identity: { $ref: "#/components/schemas/ResearchIdentity" }
+        window: { type: string }
+        effectiveFrom: { type: string }
+        effectiveTo: { type: string }
+        freshness: { type: string }
+        role: { type: string }
+        panels: { type: array, items: { $ref: "#/components/schemas/ResearchPanel" } }
+        arsenal: { type: array, items: { $ref: "#/components/schemas/ResearchMetric" } }
+        notes: { type: array, items: { type: string } }
+      required: [identity, window, effectiveFrom, effectiveTo, freshness, role, panels, arsenal, notes]
+    ResearchSearchResult:
+      type: object
+      properties:
+        playerId: { type: number }
+        name: { type: string }
+        team: { type: string }
+        position: { type: string }
+        role: { type: string }
+      required: [playerId, name, team, position, role]
+    ResearchLab:
+      type: object
+      properties:
+        sourceStatus: { type: string }
+        searchResults: { type: array, items: { $ref: "#/components/schemas/ResearchSearchResult" } }
+        profile: { anyOf: [{ $ref: "#/components/schemas/ResearchProfile" }, { type: "null" }] }
+        notices: { type: array, items: { type: string } }
+      required: [sourceStatus, searchResults, profile, notices]
+    ParkResearch:
+      type: object
+      properties:
+        venue: { type: string }
+        span: { type: string }
+        factors: { type: array, items: { $ref: "#/components/schemas/ResearchMetric" } }
+      required: [venue, span, factors]
+    GameLab:
+      type: object
+      properties:
+        date: { type: string }
+        games: { type: array, items: { $ref: "#/components/schemas/SlateGame" } }
+        selectedGame: { anyOf: [{ $ref: "#/components/schemas/SlateGame" }, { type: "null" }] }
+        parkResearch: { anyOf: [{ $ref: "#/components/schemas/ParkResearch" }, { type: "null" }] }
+        notes: { type: array, items: { type: string } }
+      required: [date, games, selectedGame, parkResearch, notes]
+    ResearchIngestResult:
+      type: object
+      properties:
+        status: { type: string }
+        sources: { type: array, items: { $ref: "#/components/schemas/IngestResult" } }
+        quarantinedRows: { type: number }
+        notes: { type: array, items: { type: string } }
+      required: [status, sources, quarantinedRows, notes]
 

@@ -132,3 +132,37 @@ test("projection reads are scoped to the current effective date", () => {
   assert.ok(!routes.includes("ORDER BY f.team_abbreviation, f.source_player_id LIMIT 500"), "Latest Projection Center must include every current eligible player, not a truncated component subset");
   assert.ok(routes.includes("uniqueEligiblePlayers"), "Latest Projection Center must distinguish unique players from component rows");
 });
+
+test("Phase 2A research foundation keeps raw evidence, canonical joins, and separate research tables", () => {
+  const schema = readText("lib/db/src/schema/foundation.ts");
+  const service = readText("artifacts/api-server/src/services/research-foundation.ts");
+  for (const table of ["player_research_snapshots", "player_research_features", "pitcher_research_snapshots", "pitcher_research_features", "pitch_arsenal_features", "park_research_snapshots", "park_research_features", "research_identity_quarantine"]) {
+    assert.ok(schema.includes(table), `missing Phase 2A table ${table}`);
+  }
+  for (const label of ['"RAW"', '"NORMALIZED"', '"DERIVED"', '"HEURISTIC"', '"INSUFFICIENT_SAMPLE"', '"NOT_FOUND"', '"QUARANTINED"']) {
+    assert.ok(schema.includes(label), `missing research status ${label}`);
+  }
+  assert.ok(service.includes("canonical_identity_or_current_eligibility_not_confirmed"));
+  assert.ok(service.includes("Identity uncertainty is quarantined from research views and is not counted as an ingest rejection."));
+  assert.ok(service.includes("contentChecksum"));
+  assert.ok(service.includes("unchanged_from_prior"));
+  assert.ok(service.includes("pe.eligible_today_research ELSE pe.eligible_pitcher_research"), "research evidence must pass the Phase 1C role-specific eligibility gate");
+  assert.ok(service.includes("effective_to <= $3"), "lab reads must select only snapshots valid on or before their requested as-of date");
+});
+
+test("Phase 2A preserves XBH semantics, source provenance, and does not introduce decision outputs", () => {
+  const service = readText("artifacts/api-server/src/services/research-foundation.ts");
+  const sourceRegister = readText("docs/phase-2a-public-source-register.md");
+  const apiSpec = readText("lib/api-spec/openapi.yaml");
+  assert.ok(service.includes("doubles + triples + home runs. Singles excluded."));
+  assert.ok(sourceRegister.includes("XBH = doubles + triples + home runs"));
+  assert.ok(sourceRegister.includes("Statcast"));
+  assert.ok(sourceRegister.includes("FanGraphs"));
+  assert.ok(sourceRegister.includes("Park component factors"));
+  assert.ok(apiSpec.includes("ResearchMetric"));
+  assert.ok(apiSpec.includes("ResearchIngestResult"));
+  assert.ok(apiSpec.includes("name: date"));
+  for (const prohibited of ["market probability", "sportsbook odds", "positive EV", "CLV", "recommendation", "betting pick"]) {
+    assert.ok(!service.toLowerCase().includes(prohibited.toLowerCase()), `research service must not generate ${prohibited}`);
+  }
+});

@@ -1,12 +1,17 @@
 import { Router, type IRouter } from "express";
 import {
   GetAnalystDataHealthResponse,
+  GetAnalystGameLabResponse,
+  GetAnalystPitcherLabResponse,
+  GetAnalystPlayerLabResponse,
   GetAnalystProjectionsResponse,
   GetAnalystSettingsResponse,
   GetAnalystTodayResponse,
+  RefreshAnalystResearchResponse,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
+import { getPitcherLab, getPlayerLab, ingestResearch, researchHealth } from "../services/research-foundation";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -15,6 +20,21 @@ function requestedDate(value: unknown) {
   const date = typeof value === "string" ? value : new Date().toISOString().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must use YYYY-MM-DD");
   return date;
+}
+
+function requestedWindow(value: unknown) {
+  const window = typeof value === "string" ? value : "SEASON";
+  if (!["SEASON", "CAREER", "ROLLING_7", "ROLLING_14", "ROLLING_30", "ROLLING_60"].includes(window)) {
+    throw new Error("window must be SEASON, CAREER, ROLLING_7, ROLLING_14, ROLLING_30, or ROLLING_60");
+  }
+  return window as "SEASON" | "CAREER" | "ROLLING_7" | "ROLLING_14" | "ROLLING_30" | "ROLLING_60";
+}
+
+function requestedPlayerId(value: unknown) {
+  if (value === undefined) return null;
+  const playerId = Number(value);
+  if (!Number.isSafeInteger(playerId) || playerId <= 0) throw new Error("playerId must be a positive integer");
+  return playerId;
 }
 
 function displayTime(value: string | null) {
@@ -42,7 +62,7 @@ async function sourceBadges() {
   }>(
     `SELECT DISTINCT ON (source_id) source_id, status, finished_at, row_count, normalized_row_count, rejected_row_count, http_status, duration_ms, error_message
      FROM ingest_runs
-     WHERE source_id IN ('MLB_OFFICIAL', 'FANTASYPROS')
+     WHERE source_id IN ('MLB_OFFICIAL', 'FANTASYPROS', 'STATCAST', 'FANGRAPHS', 'PARK_FACTORS')
      ORDER BY source_id, started_at DESC`,
   );
   const bySource = new Map(runs.rows.map((row) => [row.source_id, row]));
@@ -66,6 +86,9 @@ async function sourceBadges() {
   return [
     makeBadge("MLB_OFFICIAL", "MLB Official", true),
     makeBadge("FANTASYPROS", "FantasyPros", fantasyProsConfigured),
+    makeBadge("STATCAST", "Baseball Savant / Statcast", true),
+    makeBadge("FANGRAPHS", "FanGraphs", true),
+    { name: "Park Factors", status: "NOT CONFIGURED", freshness: "No reproducible public source", lastSuccess: null, rowCount: 0, detail: "Component-factor storage is ready, but no source endpoint is configured. Unavailable values remain NOT FOUND." },
     { name: "Weather", status: "NOT CONFIGURED", freshness: "No provider", lastSuccess: null, rowCount: 0, detail: "Optional source; no weather credential is configured." },
   ];
 }
@@ -309,7 +332,7 @@ router.get("/analyst/projections", async (req, res, next) => {
 router.get("/analyst/data-health", async (_req, res, next) => {
   try {
     const date = requestedDate(undefined);
-    const [sources, issueResult, lastRun, coverage] = await Promise.all([
+    const [sources, issueResult, lastRun, coverage, research] = await Promise.all([
       sourceBadges(),
       pool.query<{ issue_type: string; detail: string; severity: string }>(
         `SELECT issue_type, detail, severity FROM ingest_issues WHERE resolved_at IS NULL
@@ -320,6 +343,7 @@ router.get("/analyst/data-health", async (_req, res, next) => {
       ),
       pool.query<{ finished_at: string | null }>("SELECT max(finished_at) AS finished_at FROM ingest_runs"),
       identityCoverage(date),
+      researchHealth(),
     ]);
     const sourceStatus = sources.some((source) => source.status === "BLOCKED" || source.status === "NOT RUN") ? "BLOCKED"
       : sources.some((source) => source.status === "PARTIAL" || source.status === "NOT CONFIGURED") ? "PARTIAL"
@@ -329,7 +353,92 @@ router.get("/analyst/data-health", async (_req, res, next) => {
       sources,
       issues: issueResult.rows.map((issue) => ({ label: issue.issue_type.replaceAll("_", " "), detail: issue.detail, severity: issue.severity })),
       identityCoverage: coverage,
+      researchHealth: research,
       lastRun: isoString(lastRun.rows[0]?.finished_at) ?? "No completed ingestion runs recorded",
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/analyst/player-lab", async (req, res, next) => {
+  try {
+    const profile = await getPlayerLab(
+      requestedPlayerId(req.query.playerId),
+      String(req.query.search ?? "").trim(),
+      requestedWindow(req.query.window),
+      requestedDate(req.query.date),
+    );
+    res.json(GetAnalystPlayerLabResponse.parse(profile));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/analyst/pitcher-lab", async (req, res, next) => {
+  try {
+    const profile = await getPitcherLab(
+      requestedPlayerId(req.query.playerId),
+      String(req.query.search ?? "").trim(),
+      requestedWindow(req.query.window),
+      requestedDate(req.query.date),
+    );
+    res.json(GetAnalystPitcherLabResponse.parse(profile));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/analyst/game-lab", async (req, res, next) => {
+  try {
+    const date = requestedDate(req.query.date);
+    const games = await pool.query<{
+      game_pk: number; start_time_utc: string | null; away: string; home: string; park: string | null;
+      away_starter: string | null; home_starter: string | null; away_hand: string | null; home_hand: string | null;
+      away_state: string | null; home_state: string | null; posted_lineup_teams: number; projected_lineup_teams: number;
+    }>(
+      `SELECT g.game_pk, g.start_time_utc, away.abbreviation AS away, home.abbreviation AS home, v.name AS park,
+        away_start.full_name AS away_starter, home_start.full_name AS home_starter, away_start.throws AS away_hand, home_start.throws AS home_hand,
+        away_start.starter_state AS away_state, home_start.starter_state AS home_state,
+        COALESCE(lineups.posted_lineup_teams, 0) AS posted_lineup_teams, COALESCE(lineups.projected_lineup_teams, 0) AS projected_lineup_teams
+       FROM games g JOIN teams away ON away.team_id = g.away_team_id JOIN teams home ON home.team_id = g.home_team_id
+       LEFT JOIN venues v ON v.venue_id = g.venue_id
+       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY s.observed_at DESC LIMIT 1) away_start ON true
+       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY s.observed_at DESC LIMIT 1) home_start ON true
+       LEFT JOIN LATERAL (SELECT COUNT(DISTINCT team_id) FILTER (WHERE state = 'POSTED')::int AS posted_lineup_teams, COUNT(DISTINCT team_id) FILTER (WHERE state = 'PROJECTED')::int AS projected_lineup_teams FROM lineup_snapshots WHERE game_pk = g.game_pk) lineups ON true
+       WHERE g.game_date = $1 ORDER BY g.start_time_utc NULLS LAST`,
+      [date],
+    );
+    const responseGames = games.rows.map((game) => ({
+      id: String(game.game_pk), time: displayTime(game.start_time_utc), away: game.away, home: game.home,
+      park: game.park ?? "NOT FOUND", roof: "NOT FOUND", weather: "NOT FOUND",
+      awayStarter: { name: game.away_starter ?? "TBD", hand: game.away_hand ?? "NOT FOUND", state: game.away_state ?? "TBD", note: "" },
+      homeStarter: { name: game.home_starter ?? "TBD", hand: game.home_hand ?? "NOT FOUND", state: game.home_state ?? "TBD", note: "" },
+      lineupState: game.posted_lineup_teams === 2 ? "POSTED" : game.projected_lineup_teams ? "PROJECTED" : "UNKNOWN",
+      state: game.posted_lineup_teams === 2 && game.away_state === "CONFIRMED" && game.home_state === "CONFIRMED" ? "READY" : "PARTIAL" as const,
+      flag: game.posted_lineup_teams === 2 ? "Official posted lineups persisted" : "Research context only — no matchup score",
+    }));
+    const selected = req.query.gameId ? responseGames.find((game) => game.id === String(req.query.gameId)) ?? null : responseGames[0] ?? null;
+    const parkFactors = [
+      ["hr_factor", "Home run component", "HR component factor."],
+      ["doubles_factor", "Doubles component", "2B component factor."],
+      ["triples_factor", "Triples component", "3B component factor."],
+      ["xbh_factor", "Extra-base hit component", "XBH component factor."],
+      ["total_bases_heuristic", "Total Bases heuristic", "Heuristic would require sourced park components; it is unavailable without them."],
+    ].map(([key, label, definition]) => ({
+      key, label, value: null, unit: "factor", denominator: null, sampleSize: null,
+      source: "NOT CONFIGURED", definition, transformation: key === "total_bases_heuristic" ? "HEURISTIC" : "RAW", status: "NOT_FOUND", retrievedAt: "NOT FOUND",
+    }));
+    res.json(GetAnalystGameLabResponse.parse({
+      date,
+      games: responseGames,
+      selectedGame: selected,
+      parkResearch: selected ? { venue: selected.park, span: "NOT CONFIGURED", factors: parkFactors } : null,
+      notes: [
+        "Game Lab exposes research-ready starter, lineup, park, and freshness context only.",
+        "Park component factors remain NOT FOUND until a reproducible source is ingested; no estimate or matchup score is generated.",
+        "No market probability, recommendation, price, odds, EV, or CLV is calculated in Phase 2A.",
+      ],
     }));
   } catch (error) {
     next(error);
@@ -360,6 +469,14 @@ router.post("/analyst/refresh/mlb", async (req, res, next) => {
 router.post("/analyst/refresh/fantasypros", async (req, res, next) => {
   try {
     res.status(201).json(await ingestFantasyPros(requestedDate(req.query.date)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/refresh/research", async (req, res, next) => {
+  try {
+    res.status(201).json(RefreshAnalystResearchResponse.parse(await ingestResearch(requestedDate(req.query.date))));
   } catch (error) {
     next(error);
   }
