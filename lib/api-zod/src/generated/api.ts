@@ -606,6 +606,26 @@ export const RefreshMarketResearchXBHResponse = zod.object({
   "error": zod.string().nullable()
 })
 
+export const RefreshMarketResearchWALKQueryParams = zod.object({
+  "date": zod.string().optional()
+})
+
+export const RefreshMarketResearchWALKResponse = zod.object({
+  "market": zod.string(),
+  "slateDate": zod.string(),
+  "gamesProcessed": zod.number(),
+  "candidatesProcessed": zod.number(),
+  "candidatesWritten": zod.number(),
+  "blockedCandidates": zod.number(),
+  "strongCandidates": zod.number(),
+  "positiveCandidates": zod.number(),
+  "neutralCandidates": zod.number(),
+  "negativeCandidates": zod.number(),
+  "processingMs": zod.number(),
+  "notes": zod.array(zod.string()),
+  "error": zod.string().nullable()
+})
+
 export const GetAnalystMarketResearchQueryParams = zod.object({
   "date": zod.string().optional(),
   "market": zod.enum(["TB", "XBH", "WALK", "HR"]).optional(),

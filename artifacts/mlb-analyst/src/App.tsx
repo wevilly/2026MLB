@@ -1,8 +1,8 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH } from '@workspace/api-client-react';
-import type { AnalystSettings, BullpenArm, BullpenRoom, BullpenTeam, DataHealth, HealthIssue, MarketResearch, MarketResearchCandidate, MarketShortCode, ProjectionCenter, ProjectionRow, ResearchState, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile } from '@workspace/api-client-react';
+import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK } from '@workspace/api-client-react';
+import type { AnalystSettings, BullpenArm, BullpenRoom, BullpenTeam, DataHealth, HealthIssue, MarketResearch, MarketResearchCandidate, MarketShortCode, ProjectionCenter, ProjectionRow, ResearchState, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useSearch, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -1399,6 +1399,82 @@ function XBHEnginePanel({
   );
 }
 
+function WALKEnginePanel({
+  slateDate,
+  onComplete,
+}: {
+  slateDate: string;
+  onComplete: () => void;
+}) {
+  const mutation = useRefreshMarketResearchWALK();
+  const result = mutation.data as WALKEngineResult | undefined;
+
+  return (
+    <Panel className="mb-6 border-accent/30">
+      <div className="p-4 space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <Kicker>Phase 3C – Batter Walk engine</Kicker>
+            <p className="text-sm text-muted-foreground mt-1">
+              Runs ordinal evidence ranking for the Batter Walk market. Driven by plate discipline
+              and pitcher command — power metrics are explicitly absent. Idempotent.
+            </p>
+          </div>
+          <button
+            className="button button-dark shrink-0"
+            disabled={mutation.isPending}
+            onClick={() =>
+              mutation.mutate(
+                { params: { date: slateDate } },
+                { onSuccess: () => onComplete() },
+              )
+            }
+            data-testid="button-run-walk-engine"
+          >
+            <Sparkles size={14} />
+            {mutation.isPending ? 'Running…' : 'Run WALK engine'}
+          </button>
+        </div>
+
+        {mutation.isError && (
+          <div className="text-xs text-red-500 font-mono mt-2">
+            Error: {String(mutation.error)}
+          </div>
+        )}
+
+        {result && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-border/40">
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums">{result.candidatesWritten}</div>
+              <div className="text-xs text-muted-foreground">candidates written</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums text-good">{result.strongCandidates + result.positiveCandidates}</div>
+              <div className="text-xs text-muted-foreground">strong + positive</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums text-bad">{result.blockedCandidates}</div>
+              <div className="text-xs text-muted-foreground">blocked</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums">{result.processingMs}ms</div>
+              <div className="text-xs text-muted-foreground">processing time</div>
+            </div>
+          </div>
+        )}
+        {result?.error && (
+          <div className="text-xs text-red-500 font-mono mt-1">Engine error: {result.error}</div>
+        )}
+        {result?.notes && result.notes.length > 0 && (
+          <ul className="text-xs text-muted-foreground list-disc list-inside mt-1">
+            {result.notes.map((note: string, i: number) => <li key={i}>{note}</li>)}
+          </ul>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 function MarketBoardPage() {
   const [dateParam, setDateParam] = useState('');
   const [marketParam, setMarketParam] = useState<MarketShortCode | ''>('');
@@ -1470,6 +1546,9 @@ function MarketBoardPage() {
 
       {/* XBH Engine panel */}
       <XBHEnginePanel slateDate={effectiveDate} onComplete={() => query.refetch()} />
+
+      {/* WALK Engine panel */}
+      <WALKEnginePanel slateDate={effectiveDate} onComplete={() => query.refetch()} />
 
       {/* Contract banner — always visible */}
       <Panel className="mb-6 bg-accent/5 border-accent/20">

@@ -315,6 +315,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/XBHEngineResult"
+  /analyst/refresh/market-research/walk:
+    post:
+      operationId: refreshMarketResearchWALK
+      tags: [analyst]
+      summary: Run the Batter Walk research engine for a slate date
+      description: |
+        Executes the Phase 3C Batter Walk research engine for all lineup candidates
+        on the given slate date. Walk research is driven by plate discipline and pitcher
+        command — power metrics (SLG, ISO, barrel%) are explicitly absent.
+        Mechanisms: PATIENCE_VS_COMMAND, COUNT_CREATION, BULLPEN_WALK_PATH.
+        Counter-evidence: AGGRESSIVE_HITTER, PITCHER_LOW_WALK_RATE,
+        FIRST_PITCH_STRIKE_HEAVY, INSUFFICIENT_SAMPLE.
+
+        RANK, DON'T GATE: produces ordinal research_rank only; no odds, EV, CLV, or
+        implied probability is computed or stored. Idempotent — re-running overwrites
+        prior results for the same slate date.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Slate date to run (defaults to today)
+      responses:
+        "201":
+          description: WALK engine run completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WALKEngineResult"
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -753,6 +782,28 @@ components:
         RANK_DONT_GATE: produces ordinal research_rank only.
         No odds, EV, CLV, or implied probability is produced.
         Singles are explicitly excluded from all mechanism paths.
+      properties:
+        market: { type: string }
+        slateDate: { type: string, format: date }
+        gamesProcessed: { type: integer }
+        candidatesProcessed: { type: integer }
+        candidatesWritten: { type: integer }
+        blockedCandidates: { type: integer }
+        strongCandidates: { type: integer }
+        positiveCandidates: { type: integer }
+        neutralCandidates: { type: integer }
+        negativeCandidates: { type: integer }
+        processingMs: { type: integer }
+        notes: { type: array, items: { type: string } }
+        error: { type: ["string", "null"] }
+      required: [market, slateDate, gamesProcessed, candidatesProcessed, candidatesWritten, blockedCandidates, strongCandidates, positiveCandidates, neutralCandidates, negativeCandidates, processingMs, notes, error]
+    WALKEngineResult:
+      type: object
+      description: |
+        Result of a Batter Walk research engine run.
+        RANK_DONT_GATE: produces ordinal research_rank only.
+        No odds, EV, CLV, or implied probability is produced.
+        Walk research is discipline-driven — power metrics are explicitly absent.
       properties:
         market: { type: string }
         slateDate: { type: string, format: date }

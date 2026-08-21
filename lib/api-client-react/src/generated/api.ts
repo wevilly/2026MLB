@@ -41,12 +41,14 @@ import type {
   RefreshFullUniverseStatcastSplitsParams,
   RefreshMarketResearchTBParams,
   RefreshMarketResearchXBHParams,
+  RefreshMarketResearchWALKParams,
   RefreshMlbOfficialParams,
   ResearchIngestResult,
   ResearchIngestSource,
   ResearchLab,
   TBEngineResult,
   TodayDashboard,
+  WALKEngineResult,
   XBHEngineResult
 } from './api.schemas';
 
@@ -1264,6 +1266,53 @@ export const useRefreshMarketResearchTB = <TError = ErrorType<unknown>, TContext
   },
 ): UseMutationResult<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError, { params?: RefreshMarketResearchTBParams }, TContext> =>
   useMutation(getRefreshMarketResearchTBMutationOptions(options));
+
+export const getRefreshMarketResearchWALKUrl = (params?: RefreshMarketResearchWALKParams) => {
+  const queryParams = params ? Object.entries(params).filter(([, v]) => v !== undefined) : [];
+  const qs = queryParams.length > 0 ? `?${new URLSearchParams(queryParams as [string, string][]).toString()}` : '';
+  return `/api/analyst/refresh/market-research/walk${qs}`;
+};
+
+export const refreshMarketResearchWALK = (
+  params?: RefreshMarketResearchWALKParams,
+  options?: SecondParameter<typeof customFetch>,
+) =>
+  customFetch<WALKEngineResult>(getRefreshMarketResearchWALKUrl(params), { ...options, method: 'POST' });
+
+export const getRefreshMarketResearchWALKMutationOptions = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, TError, { params?: RefreshMarketResearchWALKParams }, TContext>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, TError, { params?: RefreshMarketResearchWALKParams }, TContext> => {
+  const mutationKey = ['refreshMarketResearchWALK'];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+  const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, { params?: RefreshMarketResearchWALKParams }> = (
+    props,
+  ) => {
+    const { params } = props ?? {};
+    return refreshMarketResearchWALK(params, requestOptions);
+  };
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RefreshMarketResearchWALKMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchWALK>>>;
+export type RefreshMarketResearchWALKMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Run the Batter Walk research engine for a slate date
+ */
+export const useRefreshMarketResearchWALK = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, TError, { params?: RefreshMarketResearchWALKParams }, TContext>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseMutationResult<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, TError, { params?: RefreshMarketResearchWALKParams }, TContext> =>
+  useMutation(getRefreshMarketResearchWALKMutationOptions(options));
 
 export const getRefreshMarketResearchXBHUrl = (params?: RefreshMarketResearchXBHParams) => {
   const queryParams = params ? Object.entries(params).filter(([, v]) => v !== undefined) : [];
