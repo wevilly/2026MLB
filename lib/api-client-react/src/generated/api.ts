@@ -32,6 +32,7 @@ import type {
   GetAnalystPlayerLabParams,
   GetAnalystProjectionsParams,
   HealthStatus,
+  HREngineResult,
   IngestResult,
   MarketResearch,
   ProjectionCenter,
@@ -39,6 +40,7 @@ import type {
   RefreshBullpenParams,
   RefreshFantasyProsParams,
   RefreshFullUniverseStatcastSplitsParams,
+  RefreshMarketResearchHRParams,
   RefreshMarketResearchTBParams,
   RefreshMarketResearchXBHParams,
   RefreshMarketResearchWALKParams,
@@ -51,6 +53,7 @@ import type {
   WALKEngineResult,
   XBHEngineResult
 } from './api.schemas';
+
 
 import { customFetch } from '../custom-fetch';
 import type { ErrorType } from '../custom-fetch';
@@ -1360,4 +1363,51 @@ export const useRefreshMarketResearchXBH = <TError = ErrorType<unknown>, TContex
   },
 ): UseMutationResult<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError, { params?: RefreshMarketResearchXBHParams }, TContext> =>
   useMutation(getRefreshMarketResearchXBHMutationOptions(options));
+
+export const getRefreshMarketResearchHRUrl = (params?: RefreshMarketResearchHRParams) => {
+  const queryParams = params ? Object.entries(params).filter(([, v]) => v !== undefined) : [];
+  const qs = queryParams.length > 0 ? `?${new URLSearchParams(queryParams as [string, string][]).toString()}` : '';
+  return `/api/analyst/refresh/market-research/hr${qs}`;
+};
+
+export const refreshMarketResearchHR = (
+  params?: RefreshMarketResearchHRParams,
+  options?: SecondParameter<typeof customFetch>,
+) =>
+  customFetch<HREngineResult>(getRefreshMarketResearchHRUrl(params), { ...options, method: 'POST' });
+
+export const getRefreshMarketResearchHRMutationOptions = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchHR>>, TError, { params?: RefreshMarketResearchHRParams }, TContext>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchHR>>, TError, { params?: RefreshMarketResearchHRParams }, TContext> => {
+  const mutationKey = ['refreshMarketResearchHR'];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+  const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchHR>>, { params?: RefreshMarketResearchHRParams }> = (
+    props,
+  ) => {
+    const { params } = props ?? {};
+    return refreshMarketResearchHR(params, requestOptions);
+  };
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RefreshMarketResearchHRMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchHR>>>;
+export type RefreshMarketResearchHRMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Run the Home Run research engine for a slate date
+ */
+export const useRefreshMarketResearchHR = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchHR>>, TError, { params?: RefreshMarketResearchHRParams }, TContext>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseMutationResult<Awaited<ReturnType<typeof refreshMarketResearchHR>>, TError, { params?: RefreshMarketResearchHRParams }, TContext> =>
+  useMutation(getRefreshMarketResearchHRMutationOptions(options));
 

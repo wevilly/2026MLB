@@ -211,17 +211,17 @@ async function cleanupSlate() {
   await pool.query(
     `DELETE FROM market_research_evidence_blocks WHERE candidate_id IN (
        SELECT candidate_id FROM market_research_candidates
-       WHERE player_id >= 9991100)`,
+       WHERE player_id >= 9991100 AND player_id < 9991200)`,
   );
   // Delete ALL market candidates for our synthetic player IDs (includes TB rows created by B2)
   await pool.query(
-    `DELETE FROM market_research_candidates WHERE player_id >= 9991100`,
+    `DELETE FROM market_research_candidates WHERE player_id >= 9991100 AND player_id < 9991200`,
   );
   await pool.query(
-    `DELETE FROM lineup_entries WHERE lineup_snapshot_id IN (SELECT lineup_snapshot_id FROM lineup_snapshots WHERE game_pk >= 9998100)`,
+    `DELETE FROM lineup_entries WHERE lineup_snapshot_id IN (SELECT lineup_snapshot_id FROM lineup_snapshots WHERE game_pk >= 9998100 AND game_pk < 9998200)`,
   );
-  await pool.query(`DELETE FROM lineup_snapshots WHERE game_pk >= 9998100`);
-  await pool.query(`DELETE FROM starters WHERE game_pk >= 9998100`);
+  await pool.query(`DELETE FROM lineup_snapshots WHERE game_pk >= 9998100 AND game_pk < 9998200`);
+  await pool.query(`DELETE FROM starters WHERE game_pk >= 9998100 AND game_pk < 9998200`);
   const pids = Object.values(P);
   await pool.query(
     `DELETE FROM player_research_features WHERE research_snapshot_id IN (
@@ -238,7 +238,7 @@ async function cleanupSlate() {
     `DELETE FROM pitcher_research_snapshots WHERE player_id IN ($1,$2)`,
     [STARTER.XBHFriendly, STARTER.XBHMiser],
   );
-  await pool.query(`DELETE FROM games WHERE game_pk >= 9998100`);
+  await pool.query(`DELETE FROM games WHERE game_pk >= 9998100 AND game_pk < 9998200`);
 }
 
 // ─── One-time fixture setup ───────────────────────────────────────────────────

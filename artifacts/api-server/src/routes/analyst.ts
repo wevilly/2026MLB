@@ -14,6 +14,7 @@ import {
   RefreshMarketResearchTBResponse,
   RefreshMarketResearchXBHResponse,
   RefreshMarketResearchWALKResponse,
+  RefreshMarketResearchHRResponse,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
@@ -22,6 +23,7 @@ import { getBullpenRoom, refreshBullpen } from "../services/bullpen-foundation";
 import { runTBEngine } from "../services/tb-engine";
 import { runXBHEngine } from "../services/xbh-engine";
 import { runWALKEngine } from "../services/walk-engine";
+import { runHREngine } from "../services/hr-engine";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -755,6 +757,20 @@ router.post("/analyst/refresh/market-research/walk", async (req, res, next) => {
       res.status(500).json(RefreshMarketResearchWALKResponse.parse(result));
     } else {
       res.status(201).json(RefreshMarketResearchWALKResponse.parse(result));
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/refresh/market-research/hr", async (req, res, next) => {
+  try {
+    const date = requestedDate(req.query.date);
+    const result = await runHREngine(date);
+    if (result.error) {
+      res.status(500).json(RefreshMarketResearchHRResponse.parse(result));
+    } else {
+      res.status(201).json(RefreshMarketResearchHRResponse.parse(result));
     }
   } catch (error) {
     next(error);

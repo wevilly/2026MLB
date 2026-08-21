@@ -195,18 +195,18 @@ async function ensurePitcherResearch(playerId, metrics, batterSide = null) {
 
 async function cleanupSlate() {
   // Clean in dependency order
-  await pool.query(`DELETE FROM market_research_evidence_blocks WHERE candidate_id IN (SELECT candidate_id FROM market_research_candidates WHERE slate_date = $1 AND market = 'TOTAL_BASES_2_PLUS' AND player_id >= 9991000)`, [SLATE]);
-  await pool.query(`DELETE FROM market_research_candidates WHERE slate_date = $1 AND market = 'TOTAL_BASES_2_PLUS' AND player_id >= 9991000`, [SLATE]);
-  await pool.query(`DELETE FROM lineup_entries WHERE lineup_snapshot_id IN (SELECT lineup_snapshot_id FROM lineup_snapshots WHERE game_pk >= 9998000)`);
-  await pool.query(`DELETE FROM lineup_snapshots WHERE game_pk >= 9998000`);
-  await pool.query(`DELETE FROM starters WHERE game_pk >= 9998000`);
+  await pool.query(`DELETE FROM market_research_evidence_blocks WHERE candidate_id IN (SELECT candidate_id FROM market_research_candidates WHERE slate_date = $1 AND market = 'TOTAL_BASES_2_PLUS' AND player_id >= 9991000 AND player_id < 9991100)`, [SLATE]);
+  await pool.query(`DELETE FROM market_research_candidates WHERE slate_date = $1 AND market = 'TOTAL_BASES_2_PLUS' AND player_id >= 9991000 AND player_id < 9991100`, [SLATE]);
+  await pool.query(`DELETE FROM lineup_entries WHERE lineup_snapshot_id IN (SELECT lineup_snapshot_id FROM lineup_snapshots WHERE game_pk >= 9998000 AND game_pk < 9998100)`);
+  await pool.query(`DELETE FROM lineup_snapshots WHERE game_pk >= 9998000 AND game_pk < 9998100`);
+  await pool.query(`DELETE FROM starters WHERE game_pk >= 9998000 AND game_pk < 9998100`);
   const pids = Object.values(P);
   await pool.query(`DELETE FROM player_research_features WHERE research_snapshot_id IN (SELECT research_snapshot_id FROM player_research_snapshots WHERE player_id = ANY($1))`, [pids]);
   await pool.query(`DELETE FROM pitch_arsenal_features WHERE research_snapshot_id IN (SELECT research_snapshot_id FROM pitcher_research_snapshots WHERE player_id IN ($1,$2))`, [STARTER.Friendly, STARTER.Stingy]);
   await pool.query(`DELETE FROM pitcher_research_features WHERE research_snapshot_id IN (SELECT research_snapshot_id FROM pitcher_research_snapshots WHERE player_id IN ($1,$2))`, [STARTER.Friendly, STARTER.Stingy]);
   await pool.query(`DELETE FROM player_research_snapshots WHERE player_id = ANY($1)`, [pids]);
   await pool.query(`DELETE FROM pitcher_research_snapshots WHERE player_id IN ($1,$2)`, [STARTER.Friendly, STARTER.Stingy]);
-  await pool.query(`DELETE FROM games WHERE game_pk >= 9998000`);
+  await pool.query(`DELETE FROM games WHERE game_pk >= 9998000 AND game_pk < 9998100`);
   // players and teams persist (no harm; they're unique by ID)
 }
 

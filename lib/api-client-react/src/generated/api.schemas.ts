@@ -579,6 +579,26 @@ export type RefreshMarketResearchWALKParams = {
   date?: string;
 };
 
+export interface HREngineResult {
+  market: string;
+  slateDate: string;
+  gamesProcessed: number;
+  candidatesProcessed: number;
+  candidatesWritten: number;
+  blockedCandidates: number;
+  strongCandidates: number;
+  positiveCandidates: number;
+  neutralCandidates: number;
+  negativeCandidates: number;
+  processingMs: number;
+  notes: string[];
+  error: string | null;
+}
+
+export type RefreshMarketResearchHRParams = {
+  date?: string;
+};
+
 export interface BullpenIngestResult {
   source: string;
   slateDate: string;
