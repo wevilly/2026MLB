@@ -1,0 +1,217 @@
+Do not begin Phase 2A yet.
+
+Before Phase 1C is accepted, complete the final review and return ONE clean final acceptance report.
+
+Do not give me another implementation log unless a new blocking defect is found.
+
+The report must reconcile the final authoritative state after all fixes.
+
+# FINAL PHASE 1C ACCEPTANCE REPORT
+
+Return the following.
+
+## 1. Final classification table
+
+For the latest FantasyPros projection universe, show:
+
+* total latest projection rows
+* unique FantasyPros players
+* canonical identities resolved
+* canonical identities unresolved
+* roster-confirmed MLB active
+* roster-confirmed 40-man
+* MLB IL
+* MLB optioned
+* minor league
+* retired
+* known identity but unsupported current roster state
+* completely unresolved identity
+* quarantined total
+* research-eligible total
+
+Make clear that:
+
+**identity resolution** and **current eligibility resolution** are different metrics.
+
+A player can have a known MLBAM identity but still be quarantined because current roster eligibility is unsupported.
+
+---
+
+## 2. Reconcile the 2,000-row Projection Center result
+
+Earlier validation reported that the current-date Projection Center returned approximately 2,000 eligible display rows.
+
+Explain exactly why.
+
+Determine whether those 2,000 rows represent:
+
+* multiple immutable snapshots
+* duplicate display rows
+* multiple projection roles
+* pagination/query behavior
+* accumulated historical observations
+* another cause
+
+The default "Latest" Projection Center view must NOT present repeated historical snapshots as though they are 2,000 distinct current players.
+
+For the default Latest view, report:
+
+* unique eligible hitter rows
+* unique eligible pitcher rows
+* unique eligible players
+* snapshot ID(s) represented
+* effective date represented
+
+Historical snapshot comparison may show more rows only when explicitly selected.
+
+If this is a defect, fix it before accepting Phase 1C.
+
+---
+
+## 3. Critical identity coverage
+
+Report final coverage for:
+
+* official MLB starters
+* official posted lineup players
+* FantasyPros projected lineup players
+* active research-eligible FantasyPros hitters
+* active research-eligible FantasyPros pitchers
+
+For each show:
+
+MAPPED / TOTAL / PERCENT
+
+Official starters must be 100%.
+
+Official posted lineup players must be 100%.
+
+Any unresolved projected-lineup player must remain a visible BLOCKING identity issue.
+
+---
+
+## 4. Eligibility authority proof
+
+Confirm the final precedence order.
+
+Official MLB roster evidence is authoritative for current MLB eligibility.
+
+FantasyPros cannot promote a player to active MLB status.
+
+MLB game feeds cannot downgrade roster-confirmed eligibility.
+
+The MLB people endpoint may confirm identity or clearly inactive/retired state, but may not establish active MLB roster eligibility without roster evidence.
+
+Name-only fuzzy matching may never establish canonical identity.
+
+---
+
+## 5. Quarantine proof
+
+Show examples of:
+
+* historical/retired row
+* known identity but unsupported current roster state
+* completely unresolved FantasyPros identity
+* team-assignment conflict
+* alias/duplicate resolution if any
+
+For each show that the raw source record remains stored while:
+
+`QUARANTINED_FROM_CURRENT_RESEARCH = true`
+
+or equivalent.
+
+---
+
+## 6. Snapshot behavior
+
+Confirm:
+
+* every retrieval observation remains immutable
+* identical payloads are retained as new retrieval observations
+* identical normalized content is flagged `UNCHANGED_FROM_PRIOR`
+* unchanged snapshots are not displayed as projection movement
+* Latest view uses the latest effective-date snapshot only
+* a date with no snapshot returns an empty/waiting state rather than falling back historically
+
+---
+
+## 7. Final tests
+
+Return every Phase 1C test with PASS/FAIL.
+
+Include at minimum:
+
+* official starter identity coverage
+* official posted-lineup identity coverage
+* projected-lineup blocking identity behavior
+* historical quarantine
+* team-assignment conflict detection
+* accent/suffix alias handling
+* duplicate external-ID handling
+* snapshot equality
+* roster-authority precedence
+* no historical Projection Center fallback
+* no FantasyPros secret exposure
+* TypeScript/API/client compilation
+
+Do not summarize these only as "10/10 passed."
+
+Name each test.
+
+---
+
+## 8. Final Data Health metrics
+
+Show:
+
+* current research-eligible players
+* current quarantined records
+* completely unresolved identities
+* known-but-eligibility-unknown identities
+* current-run team conflicts
+* starter identity coverage
+* posted-lineup identity coverage
+* projected-lineup identity coverage
+* latest source success timestamps
+* current stale-source count
+
+Historical issues may remain stored, but current-run metrics must not double-count prior retrievals.
+
+---
+
+## 9. Required screenshots
+
+Attach final current screenshots for:
+
+* Today
+* Projection Center
+* Data Health
+* Settings
+
+Projection Center screenshot should specifically show the Latest/current-date state after the 2,000-row issue is reconciled.
+
+---
+
+## 10. Final review result
+
+State exactly one:
+
+**PHASE 1C ACCEPTED**
+
+or
+
+**PHASE 1C REJECTED**
+
+If rejected, identify only the blocking defects.
+
+If accepted, stop.
+
+Do not begin Phase 2A automatically.
+
+The next phase after approval will be:
+
+**Phase 2A - Player, Pitcher, Park, and Statcast Research Data Foundation**
+
+It will still NOT create betting picks or market models.
