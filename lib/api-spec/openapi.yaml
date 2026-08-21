@@ -287,6 +287,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TBEngineResult"
+  /analyst/refresh/market-research/xbh:
+    post:
+      operationId: refreshMarketResearchXBH
+      tags: [analyst]
+      summary: Run the Extra Base Hit research engine for a slate date
+      description: |
+        Executes the Phase 3B Extra Base Hit research engine for all lineup candidates
+        on the given slate date. Singles are explicitly excluded from all mechanism paths.
+        Mechanisms: DOUBLE_ROUTE, TRIPLE_ROUTE, HOME_RUN_ROUTE, MULTI_PATH.
+        Counter-evidence: WEAK_EXIT_VELOCITY, LOW_HARD_HIT_RATE, GROUND_BALL_HEAVY,
+        PLATOON_DISADVANTAGE, INSUFFICIENT_SAMPLE.
+
+        RANK, DON'T GATE: produces ordinal research_rank only; no odds, EV, CLV, or
+        implied probability is computed or stored. Idempotent — re-running overwrites
+        prior results for the same slate date.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+          description: Slate date to run (defaults to today)
+      responses:
+        "201":
+          description: XBH engine run completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/XBHEngineResult"
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -703,6 +731,28 @@ components:
         Result of a Total Bases (2+) research engine run.
         RANK_DONT_GATE: produces ordinal research_rank only.
         No odds, EV, CLV, or implied probability is produced.
+      properties:
+        market: { type: string }
+        slateDate: { type: string, format: date }
+        gamesProcessed: { type: integer }
+        candidatesProcessed: { type: integer }
+        candidatesWritten: { type: integer }
+        blockedCandidates: { type: integer }
+        strongCandidates: { type: integer }
+        positiveCandidates: { type: integer }
+        neutralCandidates: { type: integer }
+        negativeCandidates: { type: integer }
+        processingMs: { type: integer }
+        notes: { type: array, items: { type: string } }
+        error: { type: ["string", "null"] }
+      required: [market, slateDate, gamesProcessed, candidatesProcessed, candidatesWritten, blockedCandidates, strongCandidates, positiveCandidates, neutralCandidates, negativeCandidates, processingMs, notes, error]
+    XBHEngineResult:
+      type: object
+      description: |
+        Result of an Extra Base Hit research engine run.
+        RANK_DONT_GATE: produces ordinal research_rank only.
+        No odds, EV, CLV, or implied probability is produced.
+        Singles are explicitly excluded from all mechanism paths.
       properties:
         market: { type: string }
         slateDate: { type: string, format: date }

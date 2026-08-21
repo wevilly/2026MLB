@@ -539,6 +539,26 @@ export type RefreshMarketResearchTBParams = {
   date?: string;
 };
 
+export interface XBHEngineResult {
+  market: string;
+  slateDate: string;
+  gamesProcessed: number;
+  candidatesProcessed: number;
+  candidatesWritten: number;
+  blockedCandidates: number;
+  strongCandidates: number;
+  positiveCandidates: number;
+  neutralCandidates: number;
+  negativeCandidates: number;
+  processingMs: number;
+  notes: string[];
+  error: string | null;
+}
+
+export type RefreshMarketResearchXBHParams = {
+  date?: string;
+};
+
 export interface BullpenIngestResult {
   source: string;
   slateDate: string;

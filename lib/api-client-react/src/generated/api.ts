@@ -40,12 +40,14 @@ import type {
   RefreshFantasyProsParams,
   RefreshFullUniverseStatcastSplitsParams,
   RefreshMarketResearchTBParams,
+  RefreshMarketResearchXBHParams,
   RefreshMlbOfficialParams,
   ResearchIngestResult,
   ResearchIngestSource,
   ResearchLab,
   TBEngineResult,
-  TodayDashboard
+  TodayDashboard,
+  XBHEngineResult
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1262,4 +1264,51 @@ export const useRefreshMarketResearchTB = <TError = ErrorType<unknown>, TContext
   },
 ): UseMutationResult<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError, { params?: RefreshMarketResearchTBParams }, TContext> =>
   useMutation(getRefreshMarketResearchTBMutationOptions(options));
+
+export const getRefreshMarketResearchXBHUrl = (params?: RefreshMarketResearchXBHParams) => {
+  const queryParams = params ? Object.entries(params).filter(([, v]) => v !== undefined) : [];
+  const qs = queryParams.length > 0 ? `?${new URLSearchParams(queryParams as [string, string][]).toString()}` : '';
+  return `/api/analyst/refresh/market-research/xbh${qs}`;
+};
+
+export const refreshMarketResearchXBH = (
+  params?: RefreshMarketResearchXBHParams,
+  options?: SecondParameter<typeof customFetch>,
+) =>
+  customFetch<XBHEngineResult>(getRefreshMarketResearchXBHUrl(params), { ...options, method: 'POST' });
+
+export const getRefreshMarketResearchXBHMutationOptions = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError, { params?: RefreshMarketResearchXBHParams }, TContext>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError, { params?: RefreshMarketResearchXBHParams }, TContext> => {
+  const mutationKey = ['refreshMarketResearchXBH'];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+  const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, { params?: RefreshMarketResearchXBHParams }> = (
+    props,
+  ) => {
+    const { params } = props ?? {};
+    return refreshMarketResearchXBH(params, requestOptions);
+  };
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RefreshMarketResearchXBHMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchXBH>>>;
+export type RefreshMarketResearchXBHMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Run the Extra Base Hit research engine for a slate date
+ */
+export const useRefreshMarketResearchXBH = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError, { params?: RefreshMarketResearchXBHParams }, TContext>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseMutationResult<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError, { params?: RefreshMarketResearchXBHParams }, TContext> =>
+  useMutation(getRefreshMarketResearchXBHMutationOptions(options));
 
