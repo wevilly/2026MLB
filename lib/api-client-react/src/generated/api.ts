@@ -39,10 +39,12 @@ import type {
   RefreshBullpenParams,
   RefreshFantasyProsParams,
   RefreshFullUniverseStatcastSplitsParams,
+  RefreshMarketResearchTBParams,
   RefreshMlbOfficialParams,
   ResearchIngestResult,
   ResearchIngestSource,
   ResearchLab,
+  TBEngineResult,
   TodayDashboard
 } from './api.schemas';
 
@@ -1213,4 +1215,51 @@ export const useRefreshBullpen = <TError = ErrorType<unknown>, TContext = unknow
   },
 ): UseMutationResult<Awaited<ReturnType<typeof refreshBullpen>>, TError, { params?: RefreshBullpenParams }, TContext> =>
   useMutation(getRefreshBullpenMutationOptions(options));
+
+export const getRefreshMarketResearchTBUrl = (params?: RefreshMarketResearchTBParams) => {
+  const queryParams = params ? Object.entries(params).filter(([, v]) => v !== undefined) : [];
+  const qs = queryParams.length > 0 ? `?${new URLSearchParams(queryParams as [string, string][]).toString()}` : '';
+  return `/api/analyst/refresh/market-research/tb${qs}`;
+};
+
+export const refreshMarketResearchTB = (
+  params?: RefreshMarketResearchTBParams,
+  options?: SecondParameter<typeof customFetch>,
+) =>
+  customFetch<TBEngineResult>(getRefreshMarketResearchTBUrl(params), { ...options, method: 'POST' });
+
+export const getRefreshMarketResearchTBMutationOptions = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError, { params?: RefreshMarketResearchTBParams }, TContext>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError, { params?: RefreshMarketResearchTBParams }, TContext> => {
+  const mutationKey = ['refreshMarketResearchTB'];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+  const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchTB>>, { params?: RefreshMarketResearchTBParams }> = (
+    props,
+  ) => {
+    const { params } = props ?? {};
+    return refreshMarketResearchTB(params, requestOptions);
+  };
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RefreshMarketResearchTBMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchTB>>>;
+export type RefreshMarketResearchTBMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Run the Total Bases (2+) research engine for a slate date
+ */
+export const useRefreshMarketResearchTB = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError, { params?: RefreshMarketResearchTBParams }, TContext>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseMutationResult<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError, { params?: RefreshMarketResearchTBParams }, TContext> =>
+  useMutation(getRefreshMarketResearchTBMutationOptions(options));
 

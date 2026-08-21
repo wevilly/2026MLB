@@ -563,6 +563,29 @@ export const RefreshBullpenResponse = zod.object({
  * Phase 3 – Shared Market Research Contract
  * @summary Get market research candidates for a given date and market
  */
+/**
+ * @summary Run the Total Bases (2+) research engine for a slate date
+ */
+export const RefreshMarketResearchTBQueryParams = zod.object({
+  "date": zod.string().optional()
+})
+
+export const RefreshMarketResearchTBResponse = zod.object({
+  "market": zod.string(),
+  "slateDate": zod.string(),
+  "gamesProcessed": zod.number(),
+  "candidatesProcessed": zod.number(),
+  "candidatesWritten": zod.number(),
+  "blockedCandidates": zod.number(),
+  "strongCandidates": zod.number(),
+  "positiveCandidates": zod.number(),
+  "neutralCandidates": zod.number(),
+  "negativeCandidates": zod.number(),
+  "processingMs": zod.number(),
+  "notes": zod.array(zod.string()),
+  "error": zod.string().nullable()
+})
+
 export const GetAnalystMarketResearchQueryParams = zod.object({
   "date": zod.string().optional(),
   "market": zod.enum(["TB", "XBH", "WALK", "HR"]).optional(),

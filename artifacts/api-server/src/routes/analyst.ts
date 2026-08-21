@@ -11,11 +11,13 @@ import {
   GetAnalystTodayResponse,
   RefreshAnalystResearchResponse,
   RefreshBullpenResponse,
+  RefreshMarketResearchTBResponse,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
 import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFallback, researchHealth } from "../services/research-foundation";
 import { getBullpenRoom, refreshBullpen } from "../services/bullpen-foundation";
+import { runTBEngine } from "../services/tb-engine";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -706,6 +708,22 @@ router.get("/analyst/market-research", async (req, res, next) => {
       candidateCount: candidates.length,
       systemNote: "Market engines 3A–3D populate this board. Candidates appear here once at least one engine has completed a research pass for this date.",
     }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/refresh/market-research/tb", async (req, res, next) => {
+  try {
+    const date = requestedDate(req.query.date);
+    const result = await runTBEngine(date);
+    // Propagate engine-level failures as HTTP 500 so API clients can distinguish
+    // a successful run (201) from a run that produced no usable output.
+    if (result.error) {
+      res.status(500).json(RefreshMarketResearchTBResponse.parse(result));
+    } else {
+      res.status(201).json(RefreshMarketResearchTBResponse.parse(result));
+    }
   } catch (error) {
     next(error);
   }

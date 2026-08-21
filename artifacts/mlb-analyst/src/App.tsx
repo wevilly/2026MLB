@@ -1,8 +1,8 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen } from '@workspace/api-client-react';
-import type { AnalystSettings, BullpenArm, BullpenRoom, BullpenTeam, DataHealth, HealthIssue, MarketResearch, MarketResearchCandidate, MarketShortCode, ProjectionCenter, ProjectionRow, ResearchState, SlateGame, SourceBadge, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile } from '@workspace/api-client-react';
+import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB } from '@workspace/api-client-react';
+import type { AnalystSettings, BullpenArm, BullpenRoom, BullpenTeam, DataHealth, HealthIssue, MarketResearch, MarketResearchCandidate, MarketShortCode, ProjectionCenter, ProjectionRow, ResearchState, SlateGame, SourceBadge, TBEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useSearch, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -1247,6 +1247,82 @@ const RESEARCH_STATE_TONE: Record<string, Tone> = {
   BLOCKED: 'bad',
 };
 
+function TBEnginePanel({
+  slateDate,
+  onComplete,
+}: {
+  slateDate: string;
+  onComplete: () => void;
+}) {
+  const mutation = useRefreshMarketResearchTB();
+  const result = mutation.data as TBEngineResult | undefined;
+
+  return (
+    <Panel className="mb-6 border-accent/30">
+      <div className="p-4 space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <Kicker>Phase 3A – Total Bases engine</Kicker>
+            <p className="text-sm text-muted-foreground mt-1">
+              Runs ordinal evidence ranking for the 2+ Total Bases market. Writes to the shared
+              market_research_candidates table. Idempotent — re-running overwrites prior results.
+            </p>
+          </div>
+          <button
+            className="button button-dark shrink-0"
+            disabled={mutation.isPending}
+            onClick={() =>
+              mutation.mutate(
+                { params: { date: slateDate } },
+                { onSuccess: () => onComplete() },
+              )
+            }
+            data-testid="button-run-tb-engine"
+          >
+            <Sparkles size={14} />
+            {mutation.isPending ? 'Running…' : 'Run TB engine'}
+          </button>
+        </div>
+
+        {mutation.isError && (
+          <div className="text-xs text-red-500 font-mono mt-2">
+            Error: {String(mutation.error)}
+          </div>
+        )}
+
+        {result && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-border/40">
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums">{result.candidatesWritten}</div>
+              <div className="text-xs text-muted-foreground">candidates written</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums text-good">{result.strongCandidates + result.positiveCandidates}</div>
+              <div className="text-xs text-muted-foreground">strong + positive</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums text-bad">{result.blockedCandidates}</div>
+              <div className="text-xs text-muted-foreground">blocked</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums">{result.processingMs}ms</div>
+              <div className="text-xs text-muted-foreground">processing time</div>
+            </div>
+          </div>
+        )}
+        {result?.error && (
+          <div className="text-xs text-red-500 font-mono mt-1">Engine error: {result.error}</div>
+        )}
+        {result?.notes && result.notes.length > 0 && (
+          <ul className="text-xs text-muted-foreground list-disc list-inside mt-1">
+            {result.notes.map((n, i) => <li key={i}>{n}</li>)}
+          </ul>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 function MarketBoardPage() {
   const [dateParam, setDateParam] = useState('');
   const [marketParam, setMarketParam] = useState<MarketShortCode | ''>('');
@@ -1313,6 +1389,9 @@ function MarketBoardPage() {
         />
       </div>
 
+      {/* TB Engine panel */}
+      <TBEnginePanel slateDate={effectiveDate} onComplete={() => query.refetch()} />
+
       {/* Contract banner — always visible */}
       <Panel className="mb-6 bg-accent/5 border-accent/20">
         <div className="p-4 space-y-3">
@@ -1373,11 +1452,11 @@ function MarketBoardPage() {
         <Panel>
           <div className="p-8 text-center space-y-3">
             <Kicker>No candidates yet</Kicker>
-            <h2 className="text-lg">Market engines 3A–3D will populate this board</h2>
+            <h2 className="text-lg">Run an engine above or wait for engines 3A–3D</h2>
             <p className="text-sm text-muted-foreground max-w-lg mx-auto">
-              The shared contract is ready. Once Total Bases (3A), Extra Base Hit (3B),
-              Batter Walk (3C), and Home Run (3D) engines are built, their research
-              candidates will appear here ordered by research_rank.
+              Click "Run TB engine" above to populate 2+ Total Bases candidates for today's slate.
+              Extra Base Hit (3B), Batter Walk (3C), and Home Run (3D) engines will appear here
+              as they are built.
             </p>
             <div className="flex justify-center gap-2 mt-4">
               {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
@@ -1396,7 +1475,7 @@ function MarketBoardPage() {
           <SectionHeading
             eyebrow={`${data.candidateCount} candidates · ${effectiveDate}`}
             title="Research board"
-            detail="Ordered by research_rank ASC (1 = highest). Ties share the same rank value."
+            detail="Ordered by research_rank ASC (1 = highest). Ties share the same rank value. RANK_DONT_GATE — no state removes a candidate from the board."
           />
           <div className="table-wrap">
             <table className="data-table" data-testid="market-board-table">
@@ -1406,8 +1485,10 @@ function MarketBoardPage() {
                   <th>Player</th>
                   <th>Market</th>
                   <th>State</th>
-                  <th>Game</th>
-                  <th>Primary Mechanism</th>
+                  <th>Mechanism</th>
+                  <th>Slot</th>
+                  <th>Pitcher xSLG alw</th>
+                  <th>Counter flags</th>
                   <th>Missing/Stale</th>
                 </tr>
               </thead>
@@ -1424,17 +1505,63 @@ function MarketBoardPage() {
   );
 }
 
+const MECHANISM_SHORT: Record<string, string> = {
+  CONTACT_VOLUME: 'CONTACT',
+  POWER_ROUTE: 'POWER',
+  MULTI_PATH: 'MULTI',
+};
+
 function CandidateRow({ candidate: c, index }: { candidate: MarketResearchCandidate; index: number }) {
   const tone = RESEARCH_STATE_TONE[c.researchState] ?? 'neutral';
+
+  // Extract TB-specific evidence from JSONB blobs (present on TB candidates)
+  const opp = c.opportunityEvidence as Record<string, unknown>;
+  const smatch = c.starterMatchupEvidence as Record<string, unknown>;
+  const counter = c.counterEvidence as Record<string, unknown>;
+  const flags: string[] = Array.isArray(counter?.flags) ? counter.flags as string[] : [];
+
+  const battingOrder = typeof opp?.battingOrder === 'number' ? opp.battingOrder : null;
+  const pitcherXSLG = typeof smatch?.pitcherXSLGAllowed === 'number' ? (smatch.pitcherXSLGAllowed as number).toFixed(3) : null;
+
+  const mechLabel = c.primaryMechanism ? (MECHANISM_SHORT[c.primaryMechanism] ?? c.primaryMechanism) : null;
+  const secMechLabel = c.secondaryMechanism ? (MECHANISM_SHORT[c.secondaryMechanism] ?? c.secondaryMechanism) : null;
+
   return (
     <tr data-testid={`candidate-row-${index}`}>
       <td className="number font-mono">{c.researchRank ?? '—'}</td>
       <td><strong>{c.playerName}</strong></td>
       <td><span className="badge badge-neutral font-mono text-xs">{c.market}</span></td>
       <td><Badge tone={tone}>{c.researchState}</Badge></td>
-      <td className="font-mono text-xs">{c.gamePk}</td>
-      <td>{c.primaryMechanism ?? <em className="text-muted-foreground">—</em>}</td>
-      <td className="text-xs text-muted-foreground">{c.missingStaleEvidence ?? '—'}</td>
+      <td className="text-xs">
+        {mechLabel ? (
+          <span className="flex items-center gap-1">
+            <span className="badge badge-accent font-mono">{mechLabel}</span>
+            {secMechLabel && <span className="text-muted-foreground">+{secMechLabel}</span>}
+          </span>
+        ) : <em className="text-muted-foreground">—</em>}
+      </td>
+      <td className="font-mono text-xs text-center">
+        {battingOrder !== null ? battingOrder : <em className="text-muted-foreground">—</em>}
+      </td>
+      <td className="font-mono text-xs text-center">
+        {pitcherXSLG !== null ? (
+          <span className={Number(pitcherXSLG) >= 0.430 ? 'text-good' : Number(pitcherXSLG) < 0.360 ? 'text-bad' : ''}>
+            {pitcherXSLG}
+          </span>
+        ) : <em className="text-muted-foreground">—</em>}
+      </td>
+      <td className="text-xs">
+        {flags.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {flags.map((f) => (
+              <span key={f} className="badge badge-warn font-mono text-[10px]">{f.replace(/_/g, ' ')}</span>
+            ))}
+          </div>
+        ) : <span className="text-muted-foreground">—</span>}
+      </td>
+      <td className="text-xs text-muted-foreground max-w-[160px] truncate">
+        {c.missingStaleEvidence ?? '—'}
+      </td>
     </tr>
   );
 }
