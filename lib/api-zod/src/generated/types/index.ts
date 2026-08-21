@@ -7,6 +7,7 @@
  */
 
 export * from './analystSettings';
+export * from './bullpenRoom';
 export * from './connectionStatus';
 export * from './dataHealth';
 export * from './gameLab';

@@ -21,8 +21,11 @@ import type {
 
 import type {
   AnalystSettings,
+  BullpenIngestResult,
+  BullpenRoom,
   DataHealth,
   GameLab,
+  GetAnalystBullpenRoomParams,
   GetAnalystGameLabParams,
   GetAnalystPitcherLabParams,
   GetAnalystPlayerLabParams,
@@ -31,6 +34,7 @@ import type {
   IngestResult,
   ProjectionCenter,
   RefreshAnalystResearchParams,
+  RefreshBullpenParams,
   RefreshFantasyProsParams,
   RefreshFullUniverseStatcastSplitsParams,
   RefreshMlbOfficialParams,
@@ -1023,4 +1027,121 @@ export const useRefreshFullUniverseStatcastSplits = <TError = ErrorType<unknown>
       > => {
       return useMutation(getRefreshFullUniverseStatcastSplitsMutationOptions(options));
     }
+
+
+// ─── Phase 2B: Bullpen Room ──────────────────────────────────────────────────
+
+export const getGetAnalystBullpenRoomUrl = (params?: GetAnalystBullpenRoomParams) => {
+  const normalizedParams = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) normalizedParams.append(key, String(value));
+  });
+  const stringifiedParams = normalizedParams.toString();
+  return stringifiedParams.length > 0
+    ? `/api/analyst/bullpen-room?${stringifiedParams}`
+    : `/api/analyst/bullpen-room`;
+};
+
+export const getAnalystBullpenRoom = async (
+  params?: GetAnalystBullpenRoomParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BullpenRoom> =>
+  customFetch<BullpenRoom>(getGetAnalystBullpenRoomUrl(params), { ...options, method: 'GET' });
+
+export const getGetAnalystBullpenRoomQueryKey = (params?: GetAnalystBullpenRoomParams) =>
+  [`/api/analyst/bullpen-room`, ...(params ? [params] : [])] as const;
+
+export const getGetAnalystBullpenRoomQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAnalystBullpenRoom>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetAnalystBullpenRoomParams,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof getAnalystBullpenRoom>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+  const queryKey = queryOptions?.queryKey ?? getGetAnalystBullpenRoomQueryKey(params);
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystBullpenRoom>>> = ({ signal }) =>
+    getAnalystBullpenRoom(params, { signal, ...requestOptions });
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAnalystBullpenRoom>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAnalystBullpenRoomQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystBullpenRoom>>>;
+export type GetAnalystBullpenRoomQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage
+ */
+export function useGetAnalystBullpenRoom<
+  TData = Awaited<ReturnType<typeof getAnalystBullpenRoom>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetAnalystBullpenRoomParams,
+  options?: {
+    query?: UseQueryOptions<Awaited<ReturnType<typeof getAnalystBullpenRoom>>, TError, TData>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAnalystBullpenRoomQueryOptions(params, options);
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getRefreshBullpenUrl = (params?: RefreshBullpenParams) => {
+  const normalizedParams = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) normalizedParams.append(key, String(value));
+  });
+  const stringifiedParams = normalizedParams.toString();
+  return stringifiedParams.length > 0
+    ? `/api/analyst/refresh/bullpen?${stringifiedParams}`
+    : `/api/analyst/refresh/bullpen`;
+};
+
+export const refreshBullpen = async (
+  params?: RefreshBullpenParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BullpenIngestResult> =>
+  customFetch<BullpenIngestResult>(getRefreshBullpenUrl(params), { ...options, method: 'POST' });
+
+export const getRefreshBullpenMutationOptions = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshBullpen>>, TError, { params?: RefreshBullpenParams }, TContext>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseMutationOptions<Awaited<ReturnType<typeof refreshBullpen>>, TError, { params?: RefreshBullpenParams }, TContext> => {
+  const mutationKey = ['refreshBullpen'];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+  const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshBullpen>>, { params?: RefreshBullpenParams }> = (
+    props,
+  ) => {
+    const { params } = props ?? {};
+    return refreshBullpen(params, requestOptions);
+  };
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RefreshBullpenMutationResult = NonNullable<Awaited<ReturnType<typeof refreshBullpen>>>;
+export type RefreshBullpenMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Ingest reliever appearances and recompute availability and leverage maps
+ */
+export const useRefreshBullpen = <TError = ErrorType<unknown>, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshBullpen>>, TError, { params?: RefreshBullpenParams }, TContext>;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseMutationResult<Awaited<ReturnType<typeof refreshBullpen>>, TError, { params?: RefreshBullpenParams }, TContext> =>
+  useMutation(getRefreshBullpenMutationOptions(options));
 

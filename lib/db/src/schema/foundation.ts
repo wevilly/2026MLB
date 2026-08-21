@@ -577,6 +577,186 @@ export const parkResearchFeatures = pgTable("park_research_features", {
   parkSnapshotMetricIdx: uniqueIndex("park_research_snapshot_metric_idx").on(table.parkResearchSnapshotId, table.metricKey, table.batterSide),
 }));
 
+// ─── Phase 2B – Bullpen Foundation ───────────────────────────────────────────
+
+export const relieverRoleEnum = pgEnum("reliever_role", [
+  "CLOSER",
+  "PRIMARY_SETUP",
+  "SETUP",
+  "MIDDLE",
+  "LEFTY_SPECIALIST",
+  "LONG_MAN",
+  "OPENER",
+  "SWING",
+  "UNKNOWN",
+]);
+
+export const bullpenAvailabilityStateEnum = pgEnum("bullpen_availability_state", [
+  "AVAILABLE",
+  "LIKELY_AVAILABLE",
+  "DOUBTFUL",
+  "OUT",
+  "UNKNOWN",
+  "STALE",
+]);
+
+export const bullpenConfidenceEnum = pgEnum("bullpen_confidence", [
+  "HEURISTIC",
+  "MANAGER_OVERRIDE",
+  "UNKNOWN",
+]);
+
+/**
+ * One row per reliever per team per season. Updated each bullpen refresh.
+ * Role transitions are tracked in role_change_log (append-only).
+ */
+export const relieverProfiles = pgTable(
+  "reliever_profiles",
+  {
+    profileId: uuid("profile_id").primaryKey().defaultRandom(),
+    playerId: integer("player_id").notNull().references(() => players.playerId),
+    teamId: integer("team_id").notNull().references(() => teams.teamId),
+    throws: text("throws"),
+    role: relieverRoleEnum("role").notNull().default("UNKNOWN"),
+    roleEffectiveDate: date("role_effective_date"),
+    roleSource: text("role_source"),
+    activeRoster: boolean("active_roster").notNull().default(true),
+    season: integer("season").notNull(),
+    seasonPitches: integer("season_pitches"),
+    seasonAppearances: integer("season_appearances"),
+    seasonInningsPitched: numeric("season_innings_pitched"),
+    walkRatePercent: numeric("walk_rate_percent"),
+    strikeoutRatePercent: numeric("strikeout_rate_percent"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    playerTeamSeasonIdx: uniqueIndex("reliever_profiles_player_team_season_idx").on(
+      table.playerId,
+      table.teamId,
+      table.season,
+    ),
+  }),
+);
+
+/**
+ * Append-only game-by-game pitching appearance log for relievers.
+ * No updates or deletes — historical records are immutable once written.
+ */
+export const reliefAppearanceLog = pgTable(
+  "relief_appearance_log",
+  {
+    appearanceId: uuid("appearance_id").primaryKey().defaultRandom(),
+    gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
+    gameDate: date("game_date").notNull(),
+    teamId: integer("team_id").notNull().references(() => teams.teamId),
+    playerId: integer("player_id").notNull().references(() => players.playerId),
+    opponentTeamId: integer("opponent_team_id").references(() => teams.teamId),
+    inningEntered: integer("inning_entered"),
+    outsRecorded: integer("outs_recorded"),
+    inningsPitched: numeric("innings_pitched"),
+    pitchCount: integer("pitch_count"),
+    battersFaced: integer("batters_faced"),
+    hitsAllowed: integer("hits_allowed"),
+    walksAllowed: integer("walks_allowed"),
+    strikeouts: integer("strikeouts"),
+    runsAllowed: integer("runs_allowed"),
+    isMultiInning: boolean("is_multi_inning").notNull().default(false),
+    daysRest: integer("days_rest"),
+    leverage: text("leverage"),
+    sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    gamePlayerIdx: uniqueIndex("relief_appearance_log_game_player_idx").on(
+      table.gamePk,
+      table.playerId,
+    ),
+  }),
+);
+
+/**
+ * Append-only role-change event log. Prior role assignments are never overwritten.
+ * changeType values: PROMOTION | DEMOTION | IL | OPTION | CALL_UP | TRADE | OPENER |
+ *                    SWING | MANAGER_OVERRIDE | CORRECTION
+ */
+export const roleChangeLog = pgTable("role_change_log", {
+  changeId: uuid("change_id").primaryKey().defaultRandom(),
+  playerId: integer("player_id").notNull().references(() => players.playerId),
+  teamId: integer("team_id").notNull().references(() => teams.teamId),
+  previousRole: relieverRoleEnum("previous_role"),
+  newRole: relieverRoleEnum("new_role").notNull(),
+  changeType: text("change_type").notNull(),
+  effectiveDate: date("effective_date").notNull(),
+  source: text("source").notNull(),
+  notes: text("notes"),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Per-reliever per-slate-date availability observation.
+ * Manager override wins unconditionally over heuristic.
+ * finalState is always derived: managerOverride ?? heuristicAvailability.
+ */
+export const bullpenAvailabilityObservations = pgTable(
+  "bullpen_availability_observations",
+  {
+    observationId: uuid("observation_id").primaryKey().defaultRandom(),
+    playerId: integer("player_id").notNull().references(() => players.playerId),
+    teamId: integer("team_id").notNull().references(() => teams.teamId),
+    slateDate: date("slate_date").notNull(),
+    d1Pitches: integer("d1_pitches"),
+    d2Pitches: integer("d2_pitches"),
+    d3Pitches: integer("d3_pitches"),
+    consecutiveDaysUsed: integer("consecutive_days_used").notNull().default(0),
+    multiInningYesterday: boolean("multi_inning_yesterday").notNull().default(false),
+    daysSinceLastUse: integer("days_since_last_use"),
+    heuristicAvailability: bullpenAvailabilityStateEnum("heuristic_availability").notNull().default("UNKNOWN"),
+    managerOverride: bullpenAvailabilityStateEnum("manager_override"),
+    managerOverrideNote: text("manager_override_note"),
+    finalState: bullpenAvailabilityStateEnum("final_state").notNull().default("UNKNOWN"),
+    confidence: bullpenConfidenceEnum("confidence").notNull().default("UNKNOWN"),
+    sourceFreshness: text("source_freshness"),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    playerDateIdx: uniqueIndex("bullpen_availability_player_date_idx").on(
+      table.playerId,
+      table.slateDate,
+    ),
+  }),
+);
+
+/**
+ * Per-team per-date projected leverage sequence.
+ * Rebuilt on each bullpen refresh for the slate date.
+ */
+export const bullpenLeverageMaps = pgTable(
+  "bullpen_leverage_maps",
+  {
+    mapId: uuid("map_id").primaryKey().defaultRandom(),
+    teamId: integer("team_id").notNull().references(() => teams.teamId),
+    slateDate: date("slate_date").notNull(),
+    projected9th: integer("projected_9th").references(() => players.playerId),
+    projected8th: integer("projected_8th").references(() => players.playerId),
+    projected7th: integer("projected_7th").references(() => players.playerId),
+    highestLeverageLefty: integer("highest_leverage_lefty").references(() => players.playerId),
+    longMan: integer("long_man").references(() => players.playerId),
+    highestWalkReliever: integer("highest_walk_reliever").references(() => players.playerId),
+    lowestWalkReliever: integer("lowest_walk_reliever").references(() => players.playerId),
+    roleUncertainty: boolean("role_uncertainty").notNull().default(false),
+    notes: text("notes"),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    teamDateIdx: uniqueIndex("bullpen_leverage_maps_team_date_idx").on(
+      table.teamId,
+      table.slateDate,
+    ),
+  }),
+);
+
+// ─── End Phase 2B ────────────────────────────────────────────────────────────
+
 /**
  * PLACEHOLDER — extended by Phase 4A (Historical Pregame Feature Store) and Phase 5 (Model Training).
  *

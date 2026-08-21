@@ -1,7 +1,7 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useGetAnalystDataHealth, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch } from '@workspace/api-client-react';
-import type { AnalystSettings, DataHealth, HealthIssue, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile } from '@workspace/api-client-react';
+import { useGetAnalystDataHealth, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen } from '@workspace/api-client-react';
+import type { AnalystSettings, BullpenArm, BullpenRoom, BullpenTeam, DataHealth, HealthIssue, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useSearch, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -28,7 +28,7 @@ const navGroups: { label: string; items: Array<{ href: string; label: string; ic
       { href: '/game-lab', label: 'Game lab', icon: CalendarDays },
       { href: '/player-lab', label: 'Player lab', icon: Target },
       { href: '/pitcher-lab', label: 'Pitcher lab', icon: Activity },
-      { href: '/bullpen-room', label: 'Bullpen room', icon: ShieldCheck, future: true },
+      { href: '/bullpen-room', label: 'Bullpen room', icon: ShieldCheck },
       { href: '/bettor-intelligence', label: 'Bettor intelligence', icon: BarChart3, future: true },
       { href: '/model-lab', label: 'Model lab', icon: GitBranch, future: true },
       { href: '/ai-analyst', label: 'AI analyst', icon: Sparkles, future: true },
@@ -836,6 +836,398 @@ function GameLabPage() {
   );
 }
 
+// ─── Bullpen Room ─────────────────────────────────────────────────────────────
+
+function availabilityTone(state: string): Tone {
+  switch (state) {
+    case 'AVAILABLE': return 'good';
+    case 'LIKELY_AVAILABLE': return 'good';
+    case 'DOUBTFUL': return 'warn';
+    case 'OUT': return 'bad';
+    case 'STALE': return 'warn';
+    default: return 'neutral';
+  }
+}
+
+function roleBadgeClass(role: string): string {
+  switch (role) {
+    case 'CLOSER': return 'role-closer';
+    case 'PRIMARY_SETUP': return 'role-setup';
+    case 'SETUP': return 'role-setup';
+    case 'LEFTY_SPECIALIST': return 'role-lefty';
+    case 'LONG_MAN': return 'role-longman';
+    default: return 'role-unknown';
+  }
+}
+
+function PitchPips({ pitches, label }: { pitches: number | null; label: string }) {
+  const count = pitches ?? 0;
+  const tone: Tone = count === 0 ? 'good' : count >= 35 ? 'bad' : count >= 20 ? 'warn' : 'neutral';
+  return (
+    <div className="pitch-pips" title={`${label}: ${count} pitches`}>
+      <span className={`pitch-count tone-${tone}`}>{count}</span>
+      <span className="pitch-label">{label}</span>
+    </div>
+  );
+}
+
+function ArmDetailPanel({ arm }: { arm: BullpenArm }) {
+  const changeTypeLabel: Record<string, string> = {
+    PROMOTION: '⬆ Promoted',
+    DEMOTION: '⬇ Demoted',
+    OPENER: '○ Opener',
+    SWING: '↔ Swing',
+  };
+
+  return (
+    <div className="arm-detail-panel" data-testid={`arm-detail-${arm.playerId}`}>
+      <div className="arm-detail-section">
+        <div className="arm-detail-label">Role History</div>
+        {arm.roleHistory.length === 0 ? (
+          <p className="arm-detail-empty">No role changes recorded yet — role is assigned from game-feed appearances.</p>
+        ) : (
+          <ol className="role-history-list">
+            {arm.roleHistory.map((entry) => (
+              <li key={entry.changeId} className="role-history-entry">
+                <span className="role-history-date">{entry.effectiveDate}</span>
+                <span className={`role-history-change-type change-${entry.changeType.toLowerCase()}`}>
+                  {changeTypeLabel[entry.changeType] ?? entry.changeType}
+                </span>
+                <span className="role-history-transition">
+                  {entry.previousRole ? (
+                    <>{entry.previousRole.replace(/_/g, ' ')} → <strong>{entry.newRole.replace(/_/g, ' ')}</strong></>
+                  ) : (
+                    <><em>Initial</em> → <strong>{entry.newRole.replace(/_/g, ' ')}</strong></>
+                  )}
+                </span>
+                <span className="role-history-source">{entry.source}</span>
+                {entry.notes && <span className="role-history-notes">{entry.notes}</span>}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+      <div className="arm-detail-section arm-detail-stats">
+        <div className="arm-detail-label">Usage Summary</div>
+        <div className="arm-detail-stat-row">
+          <span>Consecutive days used</span><strong>{arm.consecutiveDays}</strong>
+        </div>
+        <div className="arm-detail-stat-row">
+          <span>Days since last use</span>
+          <strong>{arm.daysSinceLastUse !== null ? arm.daysSinceLastUse : '—'}</strong>
+        </div>
+        {arm.managerOverride && (
+          <div className="arm-detail-stat-row">
+            <span>Manager override</span>
+            <strong>{arm.managerOverride}</strong>
+            {arm.managerOverrideNote && <em>{arm.managerOverrideNote}</em>}
+          </div>
+        )}
+        {arm.computedAt && (
+          <div className="arm-detail-stat-row muted">
+            <span>Computed</span>
+            <span>{new Date(arm.computedAt).toLocaleString()}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ArmRow({ arm }: { arm: BullpenArm }) {
+  const [showDetail, setShowDetail] = React.useState(false);
+  const tone = availabilityTone(arm.availability);
+  return (
+    <div className={`arm-row ${arm.staleBadge ? 'arm-stale' : ''} ${showDetail ? 'arm-expanded' : ''}`} data-testid={`arm-row-${arm.playerId}`}>
+      <button
+        className="arm-row-main"
+        onClick={() => setShowDetail((v) => !v)}
+        aria-expanded={showDetail}
+        title="Click to view role history and usage detail"
+      >
+        <div className="arm-identity">
+          <div className="arm-name-row">
+            <strong className="arm-name">{arm.name}</strong>
+            <span className="arm-hand">{arm.throws}</span>
+            {arm.staleBadge && <span className="stale-badge" title="Freshness window exceeded">STALE</span>}
+            {arm.roleHistory.length > 0 && (
+              <span className="role-history-badge" title={`${arm.roleHistory.length} role change${arm.roleHistory.length !== 1 ? 's' : ''}`}>
+                {arm.roleHistory.length}
+              </span>
+            )}
+          </div>
+          <span className={`arm-role ${roleBadgeClass(arm.role)}`}>{arm.role.replace(/_/g, ' ')}</span>
+        </div>
+        <div className="arm-usage">
+          <PitchPips pitches={arm.d1Pitches} label="D-1" />
+          <PitchPips pitches={arm.d2Pitches} label="D-2" />
+          <PitchPips pitches={arm.d3Pitches} label="D-3" />
+        </div>
+        <div className="arm-state">
+          <Badge tone={tone}>{arm.availability.replace(/_/g, ' ')}</Badge>
+          <span className="arm-confidence">
+            {arm.managerOverride
+              ? <span className="override-label" title={arm.managerOverrideNote ?? undefined}>MGR ✓</span>
+              : <span className="heuristic-label">HEURISTIC</span>
+            }
+          </span>
+        </div>
+        {arm.multiInningYesterday && (
+          <div className="arm-flag" data-testid={`arm-multiinning-${arm.playerId}`}>
+            <span>Multi-inning D-1</span>
+          </div>
+        )}
+        <ChevronRight size={12} className={`arm-chevron ${showDetail ? 'rotated' : ''}`} />
+      </button>
+      {showDetail && <ArmDetailPanel arm={arm} />}
+    </div>
+  );
+}
+
+function UsageGrid({ usage, date }: { usage: BullpenTeam['usage']; date: string }) {
+  const d1 = new Date(`${date}T12:00:00Z`);
+  const d1Label = `D-1 (${d1.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })})`;
+  const d2 = new Date(d1); d2.setUTCDate(d2.getUTCDate() - 1);
+  const d2Label = `D-2 (${d2.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })})`;
+  const d3 = new Date(d1); d3.setUTCDate(d3.getUTCDate() - 2);
+  const d3Label = `D-3 (${d3.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })})`;
+
+  const renderDay = (entries: typeof usage.d1, label: string) => (
+    <div className="usage-day">
+      <Kicker>{label}</Kicker>
+      {entries.length === 0
+        ? <p className="muted-copy text-xs">No appearances</p>
+        : entries.map((e) => (
+          <div key={e.playerId} className="usage-entry" data-testid={`usage-${e.playerId}`}>
+            <span className="usage-name">{e.name}</span>
+            <span className="usage-pitches">{e.pitches}p</span>
+            <span className="usage-ip">{e.ip} IP</span>
+            {e.multiInning && <span className="multi-badge">MI</span>}
+          </div>
+        ))
+      }
+    </div>
+  );
+
+  return (
+    <div className="usage-grid">
+      {renderDay(usage.d1, d1Label)}
+      {renderDay(usage.d2, d2Label)}
+      {renderDay(usage.d3, d3Label)}
+    </div>
+  );
+}
+
+function TeamBullpenPanel({ team, date, expanded, onToggle }: {
+  team: BullpenTeam;
+  date: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const available = team.arms.filter((a) => a.availability === 'AVAILABLE' || a.availability === 'LIKELY_AVAILABLE').length;
+  const doubtful = team.arms.filter((a) => a.availability === 'DOUBTFUL').length;
+  const out = team.arms.filter((a) => a.availability === 'OUT').length;
+  const unknown = team.arms.filter((a) => a.availability === 'UNKNOWN' || a.availability === 'STALE').length;
+
+  return (
+    <div className={`team-bullpen-panel ${expanded ? 'expanded' : ''}`} data-testid={`team-panel-${team.abbreviation}`}>
+      <button className="team-panel-header" onClick={onToggle} aria-expanded={expanded}>
+        <div className="team-header-left">
+          <span className="team-abbr">{team.abbreviation}</span>
+          <span className="team-name-small">{team.name}</span>
+          {team.staleBadge && <span className="stale-badge">STALE</span>}
+        </div>
+        <div className="team-header-stats">
+          <span className="avail-stat avail-good">{available} avail</span>
+          {doubtful > 0 && <span className="avail-stat avail-warn">{doubtful} doubtful</span>}
+          {out > 0 && <span className="avail-stat avail-bad">{out} out</span>}
+          {unknown > 0 && <span className="avail-stat avail-neutral">{unknown} unk</span>}
+        </div>
+        <ChevronRight size={14} className={`panel-chevron ${expanded ? 'rotated' : ''}`} />
+      </button>
+      {expanded && (
+        <div className="team-panel-body">
+          <div className="bullpen-columns">
+            <div className="arms-column">
+              <Kicker>Availability board</Kicker>
+              {team.arms.length === 0
+                ? <QueryMessage kind="empty" />
+                : team.arms.map((arm) => <ArmRow key={arm.playerId} arm={arm} />)
+              }
+            </div>
+            <div className="leverage-column">
+              <Kicker>Leverage sequence</Kicker>
+              <div className="leverage-map">
+                {team.leverageMap.roleUncertainty && (
+                  <div className="leverage-notice">
+                    <AlertTriangle size={13} />
+                    <span>{team.leverageMap.notes ?? 'Role data unavailable'}</span>
+                  </div>
+                )}
+                {[
+                  { label: '9th / Close', id: team.leverageMap.projected9th },
+                  { label: '8th / Setup', id: team.leverageMap.projected8th },
+                  { label: '7th', id: team.leverageMap.projected7th },
+                  { label: 'Lefty specialist', id: team.leverageMap.highestLeverageLefty },
+                  { label: 'Long man', id: team.leverageMap.longMan },
+                ].map(({ label, id }) => {
+                  const arm = id ? team.arms.find((a) => a.playerId === id) : null;
+                  return (
+                    <div key={label} className="leverage-slot">
+                      <span className="leverage-label">{label}</span>
+                      {arm
+                        ? <span className="leverage-arm"><strong>{arm.name}</strong> <Badge tone={availabilityTone(arm.availability)}>{arm.availability}</Badge></span>
+                        : <span className="leverage-empty">—</span>
+                      }
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="usage-section">
+                <Kicker>Recent usage</Kicker>
+                <UsageGrid usage={team.usage} date={date} />
+              </div>
+            </div>
+          </div>
+          <div className="coverage-bar-row">
+            <span className="coverage-label">Coverage {Math.round(team.coveragePercentage)}%</span>
+            <div className="coverage-bar">
+              <span className="coverage-fill" style={{ width: `${team.coveragePercentage}%` }} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BullpenRoomPage() {
+  const [dateParam, setDateParam] = useState('');
+  const [teamFilter, setTeamFilter] = useState('');
+  const [expandedTeams, setExpandedTeams] = useState<Set<number>>(new Set());
+
+  const effectiveDate = dateParam || new Date().toISOString().slice(0, 10);
+  const params = { date: effectiveDate, ...(teamFilter ? { team: teamFilter } : {}) };
+
+  const query = useGetAnalystBullpenRoom(params);
+  const refreshBullpenMutation = useRefreshBullpen({
+    mutation: {
+      onSuccess: () => query.refetch(),
+    },
+  });
+  const data = query.data as BullpenRoom | undefined;
+
+  const toggleTeam = (teamId: number) => {
+    setExpandedTeams((prev) => {
+      const next = new Set(prev);
+      if (next.has(teamId)) next.delete(teamId);
+      else next.add(teamId);
+      return next;
+    });
+  };
+
+  const expandAll = () => setExpandedTeams(new Set(data?.teams.map((t) => t.teamId) ?? []));
+  const collapseAll = () => setExpandedTeams(new Set());
+
+  return (
+    <div className="page-content rise-in">
+      <div className="page-intro">
+        <div>
+          <Kicker>Relief corps / Phase 2B</Kicker>
+          <h1>Bullpen <span className="slash">//</span> room</h1>
+          <p>Availability board, D-1/D-2/D-3 usage, leverage sequences, and role history. Heuristic states only — manager overrides win unconditionally.</p>
+        </div>
+        <div className="flex gap-2 items-center flex-wrap">
+          <input
+            type="date"
+            className="search-input !h-[35px] !w-auto"
+            value={dateParam}
+            onChange={(e) => setDateParam(e.target.value)}
+            data-testid="input-bullpen-date"
+          />
+          <input
+            type="text"
+            className="search-input !h-[35px] !w-[80px] uppercase"
+            value={teamFilter}
+            onChange={(e) => setTeamFilter(e.target.value.toUpperCase())}
+            placeholder="Team"
+            maxLength={3}
+            data-testid="input-bullpen-team"
+          />
+          <button
+            className="button button-dark"
+            onClick={() => refreshBullpenMutation.mutate({ params: { date: effectiveDate } })}
+            disabled={refreshBullpenMutation.isPending}
+            data-testid="button-refresh-bullpen"
+          >
+            <RefreshCw size={15} />
+            {refreshBullpenMutation.isPending ? 'Ingesting…' : 'Refresh bullpen'}
+          </button>
+        </div>
+      </div>
+
+      {data && (
+        <div className="metric-grid mb-6">
+          <Metric label="Teams with data" value={data.summary.teamsWithData} note="Active bullpen profiles" tone="accent" />
+          <Metric label="Arms available" value={data.summary.armsAvailable + data.summary.armsLikelyAvailable} note={`${data.summary.armsAvailable} fully available`} tone={data.summary.armsAvailable > 0 ? 'good' : 'warn'} />
+          <Metric label="Doubtful / Out" value={`${data.summary.armsDoubtful} / ${data.summary.armsOut}`} note="Fatigued arms" tone={data.summary.armsOut > 0 ? 'bad' : data.summary.armsDoubtful > 0 ? 'warn' : 'good'} />
+          <Metric label="Unknown state" value={data.summary.armsUnknown} note="No appearance data yet" tone={data.summary.armsUnknown > 0 ? 'neutral' : 'good'} />
+        </div>
+      )}
+
+      {!data?.teams.length && !query.isLoading && (
+        <Panel className="mb-4 bg-accent/5 border-accent/20">
+          <div className="p-6">
+            <Kicker>No data yet</Kicker>
+            <p className="mt-2 text-sm">No bullpen data exists for this date. Run a <strong>Refresh bullpen</strong> to ingest the last 3 days of MLB game logs and compute availability states.</p>
+          </div>
+        </Panel>
+      )}
+
+      {query.isLoading ? (
+        <LoadingPanel rows={5} />
+      ) : query.isError ? (
+        <QueryMessage kind="error" onRetry={() => query.refetch()} />
+      ) : data && data.teams.length > 0 ? (
+        <>
+          <div className="flex items-center justify-between mb-4">
+            <Kicker>{data.teams.length} team{data.teams.length !== 1 ? 's' : ''} · {data.date}</Kicker>
+            <div className="flex gap-2">
+              <button className="button button-quiet" onClick={expandAll} data-testid="button-expand-all">Expand all</button>
+              <button className="button button-quiet" onClick={collapseAll} data-testid="button-collapse-all">Collapse all</button>
+            </div>
+          </div>
+          <div className="bullpen-team-list" data-testid="bullpen-team-list">
+            {data.teams.map((team) => (
+              <TeamBullpenPanel
+                key={team.teamId}
+                team={team}
+                date={data.date}
+                expanded={expandedTeams.has(team.teamId)}
+                onToggle={() => toggleTeam(team.teamId)}
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
+
+      <Panel className="mt-6 bg-accent/5 border-accent/20">
+        <div className="p-6">
+          <Kicker>Heuristic rules (Phase 2B)</Kicker>
+          <div className="notes-grid mt-4">
+            <div><span>01</span><p><strong>OUT</strong> — 3 consecutive days with ≥1 pitch each</p></div>
+            <div><span>02</span><p><strong>DOUBTFUL</strong> — 2 consecutive days, OR ≥35 pitches yesterday, OR multi-inning yesterday (≥2.0 IP)</p></div>
+            <div><span>03</span><p><strong>LIKELY AVAILABLE</strong> — pitched 2–3 days ago but not yesterday</p></div>
+            <div><span>04</span><p><strong>AVAILABLE</strong> — no appearance in last 3 days</p></div>
+            <div><span>05</span><p><strong>Manager override</strong> wins unconditionally over any heuristic state</p></div>
+            <div><span>06</span><p><strong>Stale badge</strong> appears when the observation is older than 24 hours</p></div>
+          </div>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
 function Router() {
   return (
     <AppShell>
@@ -848,7 +1240,7 @@ function Router() {
           <Route path="/game-lab" component={GameLabPage} />
           <Route path="/player-lab" component={PlayerLabPage} />
           <Route path="/pitcher-lab" component={PitcherLabPage} />
-          <Route path="/bullpen-room">{() => <FuturePage label="Bullpen room" />}</Route>
+          <Route path="/bullpen-room" component={BullpenRoomPage} />
           <Route path="/bettor-intelligence">{() => <FuturePage label="Bettor intelligence" />}</Route>
           <Route path="/model-lab">{() => <FuturePage label="Model lab" />}</Route>
           <Route path="/ai-analyst">{() => <FuturePage label="AI analyst" />}</Route>

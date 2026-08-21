@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import {
+  GetAnalystBullpenRoomResponse,
   GetAnalystDataHealthResponse,
   GetAnalystGameLabResponse,
   GetAnalystPitcherLabResponse,
@@ -8,10 +9,12 @@ import {
   GetAnalystSettingsResponse,
   GetAnalystTodayResponse,
   RefreshAnalystResearchResponse,
+  RefreshBullpenResponse,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
 import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFallback, researchHealth } from "../services/research-foundation";
+import { getBullpenRoom, refreshBullpen } from "../services/bullpen-foundation";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -532,6 +535,37 @@ router.post("/analyst/refresh/research", async (req, res, next) => {
 router.post("/analyst/refresh/research/splits-full", async (req, res, next) => {
   try {
     res.status(202).json(await ingestStatcastHandednessFallback(requestedDate(req.query.date), "FULL_UNIVERSE", 24));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/analyst/bullpen-room", async (req, res, next) => {
+  try {
+    const date = requestedDate(req.query.date);
+    const team = typeof req.query.team === "string" && req.query.team.trim()
+      ? req.query.team.trim().toUpperCase()
+      : undefined;
+    const data = await getBullpenRoom(date, team);
+    res.json(GetAnalystBullpenRoomResponse.parse(data));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/refresh/bullpen", async (req, res, next) => {
+  try {
+    const date = requestedDate(req.query.date);
+    const result = await refreshBullpen(date);
+    res.status(201).json(RefreshBullpenResponse.parse({
+      source: "BULLPEN",
+      slateDate: date,
+      gamesProcessed: result.gamesProcessed,
+      appearancesNormalized: result.appearancesNormalized,
+      appearancesRejected: result.appearancesRejected,
+      teamsComputed: result.teamsComputed,
+      error: result.error ?? null,
+    }));
   } catch (error) {
     next(error);
   }

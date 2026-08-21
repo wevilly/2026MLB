@@ -471,3 +471,91 @@ export const RefreshFullUniverseStatcastSplitsResponse = zod.object({
 })
 
 
+/**
+ * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage
+ */
+export const GetAnalystBullpenRoomQueryParams = zod.object({
+  "date": zod.string().optional(),
+  "team": zod.string().optional()
+})
+
+export const GetAnalystBullpenRoomResponse = zod.object({
+  "date": zod.string(),
+  "requestedTeam": zod.string().nullable(),
+  "staleFreshnessWindowSeconds": zod.number(),
+  "teams": zod.array(zod.object({
+    "teamId": zod.number(),
+    "abbreviation": zod.string(),
+    "name": zod.string(),
+    "slateDate": zod.string(),
+    "leverageMap": zod.object({
+      "projected9th": zod.number().nullable(),
+      "projected8th": zod.number().nullable(),
+      "projected7th": zod.number().nullable(),
+      "highestLeverageLefty": zod.number().nullable(),
+      "longMan": zod.number().nullable(),
+      "highestWalkReliever": zod.number().nullable(),
+      "lowestWalkReliever": zod.number().nullable(),
+      "roleUncertainty": zod.boolean(),
+      "notes": zod.string().nullable(),
+      "computedAt": zod.string().nullable()
+    }),
+    "arms": zod.array(zod.object({
+      "playerId": zod.number(),
+      "name": zod.string(),
+      "throws": zod.string(),
+      "role": zod.string(),
+      "availability": zod.enum(['AVAILABLE', 'LIKELY_AVAILABLE', 'DOUBTFUL', 'OUT', 'UNKNOWN', 'STALE']),
+      "confidence": zod.enum(['HEURISTIC', 'MANAGER_OVERRIDE', 'UNKNOWN']),
+      "d1Pitches": zod.number().nullable(),
+      "d2Pitches": zod.number().nullable(),
+      "d3Pitches": zod.number().nullable(),
+      "consecutiveDays": zod.number(),
+      "multiInningYesterday": zod.boolean(),
+      "daysSinceLastUse": zod.number().nullable(),
+      "managerOverride": zod.string().nullable(),
+      "managerOverrideNote": zod.string().nullable(),
+      "staleBadge": zod.boolean(),
+      "sourceFreshness": zod.string().nullable(),
+      "computedAt": zod.string().nullable()
+    })),
+    "usage": zod.object({
+      "d1": zod.array(zod.object({ "playerId": zod.number(), "name": zod.string(), "pitches": zod.number(), "ip": zod.string(), "multiInning": zod.boolean() })),
+      "d2": zod.array(zod.object({ "playerId": zod.number(), "name": zod.string(), "pitches": zod.number(), "ip": zod.string(), "multiInning": zod.boolean() })),
+      "d3": zod.array(zod.object({ "playerId": zod.number(), "name": zod.string(), "pitches": zod.number(), "ip": zod.string(), "multiInning": zod.boolean() }))
+    }),
+    "coveragePercentage": zod.number(),
+    "staleBadge": zod.boolean(),
+    "computedAt": zod.string().nullable()
+  })),
+  "summary": zod.object({
+    "teamsWithData": zod.number(),
+    "teamsStale": zod.number(),
+    "totalArms": zod.number(),
+    "armsAvailable": zod.number(),
+    "armsLikelyAvailable": zod.number(),
+    "armsDoubtful": zod.number(),
+    "armsOut": zod.number(),
+    "armsUnknown": zod.number()
+  })
+})
+
+
+/**
+ * @summary Ingest reliever appearances and recompute availability and leverage maps
+ */
+export const RefreshBullpenQueryParams = zod.object({
+  "date": zod.string().optional()
+})
+
+export const RefreshBullpenResponse = zod.object({
+  "source": zod.string(),
+  "slateDate": zod.string(),
+  "gamesProcessed": zod.number(),
+  "appearancesNormalized": zod.number(),
+  "appearancesRejected": zod.number(),
+  "teamsComputed": zod.number(),
+  "error": zod.string().nullable()
+})
+
+

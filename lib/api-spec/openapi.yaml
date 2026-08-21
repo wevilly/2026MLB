@@ -226,6 +226,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResearchIngestSource"
+  /analyst/bullpen-room:
+    get:
+      operationId: getAnalystBullpenRoom
+      tags: [analyst]
+      summary: Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage for all 30 teams
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: team
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filter to a single team by abbreviation (e.g. NYY)
+      responses:
+        "200":
+          description: Bullpen room data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BullpenRoom"
+  /analyst/refresh/bullpen:
+    post:
+      operationId: refreshBullpen
+      tags: [analyst]
+      summary: Ingest reliever appearances for the last 3 days and recompute availability and leverage maps
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Bullpen ingest completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BullpenIngestResult"
 components:
   schemas:
     HealthStatus:
@@ -500,4 +539,101 @@ components:
         quarantinedRows: { type: number }
         notes: { type: array, items: { type: string } }
       required: [status, sources, quarantinedRows, notes]
+    BullpenLeverageMap:
+      type: object
+      properties:
+        projected9th: { type: ["integer", "null"] }
+        projected8th: { type: ["integer", "null"] }
+        projected7th: { type: ["integer", "null"] }
+        highestLeverageLefty: { type: ["integer", "null"] }
+        longMan: { type: ["integer", "null"] }
+        highestWalkReliever: { type: ["integer", "null"] }
+        lowestWalkReliever: { type: ["integer", "null"] }
+        roleUncertainty: { type: boolean }
+        notes: { type: ["string", "null"] }
+        computedAt: { type: ["string", "null"] }
+      required: [projected9th, projected8th, projected7th, highestLeverageLefty, longMan, highestWalkReliever, lowestWalkReliever, roleUncertainty, notes, computedAt]
+    BullpenArm:
+      type: object
+      properties:
+        playerId: { type: integer }
+        name: { type: string }
+        throws: { type: string }
+        role: { type: string }
+        availability: { type: string, enum: [AVAILABLE, LIKELY_AVAILABLE, DOUBTFUL, OUT, UNKNOWN, STALE] }
+        confidence: { type: string, enum: [HEURISTIC, MANAGER_OVERRIDE, UNKNOWN] }
+        d1Pitches: { type: ["integer", "null"] }
+        d2Pitches: { type: ["integer", "null"] }
+        d3Pitches: { type: ["integer", "null"] }
+        consecutiveDays: { type: integer }
+        multiInningYesterday: { type: boolean }
+        daysSinceLastUse: { type: ["integer", "null"] }
+        managerOverride: { type: ["string", "null"] }
+        managerOverrideNote: { type: ["string", "null"] }
+        staleBadge: { type: boolean }
+        sourceFreshness: { type: ["string", "null"] }
+        computedAt: { type: ["string", "null"] }
+      required: [playerId, name, throws, role, availability, confidence, d1Pitches, d2Pitches, d3Pitches, consecutiveDays, multiInningYesterday, daysSinceLastUse, managerOverride, managerOverrideNote, staleBadge, sourceFreshness, computedAt]
+    BullpenUsageEntry:
+      type: object
+      properties:
+        playerId: { type: integer }
+        name: { type: string }
+        pitches: { type: integer }
+        ip: { type: string }
+        multiInning: { type: boolean }
+      required: [playerId, name, pitches, ip, multiInning]
+    BullpenUsage:
+      type: object
+      properties:
+        d1: { type: array, items: { $ref: "#/components/schemas/BullpenUsageEntry" } }
+        d2: { type: array, items: { $ref: "#/components/schemas/BullpenUsageEntry" } }
+        d3: { type: array, items: { $ref: "#/components/schemas/BullpenUsageEntry" } }
+      required: [d1, d2, d3]
+    BullpenTeam:
+      type: object
+      properties:
+        teamId: { type: integer }
+        abbreviation: { type: string }
+        name: { type: string }
+        slateDate: { type: string }
+        leverageMap: { $ref: "#/components/schemas/BullpenLeverageMap" }
+        arms: { type: array, items: { $ref: "#/components/schemas/BullpenArm" } }
+        usage: { $ref: "#/components/schemas/BullpenUsage" }
+        coveragePercentage: { type: number }
+        staleBadge: { type: boolean }
+        computedAt: { type: ["string", "null"] }
+      required: [teamId, abbreviation, name, slateDate, leverageMap, arms, usage, coveragePercentage, staleBadge, computedAt]
+    BullpenRoomSummary:
+      type: object
+      properties:
+        teamsWithData: { type: integer }
+        teamsStale: { type: integer }
+        totalArms: { type: integer }
+        armsAvailable: { type: integer }
+        armsLikelyAvailable: { type: integer }
+        armsDoubtful: { type: integer }
+        armsOut: { type: integer }
+        armsUnknown: { type: integer }
+      required: [teamsWithData, teamsStale, totalArms, armsAvailable, armsLikelyAvailable, armsDoubtful, armsOut, armsUnknown]
+    BullpenRoom:
+      type: object
+      properties:
+        date: { type: string }
+        requestedTeam: { type: ["string", "null"] }
+        staleFreshnessWindowSeconds: { type: integer }
+        teams: { type: array, items: { $ref: "#/components/schemas/BullpenTeam" } }
+        summary: { $ref: "#/components/schemas/BullpenRoomSummary" }
+      required: [date, requestedTeam, staleFreshnessWindowSeconds, teams, summary]
+    BullpenIngestResult:
+      type: object
+      properties:
+        source: { type: string }
+        slateDate: { type: string }
+        gamesProcessed: { type: integer }
+        appearancesNormalized: { type: integer }
+        appearancesRejected: { type: integer }
+        teamsComputed: { type: integer }
+        error: { type: ["string", "null"] }
+      required: [source, slateDate, gamesProcessed, appearancesNormalized, appearancesRejected, teamsComputed, error]
 
