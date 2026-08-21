@@ -12,6 +12,7 @@ import type { SourceBadge } from './sourceBadge';
 
 export interface DataHealth {
   overall: string;
+  phase2aReady: boolean;
   sources: SourceBadge[];
   issues: HealthIssue[];
   identityCoverage: IdentityCoverage;

@@ -374,6 +374,28 @@ test("Phase 2A: FanGraphs source failure is recorded as a visible ingest-run sta
 });
 
 // ---------------------------------------------------------------------------
+// 10. /api/analyst/data-health returns phase2aReady: true
+// ---------------------------------------------------------------------------
+test("Phase 2A: /api/analyst/data-health reports phase2aReady: true", async () => {
+  const { default: http } = await import("node:http");
+  const body = await new Promise((resolve, reject) => {
+    const req = http.get("http://127.0.0.1:8080/api/analyst/data-health", (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+      });
+    });
+    req.on("error", reject);
+    req.setTimeout(10000, () => { req.destroy(new Error("data-health request timed out")); });
+  });
+  assert.equal(body.overall, "READY",
+    `Expected overall === "READY", got "${body.overall}"`);
+  assert.equal(body.phase2aReady, true,
+    `Expected phase2aReady === true, got ${JSON.stringify(body.phase2aReady)}`);
+});
+
+// ---------------------------------------------------------------------------
 // Teardown
 // ---------------------------------------------------------------------------
 process.on("exit", () => { try { pool.end(); } catch { /* ignore */ } });

@@ -67,3 +67,32 @@ Run `pnpm test:phase-2a` to execute the behavioral acceptance test suite (9 asse
 The queries in this report are identical to those in `researchHealth()` in
 `artifacts/api-server/src/services/research-foundation.ts` and in
 `tests/phase-2a-acceptance.test.mjs`.
+
+## Acceptance test run — Gate A closeout
+
+Executed: 2026-08-21 (Gate A — Phase 2A formal closeout)
+Command: `pnpm test:phase-2a`
+
+```
+✔ Phase 2A: eligible hitter and pitcher universe is non-trivial (46ms)
+✔ Phase 2A: every eligible hitter has same-day vs-LHP and vs-RHP Statcast evidence (71ms)
+✔ Phase 2A: every eligible pitcher has same-day vs-LHB and vs-RHB Statcast evidence (44ms)
+✔ Phase 2A: covered hitter and pitcher counts exactly match eligible universe (24ms)
+✔ Phase 2A: every current-game venue has All/L/R Statcast Park Factor components persisted (9ms)
+✔ Phase 2A: current slate has at least one game with a known venue (2ms)
+✔ Phase 2A: the dedicated Statcast Search split run for the effective date succeeded (6ms)
+✔ Phase 2A: coverage gate rejects evidence from a different effective date (3ms)
+✔ Phase 2A: FanGraphs source failure is recorded as a visible ingest-run status, not silently omitted (1ms)
+
+✔ Phase 2A: /api/analyst/data-health reports phase2aReady: true (690ms)
+
+tests 10 · pass 10 · fail 0
+```
+
+`/api/analyst/data-health` confirmed: `overall: "READY"`, `phase2aReady: true`, `missingHandednessSplits: 0`, `parkVenueCoverageGaps: 0`, blocking issues: 0.
+
+## Gate A verdict — CLOSED ✅
+
+All Phase 2A acceptance criteria are satisfied as of 2026-08-21. No OPEN items remain.
+
+Downstream phases (Phase 2B and beyond) are unblocked. The dependency rule is in effect: no downstream phase may silently compensate for an upstream data defect.

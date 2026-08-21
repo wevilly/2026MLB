@@ -108,6 +108,7 @@ export const GetAnalystProjectionsResponse = zod.object({
  */
 export const GetAnalystDataHealthResponse = zod.object({
   "overall": zod.string(),
+  "phase2aReady": zod.boolean(),
   "sources": zod.array(zod.object({
   "name": zod.string(),
   "status": zod.string(),

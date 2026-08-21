@@ -577,6 +577,21 @@ export const parkResearchFeatures = pgTable("park_research_features", {
   parkSnapshotMetricIdx: uniqueIndex("park_research_snapshot_metric_idx").on(table.parkResearchSnapshotId, table.metricKey, table.batterSide),
 }));
 
+/**
+ * PLACEHOLDER — extended by Phase 4A (Historical Pregame Feature Store) and Phase 5 (Model Training).
+ *
+ * Phase 4 extension contract:
+ *   - `model_version_id` will reference a `model_versions.version_id` FK once Phase 5A creates that table.
+ *   - `feature_snapshot` will be replaced or supplemented by a FK to `pregame_feature_snapshots` (Phase 4A).
+ *   - `status` will be replaced by a typed enum (DRAFT / CANDIDATE / ACTIVE / RETIRED) once Phase 5A defines it.
+ *   - `predicted_probability` must remain nullable; rows written before a calibrated model exists leave it NULL.
+ *   - `frozen` / `frozen_at` establish the immutability boundary: once frozen=true, no field may be updated.
+ *     Phase 4B (Settlement) enforces this at the application layer; a future migration may add a DB check.
+ *   - Do NOT add sportsbook price, odds, implied probability, EV, or CLV columns to this table.
+ *
+ * Do not redefine this table's primary key or drop existing columns in downstream phases;
+ * extend it with new nullable columns and a new FK to `model_versions` instead.
+ */
 export const futureMarketPredictions = pgTable("future_market_predictions", {
   predictionId: uuid("prediction_id").primaryKey().defaultRandom(),
   gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
@@ -593,6 +608,25 @@ export const futureMarketPredictions = pgTable("future_market_predictions", {
   frozenAt: timestamp("frozen_at", { withTimezone: true }),
 });
 
+/**
+ * PLACEHOLDER — extended by Phase 4B (Official Settlement and Postmortem Engine).
+ *
+ * Phase 4 extension contract:
+ *   - `source_id` must always reference the MLB official source ('MLB_OFFICIAL').
+ *     FantasyPros or any projection source must NEVER be written here as a settlement source.
+ *   - XBH = doubles + triples + home_runs; singles are explicitly excluded from XBH market settlement.
+ *     The `singles` column is retained for TB computation only (TB = 1B + 2×2B + 3×3B + 4×HR).
+ *   - Phase 4B will add: `settlement_state` enum (SETTLED / POSTPONED / NO_ACTION / DISPUTED / PENDING),
+ *     `settled_at` timestamp, `correction_of` UUID self-reference, and `process_error_taxonomy` text.
+ *   - Once `settlement_state = 'SETTLED'`, the row must not be updated. Phase 4B enforces this at the
+ *     application layer. Corrections create a new row with `correction_of` pointing to the original.
+ *   - AI must not write to this table. The application layer must enforce this in Phase 8A's tool registry.
+ *   - The current primary key (game_pk, player_id) will be relaxed in Phase 4B to allow correction rows;
+ *     Phase 4B will replace it with a surrogate UUID PK and add a unique partial index on
+ *     (game_pk, player_id) WHERE settlement_state = 'SETTLED' AND correction_of IS NULL.
+ *
+ * Do not add odds, price, EV, CLV, or implied-probability columns to this table.
+ */
 export const marketSettlementOutcomes = pgTable(
   "market_settlement_outcomes",
   {

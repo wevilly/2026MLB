@@ -30,3 +30,9 @@ This register documents the public research evidence accepted by the Phase 2A fo
 | Hitter vs LHP/RHP | FanGraphs remains preferred when available. When its public split endpoint fails, the fallback derives separate MLBAM-linked snapshots from Statcast Search terminal plate appearances grouped by `p_throws`; values are labeled `DERIVED_FROM_STATCAST` and retain PA denominators/sample state. |
 | Pitcher vs LHB/RHB | FanGraphs remains preferred when available. The fallback derives separate MLBAM-linked snapshots from Statcast Search terminal plate appearances grouped by `stand`; values are labeled `DERIVED_FROM_STATCAST` and retain BF denominators/sample state. |
 | Park components | Supported by Baseball Savant Statcast Park Factors when the source's server-rendered data is available; source failure remains visible |
+
+## Decision log
+
+| Date | Decision | Rule | Rationale |
+| --- | --- | --- | --- |
+| 2026-08-21 | FanGraphs unavailability does not block Phase 2A acceptance | FanGraphs returning HTML instead of JSON is a visible source failure recorded in `ingest_runs`. It does not block Phase 2A when full Statcast Search handedness-fallback coverage is present for the entire eligible hitter and pitcher universe. | The Statcast Search fallback (`statcast_search_handedness_fallback`) derives the same L/R split panels (labeled `DERIVED_FROM_STATCAST`) that FanGraphs would provide. Coverage is 486/486 hitters and 568/568 pitchers with same-day evidence. FanGraphs failure is exposed in Data Health (status: BLOCKED) so it is never silent. This rule applies only to Phase 2A acceptance; FanGraphs recovery remains desirable for rolling-window and pitch-arsenal coverage in downstream phases. |

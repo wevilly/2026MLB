@@ -344,12 +344,13 @@ components:
       type: object
       properties:
         overall: { type: string }
+        phase2aReady: { type: boolean }
         sources: { type: array, items: { $ref: "#/components/schemas/SourceBadge" } }
         issues: { type: array, items: { $ref: "#/components/schemas/HealthIssue" } }
         identityCoverage: { $ref: "#/components/schemas/IdentityCoverage" }
         researchHealth: { $ref: "#/components/schemas/ResearchHealth" }
         lastRun: { type: string }
-      required: [overall, sources, issues, identityCoverage, researchHealth, lastRun]
+      required: [overall, phase2aReady, sources, issues, identityCoverage, researchHealth, lastRun]
     ConnectionStatus:
       type: object
       properties:

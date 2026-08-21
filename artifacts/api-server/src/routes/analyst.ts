@@ -368,6 +368,7 @@ router.get("/analyst/data-health", async (_req, res, next) => {
       : "READY";
     res.json(GetAnalystDataHealthResponse.parse({
       overall: sourceStatus,
+      phase2aReady: phaseTwoReady,
       sources,
       issues: issueResult.rows.map((issue) => ({ label: issue.issue_type.replaceAll("_", " "), detail: issue.detail, severity: issue.severity })),
       identityCoverage: coverage,
