@@ -1,0 +1,930 @@
+PHASE 1C IS ACCEPTED.
+
+Proceed to:
+
+PHASE 2A - PLAYER, PITCHER, PARK, AND STATCAST RESEARCH DATA FOUNDATION
+
+Do NOT begin betting models, prediction probabilities, FIRE/HALF/HOLD picks, bettor intelligence, or the AI Analyst.
+
+The objective of Phase 2A is to build the baseball research layer that future independent TB, XBH, Walk, and HR engines will consume.
+
+This phase should answer:
+
+- Who is this hitter?
+- Who is this pitcher?
+- What does each player actually do well or poorly?
+- What pitch shapes and pitch types are involved?
+- How have those skills changed over different time windows?
+- What does the park do to singles, doubles, triples, and home runs?
+- What data is reliable, stale, missing, or sample-size limited?
+
+NO PREDICTION OUTPUTS YET.
+
+==================================================
+1. REPORTING CORRECTIONS FROM PHASE 1C
+==================================================
+
+Carry these forward immediately.
+
+A. Posted lineup coverage
+
+If there are no official posted lineups:
+
+0 / 0
+
+must display:
+
+N/A - NO OFFICIAL LINEUPS POSTED
+
+Do not display 100%.
+
+B. Identity versus ingestion
+
+Do not describe a correctly persisted FantasyPros row with unresolved identity as "rejected" unless normalization actually failed.
+
+Track separately:
+
+- RAW ROW RECEIVED
+- NORMALIZED
+- IDENTITY RESOLVED
+- IDENTITY REVIEW REQUIRED
+- QUARANTINED FROM RESEARCH
+- ACTUAL INGEST REJECTED
+
+Identity uncertainty is not an ingest failure.
+
+==================================================
+2. SOURCE OWNERSHIP
+==================================================
+
+Use authoritative sources according to the project source-precedence rules.
+
+Primary sources for Phase 2A:
+
+MLB Stats API
+- official player identity
+- roster/game state
+- handedness where available
+- game outcomes
+
+Baseball Savant / Statcast
+- xBA
+- xSLG
+- xwOBA
+- barrels
+- barrel/PA
+- hard-hit
+- exit velocity
+- launch angle
+- sweet spot
+- batted-ball direction
+- pitch-level data
+- pitcher arsenal
+- velocity
+- movement
+- release point
+- zone/location
+- batter versus pitch-type data
+- park factors where available
+
+FanGraphs
+- SLG
+- ISO
+- BB%
+- K%
+- plate discipline
+- O-Swing / chase
+- Z-Swing
+- Contact%
+- Zone%
+- F-Strike%
+- pitcher ERA/FIP/xFIP
+- GB%
+- splits
+- recent date-range leaderboards
+
+FantasyPros
+- forward-looking projection evidence
+- projected lineup evidence
+- news
+- metadata
+
+FantasyPros may not overwrite official MLB state.
+
+Use public repositories already listed in the project only as implementation/reference aids.
+
+Do not ask the user to manually provide public data before attempting retrieval yourself.
+
+==================================================
+3. RAW STATCAST INGESTION
+==================================================
+
+Build a Statcast ingestion layer.
+
+Do NOT couple raw Statcast retrieval directly to UI rendering.
+
+Separate:
+
+RAW INGEST
+NORMALIZATION
+FEATURE STORAGE
+READ API
+
+Store enough raw source evidence to reproduce every derived feature.
+
+Every retrieval must include:
+
+- source
+- endpoint/query
+- requested player/date scope
+- retrieval timestamp UTC
+- effective date/range
+- HTTP status
+- raw payload checksum
+- row count
+- normalized row count
+- rejected row count
+- ingest run ID
+
+Phase 2A must support both:
+
+PLAYER-LEVEL RESEARCH
+
+and
+
+PITCH-LEVEL RESEARCH
+
+==================================================
+4. TIME WINDOWS
+==================================================
+
+Do not store only season-to-date values.
+
+Research views must support:
+
+- current season
+- career baseline where practical
+- rolling last 7 days
+- rolling last 14 days
+- rolling last 30 days
+- rolling last 60 days
+
+Where daily-window sample size is too small, show the sample size rather than pretending the rate is equally trustworthy.
+
+Every feature row should include:
+
+- PA / BBE / BF / pitches / IP denominator as appropriate
+- date range
+- sample count
+- source
+- retrieval time
+
+Do not hide small samples.
+
+==================================================
+5. PLAYER LAB - HITTER RESEARCH FOUNDATION
+==================================================
+
+Build the real Player Lab.
+
+The Player Lab must not display one universal "player score."
+
+Organize hitter information by research families.
+
+--------------------------------
+A. OPPORTUNITY
+--------------------------------
+
+Store/display:
+
+- games
+- PA
+- AB
+- expected/projected lineup position when available
+- recent lineup-position history
+- starts
+- platoon usage where available
+- projected PA later, but do not invent it now
+
+--------------------------------
+B. CORE OFFENSE
+--------------------------------
+
+- AVG
+- OBP
+- SLG
+- OPS
+- ISO
+- wOBA
+- xBA
+- xSLG
+- xwOBA
+
+--------------------------------
+C. CONTACT
+--------------------------------
+
+- K%
+- Contact%
+- Z-Contact%
+- O-Contact% if available
+- swing-and-miss%
+- line-drive%
+- ground-ball%
+- fly-ball%
+- balls in play
+- BABIP
+
+--------------------------------
+D. DAMAGE
+--------------------------------
+
+- average EV
+- max EV
+- 90th percentile EV
+- hard-hit%
+- barrels
+- barrel%
+- barrels per PA
+- sweet-spot%
+- launch angle
+- launch-angle distribution
+- pull%
+- center%
+- opposite-field%
+- pull-air%
+- pulled fly-ball%
+
+--------------------------------
+E. EXTRA BASE HIT PROFILE
+--------------------------------
+
+XBH must receive its own first-class research section.
+
+Store:
+
+- singles
+- doubles
+- triples
+- home runs
+- XBH
+- 2B / PA
+- 3B / PA
+- HR / PA
+- XBH / PA
+- XBH / hit
+- doubles share of XBH
+- triples share of XBH
+- HR share of XBH
+
+Where available or derivable from pitch/batted-ball data:
+
+- gap-contact profile
+- directional doubles
+- directional triples
+- directional HR
+- deep-line-drive frequency
+- deep-fly-ball frequency
+- sprint speed
+- extra bases taken due to speed where relevant
+
+Do not turn XBH into "HR-lite."
+
+A doubles-heavy hitter must be able to look excellent in XBH research without looking elite in HR research.
+
+--------------------------------
+F. WALK / DISCIPLINE PROFILE
+--------------------------------
+
+- BB%
+- intentional BB%
+- unintentional BB%
+- chase / O-Swing%
+- Zone%
+- Z-Swing%
+- first-pitch swing%
+- pitches / PA
+- called-strike%
+- swinging-strike%
+- zone contact
+
+Preserve intentional and unintentional walks separately when source data supports it.
+
+--------------------------------
+G. HANDEDNESS SPLITS
+--------------------------------
+
+Against LHP and RHP separately:
+
+- PA
+- AVG
+- OBP
+- SLG
+- ISO
+- wOBA
+- xSLG if obtainable
+- BB%
+- K%
+- XBH
+- XBH / PA
+- HR / PA
+
+Do not show a split without its denominator.
+
+--------------------------------
+H. PITCH-TYPE PERFORMANCE
+--------------------------------
+
+For hitter performance against pitch families:
+
+- four-seam
+- sinker
+- cutter
+- slider
+- sweeper
+- curveball
+- changeup
+- splitter
+- other meaningful types
+
+Store where available:
+
+- usage faced
+- PA / pitches
+- xSLG
+- wOBA / xwOBA
+- whiff
+- hard-hit
+- barrels
+- run value
+- launch profile
+
+Also retain velocity-band information where obtainable.
+
+The purpose is future arsenal matchup research.
+
+Do NOT yet translate these into a tonight prediction.
+
+==================================================
+6. PITCHER LAB - STARTER RESEARCH FOUNDATION
+==================================================
+
+Build the real Pitcher Lab.
+
+Organize pitcher information by mechanism rather than ERA alone.
+
+--------------------------------
+A. WORKLOAD
+--------------------------------
+
+- games started
+- relief appearances
+- IP
+- BF
+- pitches/start
+- innings/start
+- recent workload
+- expected role classification
+- times through order where obtainable
+
+--------------------------------
+B. RUN PREVENTION CONTEXT
+--------------------------------
+
+- ERA
+- xERA
+- FIP
+- xFIP where available
+- SIERA where available
+- career baseline
+- current season
+- rolling recent windows
+
+These are context only.
+
+Do not create attackability ratings yet.
+
+--------------------------------
+C. CONTACT ALLOWED
+--------------------------------
+
+- xBA allowed
+- xSLG allowed
+- xwOBA allowed
+- hard-hit%
+- barrel%
+- average EV
+- 90th percentile EV allowed where possible
+- LD%
+- GB%
+- FB%
+- BABIP
+- contact%
+
+--------------------------------
+D. STRIKEOUT / COMMAND
+--------------------------------
+
+- K%
+- BB%
+- uBB%
+- K-BB%
+- Zone%
+- first-pitch strike%
+- chase generated
+- swinging strike%
+- called strike%
+- pitches / batter
+
+--------------------------------
+E. HANDEDNESS SPLITS
+--------------------------------
+
+Against LHB and RHB independently:
+
+- BF
+- xSLG allowed
+- xwOBA allowed
+- wOBA allowed
+- K%
+- BB%
+- uBB%
+- HR
+- XBH
+- hard-hit
+- barrels
+
+Do not collapse handedness before future matchup work.
+
+--------------------------------
+F. XBH VULNERABILITY
+--------------------------------
+
+Build an explicit pitcher XBH research section.
+
+Store:
+
+- doubles allowed
+- triples allowed
+- HR allowed
+- XBH allowed
+- XBH / BF
+- XBH / BIP
+- 2B / BF
+- 3B / BF
+- HR / BF
+- line-drive damage
+- deep fly-ball contact
+- directional damage where obtainable
+- LHB/RHB XBH splits
+
+Do not substitute ERA or HR/9 for XBH vulnerability.
+
+--------------------------------
+G. ARSENAL
+--------------------------------
+
+For each pitch type:
+
+- usage%
+- usage by batter side if obtainable
+- velocity
+- velocity trend
+- horizontal movement
+- vertical movement
+- spin where appropriate
+- release point
+- extension
+- zone%
+- whiff%
+- chase%
+- xSLG allowed
+- xwOBA allowed
+- hard-hit
+- barrels
+- run value
+
+Show sample size.
+
+--------------------------------
+H. LOCATION / ZONE
+--------------------------------
+
+Store or derive pitch-location information sufficient for future research such as:
+
+- heart%
+- shadow%
+- chase%
+- waste%
+- upper-middle frequency
+- middle-middle frequency
+- edge usage
+- zone heatmap data
+
+Do not create speculative location claims when data is unavailable.
+
+==================================================
+7. STARTER VERSUS RELIEVER ROLE SEPARATION
+==================================================
+
+Do not mix SP and RP statistical roles.
+
+If a pitcher has worked as both:
+
+store role-separated samples where possible.
+
+A converted starter or multi-inning reliever must not inherit a misleading blended profile without being labeled.
+
+This is important for the later Bullpen Room.
+
+==================================================
+8. PARK RESEARCH FOUNDATION
+==================================================
+
+Create a Park Lab/data layer even if it is surfaced initially inside Game Lab or Player Lab.
+
+Store per park:
+
+- singles factor
+- doubles factor
+- triples factor
+- HR factor
+- hits factor
+- overall run factor for context only
+
+Where source data supports it:
+
+- LHB component factors
+- RHB component factors
+- current-year factors
+- three-year factors
+
+Also store structural park information where obtainable:
+
+- dimensions
+- wall heights
+- altitude
+- roof type/status capability
+- recent renovations
+
+==================================================
+9. TOTAL BASES PARK FACTOR
+==================================================
+
+Preserve the existing project heuristic:
+
+TB Park Factor =
+(0.45 × Hits Factor
++ 0.30 × Doubles Factor
++ 0.25 × HR Factor) / 100
+
+This MUST be labeled:
+
+HEURISTIC
+
+It is not a validated probability adjustment.
+
+It may be displayed for research context.
+
+It must NOT generate a prediction in Phase 2A.
+
+==================================================
+10. XBH PARK RESEARCH
+==================================================
+
+XBH needs separate park treatment.
+
+Store/display the raw:
+
+- doubles factor
+- triples factor
+- HR factor
+
+Do NOT use overall run factor as an XBH proxy.
+
+Do NOT invent a final XBH park formula in this phase.
+
+The purpose of Phase 2A is to preserve the components so future validation can determine appropriate weighting.
+
+==================================================
+11. PLAYER / PITCHER CROSS-SOURCE PROVENANCE
+==================================================
+
+Every displayed metric should expose or be able to expose:
+
+- value
+- source
+- effective date/range
+- retrieval time
+- sample denominator
+- freshness
+- transformation status
+
+Transformation status should support:
+
+RAW
+NORMALIZED
+DERIVED
+HEURISTIC
+
+For example:
+
+XBH = 2B + 3B + HR
+
+can be DERIVED.
+
+A TB park factor using project weights is HEURISTIC.
+
+Do not blur the distinction.
+
+==================================================
+12. SOURCE DISAGREEMENTS
+==================================================
+
+If FanGraphs and Statcast expose similarly named but definitionally different metrics:
+
+DO NOT silently choose one.
+
+Store source-specific definitions.
+
+The UI should identify source/definition.
+
+Data Health should be capable of displaying:
+
+METRIC_DEFINITION_CONFLICT
+
+when the application cannot safely reconcile two fields.
+
+==================================================
+13. PLAYER LAB UI
+==================================================
+
+Make Player Lab functional with real data.
+
+Required elements:
+
+- global player search
+- current team and identity
+- handedness
+- roster state
+- current-season summary
+- rolling-window selector
+- handedness split selector
+- contact panel
+- damage panel
+- XBH panel
+- discipline/walk panel
+- pitch-type panel
+- recent trend panel
+- provenance/freshness indicators
+
+Do not show:
+
+- pick
+- recommendation
+- FIRE
+- model probability
+- betting confidence
+
+==================================================
+14. PITCHER LAB UI
+==================================================
+
+Required elements:
+
+- global pitcher search
+- role
+- throws
+- team
+- season/career/recent selector
+- contact-allowed panel
+- strikeout/command panel
+- LHB/RHB splits
+- XBH vulnerability
+- arsenal table
+- velocity/movement trends
+- pitch-location data
+- workload/TTO section
+- provenance/freshness indicators
+
+Again:
+
+NO PREDICTIONS.
+
+==================================================
+15. GAME LAB PREPARATION
+==================================================
+
+Do not fully implement Game Lab matchup recommendations yet.
+
+But make its data contract capable of eventually showing:
+
+- both starters
+- both lineups
+- player research profiles
+- pitcher research profiles
+- arsenal matchup
+- park components
+- lineup state
+- source freshness
+
+Do not calculate final matchup scores in Phase 2A.
+
+==================================================
+16. DATA HEALTH EXPANSION
+==================================================
+
+Add Phase 2A health information.
+
+Track separately:
+
+- Statcast ingest success
+- FanGraphs ingest success
+- park-factor ingest success
+- player feature freshness
+- pitcher feature freshness
+- stale rolling windows
+- unresolved metric definitions
+- incomplete handedness splits
+- missing pitch arsenal
+- insufficient sample flags
+
+The source being configured does not mean the data is current.
+
+==================================================
+17. PLAYER IDENTITY SAFETY
+==================================================
+
+All Statcast/FanGraphs research data must pass through the canonical identity layer created in Phase 1C.
+
+Do not attach research metrics to a player using name-only matching.
+
+A research row with unresolved identity must be retained but quarantined from Player/Pitcher Lab until resolved.
+
+==================================================
+18. HISTORICAL PRESERVATION
+==================================================
+
+Do not overwrite yesterday's feature state when today's refresh arrives.
+
+The platform should eventually be able to answer:
+
+"What did the player's research profile look like on August 10?"
+
+Therefore preserve dated feature snapshots or reproducible raw inputs.
+
+Use an efficient architecture, but do not make current state the only recoverable state.
+
+==================================================
+19. TESTS
+==================================================
+
+Add tests proving at minimum:
+
+A. Identity
+Statcast and FanGraphs rows cannot attach using unsupported name-only fuzzy matching.
+
+B. Rolling windows
+7/14/30/60-day features use the correct date boundaries.
+
+C. Handedness
+LHP and RHP hitter splits remain separate.
+
+LHB and RHB pitcher splits remain separate.
+
+D. XBH
+XBH = double + triple + home run.
+
+Singles never count toward XBH.
+
+E. TB
+Two singles can produce 2 total bases.
+
+Do not describe TB as XBH.
+
+F. Park
+TB heuristic uses hits/doubles/HR components.
+
+XBH retains doubles/triples/HR components independently.
+
+G. Provenance
+Every derived feature retains source/date/sample provenance.
+
+H. Role
+Starter and reliever samples are not silently blended.
+
+I. Historical state
+A newer feature refresh does not destroy the prior dated state.
+
+J. Missing data
+Missing pitch/split data renders NOT FOUND or INSUFFICIENT SAMPLE rather than zero.
+
+==================================================
+20. PUBLIC REPOSITORY RESEARCH
+==================================================
+
+Inspect relevant public repositories from the project registry for implementation ideas.
+
+Prioritize:
+
+- jldbc/pybaseball
+- toddrob99/MLB-StatsAPI
+- BillPetti/baseballr
+- sportsdataverse/baseballr-data
+- jmaslek/statcast-lab
+- Chadwick identity resources
+
+Do not blindly copy code.
+
+Record:
+
+- repository
+- relevant files/modules
+- idea used
+- code copied if any
+- license
+- reason accepted/rejected
+
+Create a short implementation-source register.
+
+==================================================
+21. NO MODELS
+==================================================
+
+Phase 2A MUST NOT add:
+
+- TB predictions
+- XBH predictions
+- Walk predictions
+- HR predictions
+- universal hitter score
+- FIRE
+- HALF
+- HOLD
+- PASS
+- PARKED
+- AI betting recommendations
+- bettor consensus
+- sportsbook price
+- odds
+- EV
+- CLV
+
+The only outputs are baseball research data and research tools.
+
+==================================================
+22. PHASE 2A ACCEPTANCE REPORT
+==================================================
+
+Stop after Phase 2A.
+
+Return:
+
+1. Statcast endpoints/data sets implemented.
+2. FanGraphs data implemented.
+3. Player feature tables created.
+4. Pitcher feature tables created.
+5. Pitch-level/arsenal tables created.
+6. Park tables created.
+7. Historical snapshot strategy.
+8. Number of hitters with current research profiles.
+9. Number of pitchers with current research profiles.
+10. Hitter handedness-split coverage.
+11. Pitcher handedness-split coverage.
+12. Arsenal coverage.
+13. XBH component coverage.
+14. Park-component coverage.
+15. Source freshness.
+16. Missing-data counts.
+17. Identity quarantine counts.
+18. All automated test results.
+19. Player Lab screenshot.
+20. Pitcher Lab screenshot.
+21. Park/Game Lab research screenshot if implemented.
+22. Data Health screenshot.
+23. Public repository source register.
+24. Known source/API limitations.
+25. Any deviations from this specification.
+26. Exact recommended Phase 2B scope.
+
+Conclude with exactly one:
+
+PHASE 2A READY FOR REVIEW
+
+or
+
+PHASE 2A BLOCKED
+
+Do not automatically begin Phase 2B.
+
+==================================================
+23. NEXT PHASE
+==================================================
+
+After approval, the next phase will be:
+
+PHASE 2B - BULLPEN RESEARCH AND AVAILABILITY FOUNDATION
+
+That phase will migrate the bullpen ledger concepts into the platform.
+
+Only after the baseball-data foundation and bullpen state are reliable should we begin building the four market-specific research/prediction engines.
