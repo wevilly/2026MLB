@@ -474,12 +474,13 @@ export const playerResearchFeatures = pgTable("player_research_features", {
   unit: text("unit"),
   denominator: numeric("denominator"),
   sampleSize: integer("sample_size"),
+  pitcherSide: text("pitcher_side"),
   transformation: researchTransformEnum("transformation").notNull().default("NORMALIZED"),
   sampleStatus: researchSampleStatusEnum("sample_status").notNull().default("AVAILABLE"),
   definition: text("definition").notNull(),
   provenance: jsonb("provenance").notNull().default({}),
 }, (table) => ({
-  snapshotMetricIdx: uniqueIndex("player_research_snapshot_metric_idx").on(table.researchSnapshotId, table.metricKey),
+  snapshotMetricSideIdx: uniqueIndex("player_research_snapshot_metric_side_idx").on(table.researchSnapshotId, table.metricKey, table.pitcherSide),
 }));
 
 export const pitcherResearchSnapshots = pgTable("pitcher_research_snapshots", {

@@ -119,6 +119,14 @@ export interface ResearchHealth {
   missingHandednessSplits: number;
   metricDefinitionConflicts: number;
   staleWindows: number;
+  eligibleHitterProfiles: number;
+  eligiblePitcherProfiles: number;
+  hitterProfilesMissingEvidence: number;
+  pitcherProfilesMissingEvidence: number;
+  noMlbSample: number;
+  sourceThresholdOrUnavailable: number;
+  identityOrEligibilityGaps: number;
+  roleGaps: number;
 }
 
 export interface DataHealth {
@@ -149,6 +157,26 @@ export interface IngestResult {
   rowCount: number;
   normalizedRowCount: number;
   rejectedRowCount: number;
+}
+
+export type ResearchIngestSourceStatus = typeof ResearchIngestSourceStatus[keyof typeof ResearchIngestSourceStatus];
+
+
+export const ResearchIngestSourceStatus = {
+  SUCCESS: 'SUCCESS',
+  PARTIAL: 'PARTIAL',
+  FAILED: 'FAILED',
+} as const;
+
+export interface ResearchIngestSource {
+  source: string;
+  ingestRunId: string;
+  rowCount: number;
+  normalizedRowCount: number;
+  rejectedRowCount: number;
+  status: ResearchIngestSourceStatus;
+  /** @nullable */
+  error: string | null;
 }
 
 export type ResearchMetricTransformation = typeof ResearchMetricTransformation[keyof typeof ResearchMetricTransformation];
@@ -246,7 +274,7 @@ export interface GameLab {
 
 export interface ResearchIngestResult {
   status: string;
-  sources: IngestResult[];
+  sources: ResearchIngestSource[];
   quarantinedRows: number;
   notes: string[];
 }

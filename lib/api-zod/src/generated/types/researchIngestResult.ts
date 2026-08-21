@@ -5,11 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { IngestResult } from './ingestResult';
+import type { ResearchIngestSource } from './researchIngestSource';
 
 export interface ResearchIngestResult {
   status: string;
-  sources: IngestResult[];
+  sources: ResearchIngestSource[];
   quarantinedRows: number;
   notes: string[];
 }

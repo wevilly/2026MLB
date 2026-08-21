@@ -166,3 +166,29 @@ test("Phase 2A preserves XBH semantics, source provenance, and does not introduc
     assert.ok(!service.toLowerCase().includes(prohibited.toLowerCase()), `research service must not generate ${prohibited}`);
   }
 });
+
+test("Phase 2A correction keeps operational shells, explicit opponent splits, and source-backed park ingestion", () => {
+  const schema = readText("lib/db/src/schema/foundation.ts");
+  const service = readText("artifacts/api-server/src/services/research-foundation.ts");
+  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  const apiSpec = readText("lib/api-spec/openapi.yaml");
+  assert.ok(schema.includes('pitcherSide: text("pitcher_side")'), "hitter research features must retain opposing pitcher side");
+  assert.ok(service.includes("min=0"), "Statcast leaderboard qualification must not define the operational player universe");
+  assert.ok(service.includes("api/leaders/splits/data"), "FanGraphs explicit split endpoint must be used");
+  assert.ok(service.includes("hitter 1/2 = vs LHP/RHP; pitcher 5/6 = vs LHB/RHB"), "split IDs must remain auditable");
+  assert.ok(service.includes("f.pitcher_side"), "hitter split panels must read the stored opponent-side dimension");
+  assert.ok(service.includes("f.batter_side"), "pitcher split panels must read the stored batter-side dimension");
+  assert.ok(service.includes("DISTINCT ON (s.source_id, opponent_side)"), "profile reads must retain the ordinary, vs-L, and vs-R snapshot per source");
+  assert.ok(service.includes('fangraphs.status === "FAILED"'), "a failed FanGraphs split source must make the aggregate refresh partial");
+  assert.ok(service.includes('source.status === "FAILED"'), "refresh notes must disclose source-specific failures");
+  assert.ok(apiSpec.includes("ResearchIngestSource"), "research-only source failure fields must not alter the shared MLB/FantasyPros ingest response contract");
+  assert.ok(service.includes("statcast-park-factors"), "Park ingest must use canonical Statcast Park Factors route");
+  assert.ok(service.includes('"index_1b"'), "Park ingest must retain Baseball Savant's source component field names");
+  assert.ok(service.includes("row.key_bat_side"), "Park ingest must retain Baseball Savant's handedness field");
+  assert.ok(service.includes("row.year_range"), "Park ingest must retain Baseball Savant's exposed multi-year range");
+  assert.ok(service.includes("Raw public Baseball Savant Statcast Park Factors component"), "park values must retain raw-source definition");
+  assert.ok(!service.includes("0::int AS missing_handedness_splits"), "split health must be calculated, not a literal placeholder");
+  assert.ok(service.includes("COALESCE(p.primary_position, '') <> 'P'"), "hitter shells must exclude official pitcher positions");
+  assert.ok(!service.includes("WITH current_date AS"), "research health must not use a reserved PostgreSQL identifier as a CTE name");
+  assert.ok(routes.includes('makeBadge("PARK_FACTORS", "Statcast Park Factors", true)'), "Data Health must surface the actual park source run");
+});

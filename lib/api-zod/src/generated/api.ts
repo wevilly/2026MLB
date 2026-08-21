@@ -145,7 +145,15 @@ export const GetAnalystDataHealthResponse = zod.object({
   "missingArsenal": zod.number(),
   "missingHandednessSplits": zod.number(),
   "metricDefinitionConflicts": zod.number(),
-  "staleWindows": zod.number()
+  "staleWindows": zod.number(),
+  "eligibleHitterProfiles": zod.number(),
+  "eligiblePitcherProfiles": zod.number(),
+  "hitterProfilesMissingEvidence": zod.number(),
+  "pitcherProfilesMissingEvidence": zod.number(),
+  "noMlbSample": zod.number(),
+  "sourceThresholdOrUnavailable": zod.number(),
+  "identityOrEligibilityGaps": zod.number(),
+  "roleGaps": zod.number()
 }),
   "lastRun": zod.string()
 })
@@ -429,7 +437,9 @@ export const RefreshAnalystResearchResponse = zod.object({
   "ingestRunId": zod.string(),
   "rowCount": zod.number(),
   "normalizedRowCount": zod.number(),
-  "rejectedRowCount": zod.number()
+  "rejectedRowCount": zod.number(),
+  "status": zod.enum(['SUCCESS', 'PARTIAL', 'FAILED']),
+  "error": zod.string().nullable()
 })),
   "quarantinedRows": zod.number(),
   "notes": zod.array(zod.string())

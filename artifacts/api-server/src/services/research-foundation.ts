@@ -145,7 +145,9 @@ function csvUrl(role: ResearchRole, year: number) {
   const selections = role === "HITTER"
     ? "pa,ab,hits,single,doubles,triples,home_run,bb_percent,k_percent,avg_hit_speed,hard_hit_percent,barrel_batted_rate,barrel_pa,launch_angle,sweet_spot_percent,expected_ba,expected_slg,estimated_woba"
     : "pitches,pa,k_percent,bb_percent,avg_hit_speed,hard_hit_percent,barrel_batted_rate,expected_ba,expected_slg,estimated_woba,era,xera";
-  return `https://baseballsavant.mlb.com/leaderboard/custom?year=${year}&type=${role === "HITTER" ? "batter" : "pitcher"}&filter=&sort=4&sortDir=desc&min=q&selections=${selections}&chart=false&x=x&csv=true`;
+  // Operational profile eligibility is determined by MLB. Do not use the
+  // public leaderboard qualification threshold to decide who receives a shell.
+  return `https://baseballsavant.mlb.com/leaderboard/custom?year=${year}&type=${role === "HITTER" ? "batter" : "pitcher"}&filter=&sort=4&sortDir=desc&min=0&selections=${selections}&chart=false&x=x&csv=true`;
 }
 
 function fanGraphsUrl(role: ResearchRole, scope: ReturnType<typeof windowScope>) {
@@ -164,13 +166,41 @@ function fanGraphsUrl(role: ResearchRole, scope: ReturnType<typeof windowScope>)
   return `https://www.fangraphs.com/api/leaders/major-league/data?${params.toString()}`;
 }
 
+function fanGraphsSplitRequest(role: ResearchRole, scope: ReturnType<typeof windowScope>, splitId: number) {
+  // Split IDs are documented by FanGraphs' public split-format endpoint:
+  // hitter 1/2 = vs LHP/RHP; pitcher 5/6 = vs LHB/RHB.
+  const body = {
+    position: role === "HITTER" ? "B" : "P",
+    statType: "player",
+    type: "8",
+    league: "all",
+    team: "0",
+    qual: "0",
+    ind: "0",
+    season: scope.to.slice(0, 4),
+    season1: scope.from.slice(0, 4),
+    startdate: "",
+    enddate: "",
+    split: String(splitId),
+  };
+  return {
+    endpoint: "https://www.fangraphs.com/api/leaders/splits/data",
+    init: {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(body),
+    },
+    scope: { ...scope, splitId, requestBody: body },
+  };
+}
+
 async function ensureResearchSources() {
   await pool.query(
     `INSERT INTO source_registry (source_id, name, source_type, base_url, expected_freshness_minutes, notes)
      VALUES
       ($1, 'Baseball Savant / Statcast', 'RESEARCH', 'https://baseballsavant.mlb.com', 1440, 'Public Statcast leaderboard evidence. MLBAM IDs are required for attachment.'),
       ($2, 'FanGraphs', 'RESEARCH', 'https://www.fangraphs.com', 1440, 'Public leaderboard research evidence. Definition-specific metrics remain source-labeled.'),
-      ($3, 'Park Factors', 'RESEARCH', NULL, 10080, 'Park component factor storage. Missing public source coverage is surfaced as unavailable, not estimated.')
+       ($3, 'Baseball Savant Statcast Park Factors', 'RESEARCH', 'https://baseballsavant.mlb.com/leaderboard/statcast-park-factors', 10080, 'Public Statcast park-factor components. Raw values remain source-defined and are never converted into a matchup score.')
      ON CONFLICT (source_id) DO UPDATE SET name = EXCLUDED.name, source_type = EXCLUDED.source_type,
        base_url = EXCLUDED.base_url, expected_freshness_minutes = EXCLUDED.expected_freshness_minutes, notes = EXCLUDED.notes`,
     [STATCAST_SOURCE, FANGRAPHS_SOURCE, PARK_SOURCE],
@@ -340,10 +370,10 @@ function pitcherMetrics(row: JsonObject, source: string): Array<{ family: string
   }));
 }
 
-async function persistHitterSnapshot(playerId: number, sourceId: string, ingestRunId: string, rawPayloadId: string, scope: ReturnType<typeof windowScope>, row: JsonObject) {
+async function persistHitterSnapshot(playerId: number, sourceId: string, ingestRunId: string, rawPayloadId: string, scope: ReturnType<typeof windowScope>, row: JsonObject, pitcherSide: string | null = null) {
   const metrics = hitterMetrics(row, sourceId === STATCAST_SOURCE ? "Baseball Savant / Statcast" : "FanGraphs");
   const pa = asNumber(row.PA ?? row.pa);
-  const contentChecksum = hash({ sourceId, playerId, scope, row });
+  const contentChecksum = hash({ sourceId, playerId, scope, pitcherSide, row });
   const previous = await pool.query<{ content_checksum: string }>(
     `SELECT content_checksum FROM player_research_snapshots WHERE player_id = $1 AND source_id = $2 AND research_window = $3
       ORDER BY retrieved_at DESC LIMIT 1`,
@@ -356,9 +386,9 @@ async function persistHitterSnapshot(playerId: number, sourceId: string, ingestR
   );
   for (const { family, metric } of metrics) {
     await pool.query(
-      `INSERT INTO player_research_features (research_snapshot_id, family, metric_key, metric_label, value, unit, denominator, sample_size, transformation, sample_status, definition, provenance)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-      [snapshot.rows[0].research_snapshot_id, family, metric.key, metric.label, metric.value, metric.unit, metric.denominator, metric.sampleSize, metric.transformation, metric.status, metric.definition, { source: metric.source, retrievedAt: metric.retrievedAt }],
+      `INSERT INTO player_research_features (research_snapshot_id, family, metric_key, metric_label, value, unit, denominator, sample_size, pitcher_side, transformation, sample_status, definition, provenance)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+       [snapshot.rows[0].research_snapshot_id, family, metric.key, metric.label, metric.value, metric.unit, metric.denominator, metric.sampleSize, pitcherSide, metric.transformation, metric.status, metric.definition, { source: metric.source, retrievedAt: metric.retrievedAt, pitcherSide }],
     );
   }
 }
@@ -372,10 +402,10 @@ function pitcherRole(row: JsonObject): "STARTER" | "RELIEVER" | "MIXED" | "UNKNO
   return "MIXED";
 }
 
-async function persistPitcherSnapshot(playerId: number, sourceId: string, ingestRunId: string, rawPayloadId: string, scope: ReturnType<typeof windowScope>, row: JsonObject) {
+async function persistPitcherSnapshot(playerId: number, sourceId: string, ingestRunId: string, rawPayloadId: string, scope: ReturnType<typeof windowScope>, row: JsonObject, batterSide: string | null = null) {
   const metrics = pitcherMetrics(row, sourceId === STATCAST_SOURCE ? "Baseball Savant / Statcast" : "FanGraphs");
   const bf = asNumber(row.BF ?? row.PA ?? row.pa);
-  const contentChecksum = hash({ sourceId, playerId, scope, row });
+  const contentChecksum = hash({ sourceId, playerId, scope, batterSide, row });
   const previous = await pool.query<{ content_checksum: string }>(
     `SELECT content_checksum FROM pitcher_research_snapshots WHERE player_id = $1 AND source_id = $2 AND research_window = $3
       ORDER BY retrieved_at DESC LIMIT 1`,
@@ -388,9 +418,9 @@ async function persistPitcherSnapshot(playerId: number, sourceId: string, ingest
   );
   for (const { family, metric } of metrics) {
     await pool.query(
-      `INSERT INTO pitcher_research_features (research_snapshot_id, family, metric_key, metric_label, value, unit, denominator, sample_size, transformation, sample_status, definition, provenance)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-      [snapshot.rows[0].research_snapshot_id, family, metric.key, metric.label, metric.value, metric.unit, metric.denominator, metric.sampleSize, metric.transformation, metric.status, metric.definition, { source: metric.source, retrievedAt: metric.retrievedAt }],
+      `INSERT INTO pitcher_research_features (research_snapshot_id, family, metric_key, metric_label, value, unit, denominator, sample_size, batter_side, transformation, sample_status, definition, provenance)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+       [snapshot.rows[0].research_snapshot_id, family, metric.key, metric.label, metric.value, metric.unit, metric.denominator, metric.sampleSize, batterSide, metric.transformation, metric.status, metric.definition, { source: metric.source, retrievedAt: metric.retrievedAt, batterSide }],
     );
   }
   if (sourceId !== FANGRAPHS_SOURCE) return;
@@ -418,6 +448,7 @@ async function ingestStatcast(effectiveDate: string) {
   let rejected = 0;
   let quarantined = 0;
   let lastStatus = 200;
+  let failure: string | null = null;
   try {
     for (const role of ["HITTER", "PITCHER"] as const) {
       const endpoint = csvUrl(role, Number(effectiveDate.slice(0, 4)));
@@ -448,9 +479,10 @@ async function ingestStatcast(effectiveDate: string) {
     }
     await finishRun(ingestRunId, quarantined ? "PARTIAL" : "SUCCESS", { rows: rowCount, normalized, rejected, httpStatus: lastStatus, metadata: { identityReviewRequired: quarantined, actualRejected: rejected } }, started);
   } catch (error) {
-    await finishRun(ingestRunId, "FAILED", { rows: rowCount, normalized, rejected, httpStatus: lastStatus, error: error instanceof Error ? error.message : String(error) }, started);
+    failure = error instanceof Error ? error.message : String(error);
+    await finishRun(ingestRunId, "FAILED", { rows: rowCount, normalized, rejected, httpStatus: lastStatus, error: failure }, started);
   }
-  return { source: "Baseball Savant / Statcast", ingestRunId, rowCount, normalizedRowCount: normalized, rejectedRowCount: rejected, quarantinedRows: quarantined };
+  return { source: "Baseball Savant / Statcast", ingestRunId, rowCount, normalizedRowCount: normalized, rejectedRowCount: rejected, quarantinedRows: quarantined, status: failure ? "FAILED" : quarantined || rejected ? "PARTIAL" : "SUCCESS", error: failure };
 }
 
 async function ingestFanGraphs(effectiveDate: string) {
@@ -461,6 +493,7 @@ async function ingestFanGraphs(effectiveDate: string) {
   let rejected = 0;
   let quarantined = 0;
   let lastStatus = 200;
+  let failure: string | null = null;
   try {
     for (const window of ["SEASON", "ROLLING_7", "ROLLING_14", "ROLLING_30", "ROLLING_60"] as ResearchWindow[]) {
       const scope = windowScope(window, effectiveDate);
@@ -491,27 +524,158 @@ async function ingestFanGraphs(effectiveDate: string) {
         }
       }
     }
+    // Side splits are separately retrieved only for the season window. They
+    // are opponent-handedness evidence, never inferred from the player's hand.
+    const splitScope = windowScope("SEASON", effectiveDate);
+    for (const role of ["HITTER", "PITCHER"] as const) {
+      const splitDefinitions = role === "HITTER"
+        ? [{ splitId: 1, side: "L" }, { splitId: 2, side: "R" }]
+        : [{ splitId: 5, side: "L" }, { splitId: 6, side: "R" }];
+      for (const { splitId, side } of splitDefinitions) {
+        const request = fanGraphsSplitRequest(role, splitScope, splitId);
+        const response = await fetch(request.endpoint, request.init);
+        lastStatus = response.status;
+        const payload = await response.json() as JsonObject;
+        if (!response.ok) throw new Error(`FanGraphs ${role.toLowerCase()} split ${splitId} request returned HTTP ${response.status}`);
+        const rows = Array.isArray(payload.data) ? payload.data.filter((row): row is JsonObject => Boolean(row) && typeof row === "object") : [];
+        rowCount += rows.length;
+        const rawPayloadId = await storeRaw(
+          ingestRunId, FANGRAPHS_SOURCE, `fangraphs_${role.toLowerCase()}_vs_${side.toLowerCase()}_season`,
+          effectiveDate, payload, request.endpoint,
+          { ...request.scope, role, opponentSide: side, requestedPlayerScope: "league-wide" },
+        );
+        for (const raw of rows) {
+          const playerId = asNumber(raw.xMLBAMID);
+          if (!playerId) {
+            rejected += 1;
+            continue;
+          }
+          normalized += 1;
+          const canonical = await canonicalPlayer(playerId, effectiveDate, role);
+          if (!canonical) {
+            quarantined += 1;
+            await quarantineResearchRow(ingestRunId, FANGRAPHS_SOURCE, String(playerId), typeof raw.Name === "string" ? raw.Name.replace(/<[^>]*>/g, "") : null, "canonical_identity_or_current_eligibility_not_confirmed", raw);
+            continue;
+          }
+          if (role === "HITTER") await persistHitterSnapshot(playerId, FANGRAPHS_SOURCE, ingestRunId, rawPayloadId, splitScope, raw, side);
+          else await persistPitcherSnapshot(playerId, FANGRAPHS_SOURCE, ingestRunId, rawPayloadId, splitScope, raw, side);
+        }
+      }
+    }
     await finishRun(ingestRunId, quarantined ? "PARTIAL" : "SUCCESS", { rows: rowCount, normalized, rejected, httpStatus: lastStatus, metadata: { identityReviewRequired: quarantined, actualRejected: rejected } }, started);
   } catch (error) {
-    await finishRun(ingestRunId, "FAILED", { rows: rowCount, normalized, rejected, httpStatus: lastStatus, error: error instanceof Error ? error.message : String(error) }, started);
+    failure = error instanceof Error ? error.message : String(error);
+    await finishRun(ingestRunId, "FAILED", { rows: rowCount, normalized, rejected, httpStatus: lastStatus, error: failure }, started);
   }
-  return { source: "FanGraphs", ingestRunId, rowCount, normalizedRowCount: normalized, rejectedRowCount: rejected, quarantinedRows: quarantined };
+  return { source: "FanGraphs", ingestRunId, rowCount, normalizedRowCount: normalized, rejectedRowCount: rejected, quarantinedRows: quarantined, status: failure ? "FAILED" : quarantined || rejected ? "PARTIAL" : "SUCCESS", error: failure };
+}
+
+function extractEmbeddedArray(html: string): JsonObject[] {
+  const match = html.match(/(?:var|const|let)\s+(?:data|parkData|park_data)\s*=\s*(\[[\s\S]*?\]);/);
+  if (!match) return [];
+  try {
+    const parsed = JSON.parse(match[1]);
+    return Array.isArray(parsed) ? parsed.filter((row): row is JsonObject => Boolean(row) && typeof row === "object") : [];
+  } catch {
+    return [];
+  }
+}
+
+function parkValue(row: JsonObject, keys: string[]) {
+  for (const key of keys) {
+    const value = asNumber(row[key]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+async function ingestParkFactors(effectiveDate: string) {
+  const started = Date.now();
+  const ingestRunId = await startRun(PARK_SOURCE, "statcast_park_factors", effectiveDate);
+  const endpoint = `https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=year&year=${effectiveDate.slice(0, 4)}&batSide=All`;
+  let rowCount = 0;
+  let normalized = 0;
+  let rejected = 0;
+  let failure: string | null = null;
+  try {
+    const response = await fetch(endpoint, {
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        "user-agent": "Mozilla/5.0 (compatible; MLBAnalystResearch/1.0)",
+      },
+    });
+    const payload = await response.text();
+    if (!response.ok) throw new Error(`Statcast park factor request returned HTTP ${response.status}`);
+    const rows = extractEmbeddedArray(payload);
+    rowCount = rows.length;
+    if (!rows.length) throw new Error("Statcast park factor page did not expose a parsable public data array");
+    const rawPayloadId = await storeRaw(ingestRunId, PARK_SOURCE, "statcast_park_factors_html", effectiveDate, payload, endpoint, {
+      season: Number(effectiveDate.slice(0, 4)),
+      span: "year",
+      batterSide: "All",
+      parser: "server-rendered embedded array",
+    });
+    for (const row of rows) {
+      const venueId = parkValue(row, ["venue_id", "venueId", "park_id", "parkId", "id"]);
+      if (!venueId) {
+        rejected += 1;
+        continue;
+      }
+      const venueExists = await pool.query("SELECT 1 FROM venues WHERE venue_id = $1", [venueId]);
+      if (!venueExists.rowCount) {
+        rejected += 1;
+        continue;
+      }
+      const sideValue = String(row.key_bat_side ?? row.batter_side ?? row.bat_side ?? row.hand ?? "All").toUpperCase();
+      const batterSide = sideValue === "ALL" ? null : sideValue;
+      const span = String(row.year_range ?? row.span ?? row.rolling ?? row.type ?? "NOT FOUND");
+      const sourceFields: Array<[string, string, string[]]> = [
+        ["singles_factor", "Singles component", ["index_1b", "1B", "1b", "single", "singles"]],
+        ["doubles_factor", "Doubles component", ["index_2b", "2B", "2b", "double", "doubles"]],
+        ["triples_factor", "Triples component", ["index_3b", "3B", "3b", "triple", "triples"]],
+        ["hr_factor", "Home run component", ["index_hr", "HR", "hr", "home_run", "home_runs"]],
+        ["hits_factor", "Hits component", ["index_hits", "H", "hits", "hit"]],
+      ];
+      const checksum = hash({ venueId, effectiveDate, span, batterSide, row });
+      const snapshot = await pool.query<{ park_research_snapshot_id: string }>(
+        `INSERT INTO park_research_snapshots (venue_id, source_id, ingest_run_id, raw_payload_id, season, span, content_checksum, provenance)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING park_research_snapshot_id`,
+        [venueId, PARK_SOURCE, ingestRunId, rawPayloadId, Number(effectiveDate.slice(0, 4)), span, checksum, { source: "Baseball Savant Statcast Park Factors", endpoint, sourceYearRange: row.year_range ?? null, sourceBatterSide: row.key_bat_side ?? null, rawRow: row }],
+      );
+      for (const [key, label, fields] of sourceFields) {
+        const value = parkValue(row, fields);
+        await pool.query(
+          `INSERT INTO park_research_features (park_research_snapshot_id, metric_key, metric_label, value, batter_side, transformation, sample_status, definition, provenance)
+           VALUES ($1, $2, $3, $4, $5, 'RAW', $6, $7, $8)`,
+          [snapshot.rows[0].park_research_snapshot_id, key, label, value, batterSide, value === null ? "NOT_FOUND" : "AVAILABLE", "Raw public Baseball Savant Statcast Park Factors component; no composite factor is inferred.", { source: "Baseball Savant Statcast Park Factors", rawFields: fields, span }],
+        );
+      }
+      normalized += 1;
+    }
+    await finishRun(ingestRunId, rejected ? "PARTIAL" : "SUCCESS", { rows: rowCount, normalized, rejected, httpStatus: response.status }, started);
+  } catch (error) {
+    failure = error instanceof Error ? error.message : String(error);
+    await finishRun(ingestRunId, "FAILED", { rows: rowCount, normalized, rejected, error: failure }, started);
+  }
+  return { source: "Baseball Savant Statcast Park Factors", ingestRunId, rowCount, normalizedRowCount: normalized, rejectedRowCount: rejected, quarantinedRows: 0, status: failure ? "FAILED" : rejected ? "PARTIAL" : "SUCCESS", error: failure };
 }
 
 export async function ingestResearch(effectiveDate: string) {
   await ensureResearchSources();
-  const [statcast, fangraphs] = await Promise.all([ingestStatcast(effectiveDate), ingestFanGraphs(effectiveDate)]);
+  const [statcast, fangraphs, parks] = await Promise.all([ingestStatcast(effectiveDate), ingestFanGraphs(effectiveDate), ingestParkFactors(effectiveDate)]);
   return {
-    status: statcast.rejectedRowCount || fangraphs.rejectedRowCount || statcast.quarantinedRows || fangraphs.quarantinedRows ? "PARTIAL" : "SUCCESS",
+    status: statcast.status === "FAILED" || fangraphs.status === "FAILED" || parks.status === "FAILED" || statcast.rejectedRowCount || fangraphs.rejectedRowCount || parks.rejectedRowCount || statcast.quarantinedRows || fangraphs.quarantinedRows ? "PARTIAL" : "SUCCESS",
     sources: [
-      { source: statcast.source, ingestRunId: statcast.ingestRunId, rowCount: statcast.rowCount, normalizedRowCount: statcast.normalizedRowCount, rejectedRowCount: statcast.rejectedRowCount },
-      { source: fangraphs.source, ingestRunId: fangraphs.ingestRunId, rowCount: fangraphs.rowCount, normalizedRowCount: fangraphs.normalizedRowCount, rejectedRowCount: fangraphs.rejectedRowCount },
+      { source: statcast.source, ingestRunId: statcast.ingestRunId, rowCount: statcast.rowCount, normalizedRowCount: statcast.normalizedRowCount, rejectedRowCount: statcast.rejectedRowCount, status: statcast.status, error: statcast.error },
+      { source: fangraphs.source, ingestRunId: fangraphs.ingestRunId, rowCount: fangraphs.rowCount, normalizedRowCount: fangraphs.normalizedRowCount, rejectedRowCount: fangraphs.rejectedRowCount, status: fangraphs.status, error: fangraphs.error },
+      { source: parks.source, ingestRunId: parks.ingestRunId, rowCount: parks.rowCount, normalizedRowCount: parks.normalizedRowCount, rejectedRowCount: parks.rejectedRowCount, status: parks.status, error: parks.error },
     ],
     quarantinedRows: statcast.quarantinedRows + fangraphs.quarantinedRows,
     notes: [
       "Raw source responses are preserved with retrieval scope, checksum, HTTP status, row counts, and ingest run ID.",
       "Identity uncertainty is quarantined from research views and is not counted as an ingest rejection.",
-      "Park component factors remain NOT FOUND until a reproducible public component source is configured; no factor is estimated.",
+      "Baseball Savant park-factor components retain raw source values, span, and handedness. No composite park factor or matchup score is inferred.",
+      ...[statcast, fangraphs, parks].filter((source) => source.status === "FAILED").map((source) => `${source.source} failed: ${source.error ?? "source failure"}. Existing coverage remains visible; unavailable source evidence is not fabricated.`),
     ],
   };
 }
@@ -525,10 +689,16 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
   const featureTable = role === "HITTER" ? "player_research_features" : "pitcher_research_features";
   const profileCount = await pool.query<{ player_id: number; full_name: string; abbreviation: string | null; primary_position: string | null }>(
     `SELECT DISTINCT ON (p.player_id) p.player_id, p.full_name, t.abbreviation, p.primary_position
-     FROM ${table} rs JOIN players p ON p.player_id = rs.player_id LEFT JOIN teams t ON t.team_id = p.current_team_id
-      WHERE p.full_name ILIKE $1 AND rs.effective_to <= $2
-      ORDER BY p.player_id, rs.effective_to DESC, rs.retrieved_at DESC LIMIT 25`,
-    [`%${search}%`, effectiveDate],
+     FROM players p
+     JOIN player_eligibility pe ON pe.player_id = p.player_id
+       AND pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = $2
+       AND NOT pe.requires_identity_review AND NOT pe.quarantined_from_current_research
+       AND CASE WHEN $3 = 'HITTER' THEN pe.eligible_today_research ELSE pe.eligible_pitcher_research END
+     LEFT JOIN teams t ON t.team_id = p.current_team_id
+     WHERE p.full_name ILIKE $1
+       AND CASE WHEN $3 = 'HITTER' THEN COALESCE(p.primary_position, '') <> 'P' ELSE p.primary_position = 'P' END
+     ORDER BY p.player_id, p.full_name LIMIT 100`,
+    [`%${search}%`, effectiveDate, role],
   );
   const selectedId = playerId ?? profileCount.rows[0]?.player_id ?? null;
   if (!selectedId) {
@@ -550,22 +720,30 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
     [selectedId, effectiveDate],
   );
   const snapshotRows = await pool.query<{ research_snapshot_id: string; source_id: string; effective_from: string; effective_to: string; retrieved_at: string; role: string | null }>(
-    `SELECT DISTINCT ON (source_id) research_snapshot_id, source_id, effective_from, effective_to, retrieved_at, ${role === "PITCHER" ? "role" : "NULL::text AS role"}
-     FROM ${table} WHERE player_id = $1 AND research_window = $2 AND effective_to <= $3
-     ORDER BY source_id, effective_to DESC, retrieved_at DESC`,
+    `SELECT DISTINCT ON (s.source_id, opponent_side) s.research_snapshot_id, s.source_id, s.effective_from, s.effective_to, s.retrieved_at, ${role === "PITCHER" ? "s.role" : "NULL::text AS role"}
+      FROM ${table} s
+      LEFT JOIN LATERAL (
+        SELECT max(${role === "HITTER" ? "f.pitcher_side" : "f.batter_side"}) AS opponent_side
+        FROM ${featureTable} f WHERE f.research_snapshot_id = s.research_snapshot_id
+      ) split_dimension ON true
+      WHERE s.player_id = $1 AND s.research_window = $2 AND s.effective_to <= $3
+      ORDER BY s.source_id, opponent_side NULLS FIRST, s.effective_to DESC, s.retrieved_at DESC`,
     [selectedId, researchWindow, effectiveDate],
   );
   const features = snapshotRows.rows.length ? await pool.query<{
     family: string; metric_key: string; metric_label: string; value: string | null; unit: string | null; denominator: string | null;
-    sample_size: number | null; transformation: MetricRow["transformation"]; sample_status: MetricRow["status"]; definition: string; source_id: string; retrieved_at: string;
+    sample_size: number | null; opponent_side: string | null; transformation: MetricRow["transformation"]; sample_status: MetricRow["status"]; definition: string; source_id: string; retrieved_at: string;
   }>(
-    `SELECT f.family, f.metric_key, f.metric_label, f.value, f.unit, f.denominator, f.sample_size, f.transformation, f.sample_status, f.definition, s.source_id, s.retrieved_at
+    `SELECT f.family, f.metric_key, f.metric_label, f.value, f.unit, f.denominator, f.sample_size,
+      ${role === "HITTER" ? "f.pitcher_side" : "f.batter_side"} AS opponent_side,
+      f.transformation, f.sample_status, f.definition, s.source_id, s.retrieved_at
      FROM ${featureTable} f JOIN ${table} s ON s.research_snapshot_id = f.research_snapshot_id
      WHERE f.research_snapshot_id = ANY($1) ORDER BY f.family, f.metric_label, s.source_id`,
     [snapshotRows.rows.map((row) => row.research_snapshot_id)],
   ) : { rows: [] };
   const values = features.rows.map((row) => ({
     family: row.family,
+    opponentSide: row.opponent_side,
     metric: {
       key: row.metric_key,
       label: row.metric_label,
@@ -583,9 +761,17 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
   const catalog = role === "HITTER" ? hitterCatalog : pitcherCatalog;
   const familyOrder = [...new Set(catalog.map(([family]) => family))];
   const panels = familyOrder.map((family) => {
-    const available = values.filter((row) => row.family === family).map((row) => row.metric);
+    const available = values.filter((row) => row.family === family && !row.opponentSide).map((row) => row.metric);
     const placeholders = catalog.filter(([candidate]) => candidate === family && !available.some((metric) => metric.key === candidate[1])).map(([, key, label, unit]) => metricPlaceholder(family, key, label, unit));
     return { title: family.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()), metrics: [...available, ...placeholders] };
+  });
+  const splitPanels = ["L", "R"].flatMap((side) => {
+    const splitMetrics = values.filter((row) => row.opponentSide === side).map((row) => row.metric);
+    if (!splitMetrics.length) return [];
+    return [{
+      title: `Vs ${side}${role === "HITTER" ? "HP" : "HB"} · opponent-handedness`,
+      metrics: splitMetrics,
+    }];
   });
   const arsenal = role === "PITCHER" && snapshotRows.rows.length ? (await pool.query<{
     pitch_type: string; pitch_name: string; usage_percent: string | null; velocity: string | null; horizontal_movement: string | null; vertical_movement: string | null; sample_size: number | null; sample_status: MetricRow["status"]; provenance: JsonObject;
@@ -608,15 +794,17 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
       effectiveTo: snapshotRows.rows[0] ? isoValue(snapshotRows.rows[0].effective_to) : effectiveDate,
       freshness: snapshotRows.rows[0] ? isoValue(snapshotRows.rows[0].retrieved_at) : "NOT FOUND",
       role: snapshotRows.rows[0]?.role ?? (role === "HITTER" ? "HITTER" : "UNKNOWN"),
-      panels,
+       panels: [...panels, ...splitPanels],
       arsenal,
       notes: [
         "Every research value keeps source, definition, date range, retrieval time, denominator, sample size, and transformation status.",
         "XBH is derived only from doubles + triples + home runs. Singles are intentionally excluded.",
-        role === "PITCHER" ? "Starter and reliever samples are labeled by source role; mixed-role source rows are never relabeled as starter-only." : "Pitch-type matchup interpretation is research-only and is not a prediction.",
+         role === "PITCHER"
+           ? "Starter and reliever samples are labeled by source role; mixed-role source rows are never relabeled as starter-only. Vs-LHB/RHB panels use explicit batter-side evidence."
+           : "Vs-LHP/RHP panels use explicit opposing-pitcher split evidence; the hitter's own batting hand is not used as a substitute.",
       ],
     } : null,
-    notices: snapshotRows.rows.length ? [] : ["No source snapshot exists for this player/window. The view intentionally does not fall back to another window."],
+    notices: snapshotRows.rows.length ? [] : ["NO MLB SAMPLE / SOURCE COVERAGE for this player and window. The operational shell is retained; the view intentionally does not fall back to another window."],
   };
 }
 
@@ -632,8 +820,27 @@ export async function researchHealth() {
   const result = await pool.query<{
     player_profiles: number; pitcher_profiles: number; arsenal_profiles: number; park_profiles: number; identity_quarantines: number;
     insufficient_samples: number; missing_arsenal: number; missing_handedness_splits: number; metric_definition_conflicts: number; stale_windows: number;
+    eligible_hitter_profiles: number; eligible_pitcher_profiles: number; hitter_profiles_missing_evidence: number; pitcher_profiles_missing_evidence: number;
+    no_mlb_sample: number; source_threshold_or_unavailable: number; identity_or_eligibility_gaps: number; role_gaps: number;
   }>(
-    `SELECT
+    `WITH effective_day AS (
+       SELECT max(effective_date) AS effective_date FROM player_eligibility WHERE source_id = 'MLB_OFFICIAL'
+     ),
+     eligible_hitters AS (
+       SELECT DISTINCT pe.player_id FROM player_eligibility pe
+       JOIN players p ON p.player_id = pe.player_id, effective_day d
+       WHERE pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = d.effective_date
+         AND pe.eligible_today_research AND NOT pe.requires_identity_review AND NOT pe.quarantined_from_current_research
+         AND COALESCE(p.primary_position, '') <> 'P'
+     ),
+     eligible_pitchers AS (
+       SELECT DISTINCT pe.player_id FROM player_eligibility pe
+       JOIN players p ON p.player_id = pe.player_id, effective_day d
+       WHERE pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = d.effective_date
+         AND pe.eligible_pitcher_research AND NOT pe.requires_identity_review AND NOT pe.quarantined_from_current_research
+         AND p.primary_position = 'P'
+     )
+     SELECT
       (SELECT count(DISTINCT player_id)::int FROM player_research_snapshots) AS player_profiles,
       (SELECT count(DISTINCT player_id)::int FROM pitcher_research_snapshots) AS pitcher_profiles,
       (SELECT count(DISTINCT research_snapshot_id)::int FROM pitch_arsenal_features) AS arsenal_profiles,
@@ -641,9 +848,39 @@ export async function researchHealth() {
       (SELECT count(*)::int FROM research_identity_quarantine) AS identity_quarantines,
       ((SELECT count(*) FROM player_research_features WHERE sample_status = 'INSUFFICIENT_SAMPLE') + (SELECT count(*) FROM pitcher_research_features WHERE sample_status = 'INSUFFICIENT_SAMPLE'))::int AS insufficient_samples,
       (SELECT count(*)::int FROM pitcher_research_snapshots ps WHERE NOT EXISTS (SELECT 1 FROM pitch_arsenal_features pa WHERE pa.research_snapshot_id = ps.research_snapshot_id)) AS missing_arsenal,
-      0::int AS missing_handedness_splits,
+      (
+        (SELECT count(*) FROM eligible_hitters h WHERE NOT EXISTS (
+          SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
+          WHERE s.player_id = h.player_id AND f.pitcher_side = 'L'
+        ) OR NOT EXISTS (
+          SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
+          WHERE s.player_id = h.player_id AND f.pitcher_side = 'R'
+        ))
+        +
+        (SELECT count(*) FROM eligible_pitchers p WHERE NOT EXISTS (
+          SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
+          WHERE s.player_id = p.player_id AND f.batter_side = 'L'
+        ) OR NOT EXISTS (
+          SELECT 1 FROM pitcher_research_features f JOIN pitcher_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
+          WHERE s.player_id = p.player_id AND f.batter_side = 'R'
+        ))
+      )::int AS missing_handedness_splits,
       (SELECT count(*)::int FROM ingest_issues WHERE issue_type = 'METRIC_DEFINITION_CONFLICT' AND resolved_at IS NULL) AS metric_definition_conflicts,
-      (SELECT count(*)::int FROM ingest_runs WHERE source_id IN ('STATCAST', 'FANGRAPHS') AND finished_at < now() - interval '2 days') AS stale_windows`,
+      (SELECT count(*)::int FROM ingest_runs WHERE source_id IN ('STATCAST', 'FANGRAPHS', 'PARK_FACTORS') AND finished_at < now() - interval '2 days') AS stale_windows,
+      (SELECT count(*)::int FROM eligible_hitters) AS eligible_hitter_profiles,
+      (SELECT count(*)::int FROM eligible_pitchers) AS eligible_pitcher_profiles,
+      (SELECT count(*)::int FROM eligible_hitters h WHERE NOT EXISTS (SELECT 1 FROM player_research_snapshots s WHERE s.player_id = h.player_id)) AS hitter_profiles_missing_evidence,
+      (SELECT count(*)::int FROM eligible_pitchers p WHERE NOT EXISTS (SELECT 1 FROM pitcher_research_snapshots s WHERE s.player_id = p.player_id)) AS pitcher_profiles_missing_evidence,
+      (
+        (SELECT count(*) FROM eligible_hitters h WHERE NOT EXISTS (SELECT 1 FROM player_research_snapshots s WHERE s.player_id = h.player_id AND s.source_id = 'STATCAST'))
+        + (SELECT count(*) FROM eligible_pitchers p WHERE NOT EXISTS (SELECT 1 FROM pitcher_research_snapshots s WHERE s.player_id = p.player_id AND s.source_id = 'STATCAST'))
+      )::int AS no_mlb_sample,
+      (
+        (SELECT count(*) FROM eligible_hitters h WHERE NOT EXISTS (SELECT 1 FROM player_research_snapshots s WHERE s.player_id = h.player_id))
+        + (SELECT count(*) FROM eligible_pitchers p WHERE NOT EXISTS (SELECT 1 FROM pitcher_research_snapshots s WHERE s.player_id = p.player_id))
+      )::int AS source_threshold_or_unavailable,
+      (SELECT count(*)::int FROM player_eligibility pe, effective_day d WHERE pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = d.effective_date AND (pe.requires_identity_review OR pe.quarantined_from_current_research)) AS identity_or_eligibility_gaps,
+      0::int AS role_gaps`,
   );
   const row = result.rows[0];
   return {
@@ -657,5 +894,13 @@ export async function researchHealth() {
     missingHandednessSplits: row?.missing_handedness_splits ?? 0,
     metricDefinitionConflicts: row?.metric_definition_conflicts ?? 0,
     staleWindows: row?.stale_windows ?? 0,
+    eligibleHitterProfiles: row?.eligible_hitter_profiles ?? 0,
+    eligiblePitcherProfiles: row?.eligible_pitcher_profiles ?? 0,
+    hitterProfilesMissingEvidence: row?.hitter_profiles_missing_evidence ?? 0,
+    pitcherProfilesMissingEvidence: row?.pitcher_profiles_missing_evidence ?? 0,
+    noMlbSample: row?.no_mlb_sample ?? 0,
+    sourceThresholdOrUnavailable: row?.source_threshold_or_unavailable ?? 0,
+    identityOrEligibilityGaps: row?.identity_or_eligibility_gaps ?? 0,
+    roleGaps: row?.role_gaps ?? 0,
   };
 }

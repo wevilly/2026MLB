@@ -88,7 +88,7 @@ async function sourceBadges() {
     makeBadge("FANTASYPROS", "FantasyPros", fantasyProsConfigured),
     makeBadge("STATCAST", "Baseball Savant / Statcast", true),
     makeBadge("FANGRAPHS", "FanGraphs", true),
-    { name: "Park Factors", status: "NOT CONFIGURED", freshness: "No reproducible public source", lastSuccess: null, rowCount: 0, detail: "Component-factor storage is ready, but no source endpoint is configured. Unavailable values remain NOT FOUND." },
+    makeBadge("PARK_FACTORS", "Statcast Park Factors", true),
     { name: "Weather", status: "NOT CONFIGURED", freshness: "No provider", lastSuccess: null, rowCount: 0, detail: "Optional source; no weather credential is configured." },
   ];
 }
@@ -393,11 +393,11 @@ router.get("/analyst/game-lab", async (req, res, next) => {
   try {
     const date = requestedDate(req.query.date);
     const games = await pool.query<{
-      game_pk: number; start_time_utc: string | null; away: string; home: string; park: string | null;
+      game_pk: number; venue_id: number | null; start_time_utc: string | null; away: string; home: string; park: string | null;
       away_starter: string | null; home_starter: string | null; away_hand: string | null; home_hand: string | null;
       away_state: string | null; home_state: string | null; posted_lineup_teams: number; projected_lineup_teams: number;
     }>(
-      `SELECT g.game_pk, g.start_time_utc, away.abbreviation AS away, home.abbreviation AS home, v.name AS park,
+       `SELECT g.game_pk, g.venue_id, g.start_time_utc, away.abbreviation AS away, home.abbreviation AS home, v.name AS park,
         away_start.full_name AS away_starter, home_start.full_name AS home_starter, away_start.throws AS away_hand, home_start.throws AS home_hand,
         away_start.starter_state AS away_state, home_start.starter_state AS home_state,
         COALESCE(lineups.posted_lineup_teams, 0) AS posted_lineup_teams, COALESCE(lineups.projected_lineup_teams, 0) AS projected_lineup_teams
@@ -418,8 +418,10 @@ router.get("/analyst/game-lab", async (req, res, next) => {
       state: game.posted_lineup_teams === 2 && game.away_state === "CONFIRMED" && game.home_state === "CONFIRMED" ? "READY" : "PARTIAL" as const,
       flag: game.posted_lineup_teams === 2 ? "Official posted lineups persisted" : "Research context only — no matchup score",
     }));
-    const selected = req.query.gameId ? responseGames.find((game) => game.id === String(req.query.gameId)) ?? null : responseGames[0] ?? null;
-    const parkFactors = [
+    const selectedIndex = req.query.gameId ? games.rows.findIndex((game) => game.game_pk === Number(req.query.gameId)) : (games.rows.length ? 0 : -1);
+    const selected = selectedIndex >= 0 ? responseGames[selectedIndex] : null;
+    const selectedDb = selectedIndex >= 0 ? games.rows[selectedIndex] : null;
+    const fallbackParkFactors = [
       ["hr_factor", "Home run component", "HR component factor."],
       ["doubles_factor", "Doubles component", "2B component factor."],
       ["triples_factor", "Triples component", "3B component factor."],
@@ -427,16 +429,38 @@ router.get("/analyst/game-lab", async (req, res, next) => {
       ["total_bases_heuristic", "Total Bases heuristic", "Heuristic would require sourced park components; it is unavailable without them."],
     ].map(([key, label, definition]) => ({
       key, label, value: null, unit: "factor", denominator: null, sampleSize: null,
-      source: "NOT CONFIGURED", definition, transformation: key === "total_bases_heuristic" ? "HEURISTIC" : "RAW", status: "NOT_FOUND", retrievedAt: "NOT FOUND",
+      source: "NOT FOUND", definition, transformation: key === "total_bases_heuristic" ? "HEURISTIC" : "RAW", status: "NOT_FOUND", retrievedAt: "NOT FOUND",
     }));
+    const parkSnapshot = selectedDb?.venue_id ? await pool.query<{
+      span: string; retrieved_at: string; park_research_snapshot_id: string;
+    }>(
+      `SELECT park_research_snapshot_id, span, retrieved_at FROM park_research_snapshots
+       WHERE venue_id = $1 ORDER BY season DESC, retrieved_at DESC LIMIT 1`,
+      [selectedDb.venue_id],
+    ) : { rows: [] };
+    const parkFactors = parkSnapshot.rows[0] ? (await pool.query<{
+      metric_key: string; metric_label: string; value: string | null; batter_side: string | null; transformation: "RAW" | "NORMALIZED" | "DERIVED" | "HEURISTIC"; sample_status: "AVAILABLE" | "INSUFFICIENT_SAMPLE" | "NOT_FOUND" | "QUARANTINED"; definition: string;
+    }>(
+      `SELECT metric_key, metric_label, value, batter_side, transformation, sample_status, definition
+       FROM park_research_features WHERE park_research_snapshot_id = $1 ORDER BY batter_side NULLS FIRST, metric_label`,
+      [parkSnapshot.rows[0].park_research_snapshot_id],
+    )).rows.map((factor) => ({
+      key: `${factor.metric_key}-${factor.batter_side ?? "all"}`,
+      label: `${factor.metric_label}${factor.batter_side ? ` vs ${factor.batter_side}HB` : ""}`,
+      value: factor.value === null ? null : Number(factor.value),
+      unit: "factor", denominator: null, sampleSize: null,
+      source: "Baseball Savant Statcast Park Factors", definition: factor.definition,
+      transformation: factor.transformation, status: factor.sample_status,
+      retrievedAt: isoString(parkSnapshot.rows[0].retrieved_at) ?? "NOT FOUND",
+    })) : fallbackParkFactors;
     res.json(GetAnalystGameLabResponse.parse({
       date,
       games: responseGames,
       selectedGame: selected,
-      parkResearch: selected ? { venue: selected.park, span: "NOT CONFIGURED", factors: parkFactors } : null,
+      parkResearch: selected ? { venue: selected.park, span: parkSnapshot.rows[0]?.span ?? "NOT FOUND", factors: parkFactors } : null,
       notes: [
         "Game Lab exposes research-ready starter, lineup, park, and freshness context only.",
-        "Park component factors remain NOT FOUND until a reproducible source is ingested; no estimate or matchup score is generated.",
+        "Park values are raw Baseball Savant components when available. Total Bases remains HEURISTIC and unavailable without a documented source formula.",
         "No market probability, recommendation, price, odds, EV, or CLV is calculated in Phase 2A.",
       ],
     }));

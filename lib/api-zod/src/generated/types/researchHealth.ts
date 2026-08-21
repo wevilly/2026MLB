@@ -17,4 +17,12 @@ export interface ResearchHealth {
   missingHandednessSplits: number;
   metricDefinitionConflicts: number;
   staleWindows: number;
+  eligibleHitterProfiles: number;
+  eligiblePitcherProfiles: number;
+  hitterProfilesMissingEvidence: number;
+  pitcherProfilesMissingEvidence: number;
+  noMlbSample: number;
+  sourceThresholdOrUnavailable: number;
+  identityOrEligibilityGaps: number;
+  roleGaps: number;
 }

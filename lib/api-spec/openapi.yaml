@@ -357,6 +357,17 @@ components:
         normalizedRowCount: { type: number }
         rejectedRowCount: { type: number }
       required: [source, ingestRunId, rowCount, normalizedRowCount, rejectedRowCount]
+    ResearchIngestSource:
+      type: object
+      properties:
+        source: { type: string }
+        ingestRunId: { type: string }
+        rowCount: { type: number }
+        normalizedRowCount: { type: number }
+        rejectedRowCount: { type: number }
+        status: { type: string, enum: [SUCCESS, PARTIAL, FAILED] }
+        error: { type: ["string", "null"] }
+      required: [source, ingestRunId, rowCount, normalizedRowCount, rejectedRowCount, status, error]
     ResearchHealth:
       type: object
       properties:
@@ -370,7 +381,15 @@ components:
         missingHandednessSplits: { type: number }
         metricDefinitionConflicts: { type: number }
         staleWindows: { type: number }
-      required: [playerProfiles, pitcherProfiles, arsenalProfiles, parkProfiles, identityQuarantines, insufficientSamples, missingArsenal, missingHandednessSplits, metricDefinitionConflicts, staleWindows]
+        eligibleHitterProfiles: { type: number }
+        eligiblePitcherProfiles: { type: number }
+        hitterProfilesMissingEvidence: { type: number }
+        pitcherProfilesMissingEvidence: { type: number }
+        noMlbSample: { type: number }
+        sourceThresholdOrUnavailable: { type: number }
+        identityOrEligibilityGaps: { type: number }
+        roleGaps: { type: number }
+      required: [playerProfiles, pitcherProfiles, arsenalProfiles, parkProfiles, identityQuarantines, insufficientSamples, missingArsenal, missingHandednessSplits, metricDefinitionConflicts, staleWindows, eligibleHitterProfiles, eligiblePitcherProfiles, hitterProfilesMissingEvidence, pitcherProfilesMissingEvidence, noMlbSample, sourceThresholdOrUnavailable, identityOrEligibilityGaps, roleGaps]
     ResearchMetric:
       type: object
       properties:
@@ -453,7 +472,7 @@ components:
       type: object
       properties:
         status: { type: string }
-        sources: { type: array, items: { $ref: "#/components/schemas/IngestResult" } }
+        sources: { type: array, items: { $ref: "#/components/schemas/ResearchIngestSource" } }
         quarantinedRows: { type: number }
         notes: { type: array, items: { type: string } }
       required: [status, sources, quarantinedRows, notes]

@@ -29,6 +29,8 @@ export * from './refreshMlbOfficialParams';
 export * from './researchHealth';
 export * from './researchIdentity';
 export * from './researchIngestResult';
+export * from './researchIngestSource';
+export * from './researchIngestSourceStatus';
 export * from './researchLab';
 export * from './researchMetric';
 export * from './researchMetricStatus';

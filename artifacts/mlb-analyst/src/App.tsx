@@ -341,13 +341,13 @@ function DataHealthPage() {
           <Panel>
             <SectionHeading eyebrow="Research layer" title="Analyst lab metrics" detail="Evidence, profiles, and analytical lab data quality." />
             <div className="metric-grid">
-              <Metric label="Hitter profiles" value={data.researchHealth?.playerProfiles ?? 0} note="Searchable hitter states" tone="good" />
-              <Metric label="Pitcher profiles" value={data.researchHealth?.pitcherProfiles ?? 0} note="Searchable pitcher states" tone="good" />
+              <Metric label="Hitter evidence" value={`${data.researchHealth?.playerProfiles ?? 0}/${data.researchHealth?.eligibleHitterProfiles ?? 0}`} note={`${data.researchHealth?.hitterProfilesMissingEvidence ?? 0} eligible shells lack source evidence`} tone={(data.researchHealth?.hitterProfilesMissingEvidence ?? 0) > 0 ? 'warn' : 'good'} />
+              <Metric label="Pitcher evidence" value={`${data.researchHealth?.pitcherProfiles ?? 0}/${data.researchHealth?.eligiblePitcherProfiles ?? 0}`} note={`${data.researchHealth?.pitcherProfilesMissingEvidence ?? 0} eligible shells lack source evidence`} tone={(data.researchHealth?.pitcherProfilesMissingEvidence ?? 0) > 0 ? 'warn' : 'good'} />
               <Metric label="Park contexts" value={data.researchHealth?.parkProfiles ?? 0} note="Available venue spans" tone="good" />
               <Metric label="Stale windows" value={data.researchHealth?.staleWindows ?? 0} note="Requires refresh" tone={(data.researchHealth?.staleWindows ?? 0) > 0 ? 'warn' : 'good'} />
               <Metric label="Quarantined records" value={data.researchHealth?.identityQuarantines ?? 0} note="ID mapping failed" tone={(data.researchHealth?.identityQuarantines ?? 0) > 0 ? 'bad' : 'good'} />
               <Metric label="Insufficient samples" value={data.researchHealth?.insufficientSamples ?? 0} note="Statistically suppressed" tone={(data.researchHealth?.insufficientSamples ?? 0) > 0 ? 'warn' : 'good'} />
-              <Metric label="Missing splits" value={data.researchHealth?.missingHandednessSplits ?? 0} note="Handedness context lost" tone={(data.researchHealth?.missingHandednessSplits ?? 0) > 0 ? 'bad' : 'good'} />
+              <Metric label="Missing side splits" value={data.researchHealth?.missingHandednessSplits ?? 0} note={`No MLB sample: ${data.researchHealth?.noMlbSample ?? 0} · source unavailable: ${data.researchHealth?.sourceThresholdOrUnavailable ?? 0}`} tone={(data.researchHealth?.missingHandednessSplits ?? 0) > 0 ? 'bad' : 'good'} />
               <Metric label="Definition conflicts" value={data.researchHealth?.metricDefinitionConflicts ?? 0} note="Formula mismatch" tone={(data.researchHealth?.metricDefinitionConflicts ?? 0) > 0 ? 'bad' : 'good'} />
             </div>
           </Panel>
