@@ -219,7 +219,7 @@ export const GetAnalystPlayerLabResponse = zod.object({
   "sampleSize": zod.number().nullable(),
   "source": zod.string(),
   "definition": zod.string(),
-  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'HEURISTIC']),
+  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'DERIVED_FROM_STATCAST', 'HEURISTIC']),
   "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND', 'QUARANTINED']),
   "retrievedAt": zod.string()
 }))
@@ -233,7 +233,7 @@ export const GetAnalystPlayerLabResponse = zod.object({
   "sampleSize": zod.number().nullable(),
   "source": zod.string(),
   "definition": zod.string(),
-  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'HEURISTIC']),
+  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'DERIVED_FROM_STATCAST', 'HEURISTIC']),
   "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND', 'QUARANTINED']),
   "retrievedAt": zod.string()
 })),
@@ -288,7 +288,7 @@ export const GetAnalystPitcherLabResponse = zod.object({
   "sampleSize": zod.number().nullable(),
   "source": zod.string(),
   "definition": zod.string(),
-  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'HEURISTIC']),
+  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'DERIVED_FROM_STATCAST', 'HEURISTIC']),
   "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND', 'QUARANTINED']),
   "retrievedAt": zod.string()
 }))
@@ -302,7 +302,7 @@ export const GetAnalystPitcherLabResponse = zod.object({
   "sampleSize": zod.number().nullable(),
   "source": zod.string(),
   "definition": zod.string(),
-  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'HEURISTIC']),
+  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'DERIVED_FROM_STATCAST', 'HEURISTIC']),
   "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND', 'QUARANTINED']),
   "retrievedAt": zod.string()
 })),
@@ -382,7 +382,7 @@ export const GetAnalystGameLabResponse = zod.object({
   "sampleSize": zod.number().nullable(),
   "source": zod.string(),
   "definition": zod.string(),
-  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'HEURISTIC']),
+  "transformation": zod.enum(['RAW', 'NORMALIZED', 'DERIVED', 'DERIVED_FROM_STATCAST', 'HEURISTIC']),
   "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND', 'QUARANTINED']),
   "retrievedAt": zod.string()
 }))

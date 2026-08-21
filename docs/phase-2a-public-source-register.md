@@ -27,6 +27,6 @@ This register documents the public research evidence accepted by the Phase 2A fo
 | Pitcher season evidence | Supported by Statcast and FanGraphs |
 | Pitcher rolling windows | Supported by FanGraphs |
 | Pitch arsenal | Supported when FanGraphs exposes the pitch-type fields |
-| Hitter vs LHP/RHP | Currently unavailable: the public FanGraphs split endpoint returns HTTP 500 in the implementation environment. The refresh response is `PARTIAL`, source error metadata is preserved, and missing split coverage remains visible. |
-| Pitcher vs LHB/RHB | Currently unavailable for the same public FanGraphs failure. The storage contract and explicit split request are ready; no pitcher hand is used as a substitute. |
+| Hitter vs LHP/RHP | FanGraphs remains preferred when available. When its public split endpoint fails, the fallback derives separate MLBAM-linked snapshots from Statcast Search terminal plate appearances grouped by `p_throws`; values are labeled `DERIVED_FROM_STATCAST` and retain PA denominators/sample state. |
+| Pitcher vs LHB/RHB | FanGraphs remains preferred when available. The fallback derives separate MLBAM-linked snapshots from Statcast Search terminal plate appearances grouped by `stand`; values are labeled `DERIVED_FROM_STATCAST` and retain BF denominators/sample state. |
 | Park components | Supported by Baseball Savant Statcast Park Factors when the source's server-rendered data is available; source failure remains visible |

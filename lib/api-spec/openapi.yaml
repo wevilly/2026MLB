@@ -401,7 +401,7 @@ components:
         sampleSize: { type: ["number", "null"] }
         source: { type: string }
         definition: { type: string }
-        transformation: { type: string, enum: [RAW, NORMALIZED, DERIVED, HEURISTIC] }
+        transformation: { type: string, enum: [RAW, NORMALIZED, DERIVED, DERIVED_FROM_STATCAST, HEURISTIC] }
         status: { type: string, enum: [AVAILABLE, INSUFFICIENT_SAMPLE, NOT_FOUND, QUARANTINED] }
         retrievedAt: { type: string }
       required: [key, label, value, unit, denominator, sampleSize, source, definition, transformation, status, retrievedAt]

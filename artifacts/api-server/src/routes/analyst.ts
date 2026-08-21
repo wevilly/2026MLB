@@ -429,21 +429,26 @@ router.get("/analyst/game-lab", async (req, res, next) => {
       ["total_bases_heuristic", "Total Bases heuristic", "Heuristic would require sourced park components; it is unavailable without them."],
     ].map(([key, label, definition]) => ({
       key, label, value: null, unit: "factor", denominator: null, sampleSize: null,
-      source: "NOT FOUND", definition, transformation: key === "total_bases_heuristic" ? "HEURISTIC" : "RAW", status: "NOT_FOUND", retrievedAt: "NOT FOUND",
+       source: "NOT FOUND", definition, transformation: (key === "total_bases_heuristic" ? "HEURISTIC" : "RAW") as "HEURISTIC" | "RAW", status: "NOT_FOUND" as const, retrievedAt: "NOT FOUND",
     }));
     const parkSnapshot = selectedDb?.venue_id ? await pool.query<{
-      span: string; retrieved_at: string; park_research_snapshot_id: string;
+      span: string; retrieved_at: string; park_research_snapshot_id: string; batter_side: string | null;
     }>(
-      `SELECT park_research_snapshot_id, span, retrieved_at FROM park_research_snapshots
-       WHERE venue_id = $1 ORDER BY season DESC, retrieved_at DESC LIMIT 1`,
+      `SELECT DISTINCT ON (f.batter_side) ps.park_research_snapshot_id, ps.span, ps.retrieved_at, f.batter_side
+       FROM park_research_snapshots ps JOIN park_research_features f ON f.park_research_snapshot_id = ps.park_research_snapshot_id
+       WHERE ps.venue_id = $1 ORDER BY f.batter_side NULLS FIRST, ps.season DESC, ps.retrieved_at DESC`,
       [selectedDb.venue_id],
     ) : { rows: [] };
-    const parkFactors = parkSnapshot.rows[0] ? (await pool.query<{
-      metric_key: string; metric_label: string; value: string | null; batter_side: string | null; transformation: "RAW" | "NORMALIZED" | "DERIVED" | "HEURISTIC"; sample_status: "AVAILABLE" | "INSUFFICIENT_SAMPLE" | "NOT_FOUND" | "QUARANTINED"; definition: string;
+    let parkFactors: Array<{
+      key: string; label: string; value: number | null; unit: string; denominator: number | null; sampleSize: number | null;
+      source: string; definition: string; transformation: "RAW" | "NORMALIZED" | "DERIVED" | "DERIVED_FROM_STATCAST" | "HEURISTIC";
+      status: "AVAILABLE" | "INSUFFICIENT_SAMPLE" | "NOT_FOUND" | "QUARANTINED"; retrievedAt: string;
+    }> = parkSnapshot.rows.length ? (await pool.query<{
+      metric_key: string; metric_label: string; value: string | null; batter_side: string | null; transformation: "RAW" | "NORMALIZED" | "DERIVED" | "DERIVED_FROM_STATCAST" | "HEURISTIC"; sample_status: "AVAILABLE" | "INSUFFICIENT_SAMPLE" | "NOT_FOUND" | "QUARANTINED"; definition: string;
     }>(
-      `SELECT metric_key, metric_label, value, batter_side, transformation, sample_status, definition
-       FROM park_research_features WHERE park_research_snapshot_id = $1 ORDER BY batter_side NULLS FIRST, metric_label`,
-      [parkSnapshot.rows[0].park_research_snapshot_id],
+       `SELECT metric_key, metric_label, value, batter_side, transformation, sample_status, definition
+        FROM park_research_features WHERE park_research_snapshot_id = ANY($1) ORDER BY batter_side NULLS FIRST, metric_label`,
+       [parkSnapshot.rows.map((snapshot) => snapshot.park_research_snapshot_id)],
     )).rows.map((factor) => ({
       key: `${factor.metric_key}-${factor.batter_side ?? "all"}`,
       label: `${factor.metric_label}${factor.batter_side ? ` vs ${factor.batter_side}HB` : ""}`,
@@ -451,13 +456,13 @@ router.get("/analyst/game-lab", async (req, res, next) => {
       unit: "factor", denominator: null, sampleSize: null,
       source: "Baseball Savant Statcast Park Factors", definition: factor.definition,
       transformation: factor.transformation, status: factor.sample_status,
-      retrievedAt: isoString(parkSnapshot.rows[0].retrieved_at) ?? "NOT FOUND",
+       retrievedAt: isoString(parkSnapshot.rows[0]?.retrieved_at) ?? "NOT FOUND",
     })) : fallbackParkFactors;
     res.json(GetAnalystGameLabResponse.parse({
       date,
       games: responseGames,
       selectedGame: selected,
-      parkResearch: selected ? { venue: selected.park, span: parkSnapshot.rows[0]?.span ?? "NOT FOUND", factors: parkFactors } : null,
+       parkResearch: selected ? { venue: selected.park, span: parkSnapshot.rows.map((snapshot) => snapshot.span).filter((span, index, spans) => spans.indexOf(span) === index).join(", ") || "NOT FOUND", factors: parkFactors } : null,
       notes: [
         "Game Lab exposes research-ready starter, lineup, park, and freshness context only.",
         "Park values are raw Baseball Savant components when available. Total Bases remains HEURISTIC and unavailable without a documented source formula.",

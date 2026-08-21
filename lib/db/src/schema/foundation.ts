@@ -84,6 +84,7 @@ export const researchTransformEnum = pgEnum("research_transform", [
   "RAW",
   "NORMALIZED",
   "DERIVED",
+  "DERIVED_FROM_STATCAST",
   "HEURISTIC",
 ]);
 

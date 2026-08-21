@@ -186,6 +186,11 @@ test("Phase 2A correction keeps operational shells, explicit opponent splits, an
   assert.ok(service.includes('"index_1b"'), "Park ingest must retain Baseball Savant's source component field names");
   assert.ok(service.includes("row.key_bat_side"), "Park ingest must retain Baseball Savant's handedness field");
   assert.ok(service.includes("row.year_range"), "Park ingest must retain Baseball Savant's exposed multi-year range");
+  assert.ok(service.includes("batters_lookup[]"), "Statcast Search fallback must request MLBAM-scoped hitter evidence");
+  assert.ok(service.includes("pitchers_lookup[]"), "Statcast Search fallback must request MLBAM-scoped pitcher evidence");
+  assert.ok(service.includes("row.p_throws"), "Hitter split evidence must use the Statcast opponent pitcher hand");
+  assert.ok(service.includes("row.stand"), "Pitcher split evidence must use the Statcast opponent batter hand");
+  assert.ok(service.includes("DERIVED_FROM_STATCAST"), "Statcast split evidence must never be presented as direct FanGraphs data");
   assert.ok(service.includes("Raw public Baseball Savant Statcast Park Factors component"), "park values must retain raw-source definition");
   assert.ok(!service.includes("0::int AS missing_handedness_splits"), "split health must be calculated, not a literal placeholder");
   assert.ok(service.includes("COALESCE(p.primary_position, '') <> 'P'"), "hitter shells must exclude official pitcher positions");

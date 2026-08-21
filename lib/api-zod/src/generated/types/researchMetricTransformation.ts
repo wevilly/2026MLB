@@ -13,5 +13,6 @@ export const ResearchMetricTransformation = {
   RAW: 'RAW',
   NORMALIZED: 'NORMALIZED',
   DERIVED: 'DERIVED',
+  DERIVED_FROM_STATCAST: 'DERIVED_FROM_STATCAST',
   HEURISTIC: 'HEURISTIC',
 } as const;
