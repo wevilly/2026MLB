@@ -43,6 +43,11 @@ paths:
       operationId: getAnalystProjections
       tags: [analyst]
       summary: Get FantasyPros projection snapshot summary
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
       responses:
         "200":
           description: Projection center data
@@ -158,8 +163,9 @@ components:
         timezone: { type: string }
         games: { type: array, items: { $ref: "#/components/schemas/SlateGame" } }
         sources: { type: array, items: { $ref: "#/components/schemas/SourceBadge" } }
+        identityCoverage: { $ref: "#/components/schemas/IdentityCoverage" }
         alerts: { type: array, items: { type: string } }
-      required: [date, timezone, games, sources, alerts]
+      required: [date, timezone, games, sources, identityCoverage, alerts]
     ProjectionRow:
       type: object
       properties:
@@ -188,14 +194,43 @@ components:
         detail: { type: string }
         severity: { type: string }
       required: [label, detail, severity]
+    IdentityCoverage:
+      type: object
+      properties:
+        officialStartersMapped: { type: number }
+        officialStartersTotal: { type: number }
+        officialLineupPlayersMapped: { type: number }
+        officialLineupPlayersTotal: { type: number }
+        projectedLineupPlayersMapped: { type: number }
+        projectedLineupPlayersTotal: { type: number }
+        activeProjectionPlayersMapped: { type: number }
+        activeProjectionPlayersTotal: { type: number }
+        unresolvedActivePlayers: { type: number }
+        quarantinedRows: { type: number }
+        teamAssignmentConflicts: { type: number }
+        blockingProjectedLineupIssues: { type: number }
+      required:
+        - officialStartersMapped
+        - officialStartersTotal
+        - officialLineupPlayersMapped
+        - officialLineupPlayersTotal
+        - projectedLineupPlayersMapped
+        - projectedLineupPlayersTotal
+        - activeProjectionPlayersMapped
+        - activeProjectionPlayersTotal
+        - unresolvedActivePlayers
+        - quarantinedRows
+        - teamAssignmentConflicts
+        - blockingProjectedLineupIssues
     DataHealth:
       type: object
       properties:
         overall: { type: string }
         sources: { type: array, items: { $ref: "#/components/schemas/SourceBadge" } }
         issues: { type: array, items: { $ref: "#/components/schemas/HealthIssue" } }
+        identityCoverage: { $ref: "#/components/schemas/IdentityCoverage" }
         lastRun: { type: string }
-      required: [overall, sources, issues, lastRun]
+      required: [overall, sources, issues, identityCoverage, lastRun]
     ConnectionStatus:
       type: object
       properties:

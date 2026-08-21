@@ -22,6 +22,7 @@ import type {
 import type {
   AnalystSettings,
   DataHealth,
+  GetAnalystProjectionsParams,
   HealthStatus,
   IngestResult,
   ProjectionCenter,
@@ -212,20 +213,27 @@ export function useGetAnalystToday<TData = Awaited<ReturnType<typeof getAnalystT
 
 
 
-export const getGetAnalystProjectionsUrl = () => {
+export const getGetAnalystProjectionsUrl = (params?: GetAnalystProjectionsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/analyst/projections`
+  return stringifiedParams.length > 0 ? `/api/analyst/projections?${stringifiedParams}` : `/api/analyst/projections`
 }
 
 /**
  * @summary Get FantasyPros projection snapshot summary
  */
-export const getAnalystProjections = async ( options?: Parameters<typeof customFetch>[1]): Promise<ProjectionCenter> => {
+export const getAnalystProjections = async (params?: GetAnalystProjectionsParams, options?: Parameters<typeof customFetch>[1]): Promise<ProjectionCenter> => {
 
-  return customFetch<ProjectionCenter>(getGetAnalystProjectionsUrl(),
+  return customFetch<ProjectionCenter>(getGetAnalystProjectionsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -238,23 +246,23 @@ export const getAnalystProjections = async ( options?: Parameters<typeof customF
 
 
 
-export const getGetAnalystProjectionsQueryKey = () => {
+export const getGetAnalystProjectionsQueryKey = (params?: GetAnalystProjectionsParams,) => {
     return [
-    `/api/analyst/projections`
+    `/api/analyst/projections`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetAnalystProjectionsQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystProjections>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystProjections>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetAnalystProjectionsQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystProjections>>, TError = ErrorType<unknown>>(params?: GetAnalystProjectionsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystProjections>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetAnalystProjectionsQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystProjectionsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystProjections>>> = ({ signal }) => getAnalystProjections({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystProjections>>> = ({ signal }) => getAnalystProjections(params, { signal, ...requestOptions });
 
 
 
@@ -272,11 +280,11 @@ export type GetAnalystProjectionsQueryError = ErrorType<unknown>
  */
 
 export function useGetAnalystProjections<TData = Awaited<ReturnType<typeof getAnalystProjections>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystProjections>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: GetAnalystProjectionsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystProjections>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetAnalystProjectionsQueryOptions(options)
+  const queryOptions = getGetAnalystProjectionsQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

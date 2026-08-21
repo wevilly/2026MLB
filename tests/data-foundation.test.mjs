@@ -73,3 +73,60 @@ test("FantasyPros secrets and authorization headers are absent from client and f
     }
   }
 });
+
+test("current-player eligibility policy declares authoritative states and quarantine flags", () => {
+  const schema = readText("lib/db/src/schema/foundation.ts");
+  const service = readText("artifacts/api-server/src/services/data-foundation.ts");
+  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  for (const state of ["MLB_ACTIVE", "MLB_40_MAN", "MLB_IL", "MLB_OPTIONED", "MINOR_LEAGUE", "FREE_AGENT", "HISTORICAL", "RETIRED", "UNKNOWN"]) {
+    assert.ok(schema.includes(`"${state}"`), `missing eligibility state ${state}`);
+  }
+  for (const field of ["eligible_today_research", "eligible_lineup_projection", "eligible_pitcher_research", "requires_identity_review", "quarantined_from_current_research"]) {
+    assert.ok(schema.includes(field), `missing eligibility field ${field}`);
+  }
+  assert.ok(service.includes("no_current_official_roster_observation"));
+  assert.ok(service.includes("missing_authoritative_identity_bridge"));
+  assert.ok(service.includes("MLB_TEAMS_URL"), "official roster coverage must not depend only on slate teams");
+  assert.ok(service.includes("officialPersonFallback"), "bridged players absent from a roster require official person-state verification");
+  assert.ok(service.includes('const status: EligibilityStatus = active ? "UNKNOWN" : "RETIRED"'), "people metadata must not infer major- or minor-league roster membership");
+  assert.ok(service.includes('["UNKNOWN", "MINOR_LEAGUE", "FREE_AGENT"].includes(official.status)'), "non-roster fallback classifications must be revalidated on every refresh");
+  assert.ok(routes.includes("pe.eligible_today_research AND NOT pe.requires_identity_review"));
+});
+
+test("official starters and posted lineups establish canonical current-player coverage", () => {
+  const service = readText("artifacts/api-server/src/services/data-foundation.ts");
+  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  assert.ok(service.includes('evidence: { officialStarter: true'));
+  assert.ok(service.includes('status: "MLB_ACTIVE"'));
+  assert.ok(service.includes('persistOfficialTeamRoster'));
+  assert.ok(service.includes('if (rosterType !== "game_feed")'), "game feeds must not downgrade roster-authoritative eligibility");
+  assert.ok(routes.includes("official_starters_mapped"));
+  assert.ok(routes.includes("official_lineup_players_mapped"));
+});
+
+test("projected lineup identity gaps block eligibility rather than silently entering a lineup", () => {
+  const service = readText("artifacts/api-server/src/services/data-foundation.ts");
+  assert.ok(service.includes("PROJECTED_LINEUP_IDENTITY_BLOCKING"));
+  assert.ok(service.includes("identity_or_current_roster_not_confirmed"));
+  assert.ok(service.includes("!identity.rowCount || !identity.rows[0].eligible_lineup_projection"));
+});
+
+test("aliases, team disagreements, and snapshot equality remain auditable", () => {
+  const schema = readText("lib/db/src/schema/foundation.ts");
+  const service = readText("artifacts/api-server/src/services/data-foundation.ts");
+  assert.ok(schema.includes("player_external_id_aliases"));
+  assert.ok(service.includes("DUPLICATE_SOURCE_ID"));
+  assert.ok(service.includes("TEAM_ASSIGNMENT_CONFLICT"));
+  assert.ok(schema.includes("content_checksum"));
+  assert.ok(schema.includes("unchanged_from_prior"));
+  assert.ok(service.includes("normalisedChecksum"));
+  assert.ok(service.includes("priorSnapshot.rows[0]?.content_checksum === contentChecksum"));
+  assert.ok(service.includes('replace(/[\\u0300-\\u036f]/g, "")'), "accent-safe normalization must remain available for candidate evidence");
+  assert.ok(service.includes("mlbam_id"), "identity confirmation must retain an authoritative ID bridge");
+});
+
+test("projection reads are scoped to the current effective date", () => {
+  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  assert.ok(routes.includes('const date = requestedDate(req.query.date);'));
+  assert.ok(routes.includes("WHERE effective_date = $1"), "Projection Center must not fall back to a historical snapshot");
+});

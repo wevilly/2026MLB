@@ -205,6 +205,9 @@ function DashboardPage() {
   const data = query.data as TodayDashboard | undefined;
   const flaggedGames = data?.games?.filter((game) => game.flag).length ?? 0;
   const freshSources = data?.sources?.filter((source) => toneFor(source.status) === 'good').length ?? 0;
+  const activeCoverage = data?.identityCoverage
+    ? `${data.identityCoverage.activeProjectionPlayersMapped}/${data.identityCoverage.activeProjectionPlayersTotal}`
+    : '0/0';
 
   return (
     <div className="page-content rise-in">
@@ -218,6 +221,7 @@ function DashboardPage() {
             <Metric label="Games on slate" value={data.games?.length ?? 0} note={`${data.timezone} window`} tone="accent" />
             <Metric label="Flags to resolve" value={flaggedGames} note={flaggedGames ? 'Review before lock' : 'No open flags'} tone={flaggedGames ? 'warn' : 'good'} />
             <Metric label="Sources online" value={`${freshSources}/${data.sources?.length ?? 0}`} note="Fresh or ready" tone={freshSources === data.sources?.length ? 'good' : 'warn'} />
+            <Metric label="Current identities" value={activeCoverage} note={data?.identityCoverage?.blockingProjectedLineupIssues ? `${data.identityCoverage.blockingProjectedLineupIssues} lineup block(s)` : 'Eligible projection coverage'} tone={data?.identityCoverage?.blockingProjectedLineupIssues ? 'bad' : 'good'} />
             <Metric label="Alerts" value={data.alerts?.length ?? 0} note="System observations" tone={data.alerts?.length ? 'warn' : 'good'} />
           </div>
           <div className="dashboard-layout">
@@ -309,6 +313,7 @@ function DataHealthPage() {
   const query = useGetAnalystDataHealth();
   const data = query.data as DataHealth | undefined;
   const criticalCount = data?.issues?.filter((issue) => toneFor(issue.severity) === 'bad').length ?? 0;
+  const coverage = data?.identityCoverage;
   return (
     <div className="page-content rise-in">
       <div className="page-intro">
@@ -322,6 +327,17 @@ function DataHealthPage() {
             <Metric label="Sources observed" value={data.sources?.length ?? 0} note="In current health run" tone="accent" />
             <Metric label="Issues requiring review" value={data.issues?.length ?? 0} note={criticalCount ? `${criticalCount} critical` : 'No critical issues'} tone={criticalCount ? 'bad' : data.issues?.length ? 'warn' : 'good'} />
           </div>
+          <Panel>
+            <SectionHeading eyebrow="Current player eligibility" title="Slate identity coverage" detail="Coverage is measured against official starters, posted lineups, projected lineups, and the current eligible projection universe." />
+            <div className="metric-grid">
+              <Metric label="Official starters" value={`${coverage?.officialStartersMapped ?? 0}/${coverage?.officialStartersTotal ?? 0}`} note="Canonical identities" tone={(coverage?.officialStartersMapped ?? 0) === (coverage?.officialStartersTotal ?? 0) ? 'good' : 'bad'} />
+              <Metric label="Posted lineups" value={`${coverage?.officialLineupPlayersMapped ?? 0}/${coverage?.officialLineupPlayersTotal ?? 0}`} note="Official lineup players" tone={(coverage?.officialLineupPlayersMapped ?? 0) === (coverage?.officialLineupPlayersTotal ?? 0) ? 'good' : 'bad'} />
+              <Metric label="Projected lineups" value={`${coverage?.projectedLineupPlayersMapped ?? 0}/${coverage?.projectedLineupPlayersTotal ?? 0}`} note={coverage?.blockingProjectedLineupIssues ? `${coverage.blockingProjectedLineupIssues} blocking issue(s)` : 'No blocking identity issue'} tone={coverage?.blockingProjectedLineupIssues ? 'bad' : 'good'} />
+              <Metric label="Active projections" value={`${coverage?.activeProjectionPlayersMapped ?? 0}/${coverage?.activeProjectionPlayersTotal ?? 0}`} note={`${coverage?.unresolvedActivePlayers ?? 0} unresolved active`} tone={(coverage?.unresolvedActivePlayers ?? 0) ? 'warn' : 'good'} />
+              <Metric label="Quarantined rows" value={coverage?.quarantinedRows ?? 0} note="Raw rows retained for audit" tone={(coverage?.quarantinedRows ?? 0) ? 'warn' : 'good'} />
+              <Metric label="Team conflicts" value={coverage?.teamAssignmentConflicts ?? 0} note="Source team vs official org" tone={(coverage?.teamAssignmentConflicts ?? 0) ? 'warn' : 'good'} />
+            </div>
+          </Panel>
           <div className="health-layout">
             <Panel><SectionHeading eyebrow="Ingest inventory" title="Source freshness" detail="Rows are reported, not estimated." /><div className="health-source-list">{data.sources?.length ? data.sources.map((source) => <HealthSource source={source} key={source.name} />) : <QueryMessage kind="empty" />}</div></Panel>
             <Panel><SectionHeading eyebrow="Data quality queue" title="Issues & mappings" detail="Unresolved items stay visible until cleared." />{data.issues?.length ? <div className="issue-list">{data.issues.map((issue, index) => <IssueRow issue={issue} key={`${issue.label}-${index}`} />)}</div> : <div className="clear-state clear-large"><Check size={16} /> Data quality queue is clear</div>}</Panel>

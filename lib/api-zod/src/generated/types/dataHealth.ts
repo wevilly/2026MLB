@@ -6,11 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { HealthIssue } from './healthIssue';
+import type { IdentityCoverage } from './identityCoverage';
 import type { SourceBadge } from './sourceBadge';
 
 export interface DataHealth {
   overall: string;
   sources: SourceBadge[];
   issues: HealthIssue[];
+  identityCoverage: IdentityCoverage;
   lastRun: string;
 }

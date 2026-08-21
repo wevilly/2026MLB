@@ -55,6 +55,20 @@ export const GetAnalystTodayResponse = zod.object({
   "rowCount": zod.number(),
   "detail": zod.string()
 })),
+  "identityCoverage": zod.object({
+  "officialStartersMapped": zod.number(),
+  "officialStartersTotal": zod.number(),
+  "officialLineupPlayersMapped": zod.number(),
+  "officialLineupPlayersTotal": zod.number(),
+  "projectedLineupPlayersMapped": zod.number(),
+  "projectedLineupPlayersTotal": zod.number(),
+  "activeProjectionPlayersMapped": zod.number(),
+  "activeProjectionPlayersTotal": zod.number(),
+  "unresolvedActivePlayers": zod.number(),
+  "quarantinedRows": zod.number(),
+  "teamAssignmentConflicts": zod.number(),
+  "blockingProjectedLineupIssues": zod.number()
+}),
   "alerts": zod.array(zod.string())
 })
 
@@ -62,6 +76,10 @@ export const GetAnalystTodayResponse = zod.object({
 /**
  * @summary Get FantasyPros projection snapshot summary
  */
+export const GetAnalystProjectionsQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
 export const GetAnalystProjectionsResponse = zod.object({
   "snapshotLabel": zod.string(),
   "currentAsOf": zod.string(),
@@ -98,6 +116,20 @@ export const GetAnalystDataHealthResponse = zod.object({
   "detail": zod.string(),
   "severity": zod.string()
 })),
+  "identityCoverage": zod.object({
+  "officialStartersMapped": zod.number(),
+  "officialStartersTotal": zod.number(),
+  "officialLineupPlayersMapped": zod.number(),
+  "officialLineupPlayersTotal": zod.number(),
+  "projectedLineupPlayersMapped": zod.number(),
+  "projectedLineupPlayersTotal": zod.number(),
+  "activeProjectionPlayersMapped": zod.number(),
+  "activeProjectionPlayersTotal": zod.number(),
+  "unresolvedActivePlayers": zod.number(),
+  "quarantinedRows": zod.number(),
+  "teamAssignmentConflicts": zod.number(),
+  "blockingProjectedLineupIssues": zod.number()
+}),
   "lastRun": zod.string()
 })
 

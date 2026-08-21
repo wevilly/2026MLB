@@ -4,12 +4,28 @@ import { pool } from "@workspace/db";
 const MLB_SOURCE = "MLB_OFFICIAL";
 const FANTASY_PROS_SOURCE = "FANTASYPROS";
 const MLB_SCHEDULE_URL = "https://statsapi.mlb.com/api/v1/schedule";
+const MLB_TEAMS_URL = "https://statsapi.mlb.com/api/v1/teams?sportId=1";
 const FANTASY_PROS_BASE_URL = "https://api.fantasypros.com/public/v2/json";
 
 type JsonObject = Record<string, unknown>;
 
 function checksum(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function normalisedChecksum(value: unknown) {
+  const normalise = (item: unknown): unknown => {
+    if (Array.isArray(item)) return item.map(normalise);
+    if (item && typeof item === "object") {
+      return Object.fromEntries(
+        Object.entries(item as JsonObject)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, child]) => [key, normalise(child)]),
+      );
+    }
+    return item;
+  };
+  return checksum(normalise(value));
 }
 
 function asObject(value: unknown): JsonObject {
@@ -117,7 +133,14 @@ async function upsertTeam(team: JsonObject) {
   return true;
 }
 
-async function upsertStarter(person: JsonObject, teamId: number, gamePk: number, state: string, raw: JsonObject) {
+async function upsertStarter(
+  person: JsonObject,
+  teamId: number,
+  gamePk: number,
+  state: string,
+  raw: JsonObject,
+  effectiveDate: string,
+) {
   const playerId = Number(person.id);
   if (!Number.isFinite(playerId)) return false;
   await pool.query(
@@ -126,6 +149,20 @@ async function upsertStarter(person: JsonObject, teamId: number, gamePk: number,
      ON CONFLICT (player_id) DO UPDATE SET full_name = EXCLUDED.full_name, updated_at = now()`,
     [playerId, String(person.fullName ?? person.name ?? "Unknown pitcher")],
   );
+  await upsertEligibility({
+    playerId,
+    sourceId: MLB_SOURCE,
+    externalPlayerId: String(playerId),
+    sourceDisplayName: String(person.fullName ?? person.name ?? "Unknown pitcher"),
+    status: "MLB_ACTIVE",
+    effectiveDate,
+    currentTeamId: teamId,
+    sourceTeamAbbreviation: null,
+    evidence: { officialStarter: true, gamePk, starterState: state },
+    confidence: "CONFIRMED",
+    requiresIdentityReview: false,
+    quarantineReason: null,
+  });
   const observedRaw = { ...raw, checksum: checksum(raw) };
   const existing = await pool.query(
     `SELECT 1 FROM starters WHERE game_pk = $1 AND team_id = $2 AND player_id = $3
@@ -153,6 +190,159 @@ function normaliseName(value: string) {
     .replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+type EligibilityStatus =
+  | "MLB_ACTIVE" | "MLB_40_MAN" | "MLB_IL" | "MLB_OPTIONED" | "MINOR_LEAGUE"
+  | "FREE_AGENT" | "HISTORICAL" | "RETIRED" | "UNKNOWN";
+
+function officialEligibilityStatus(statusDescription: string, rosterType: string): EligibilityStatus {
+  const value = statusDescription.toLowerCase();
+  if (/\b(il|injured list|injured)\b/.test(value)) return "MLB_IL";
+  if (/option/.test(value)) return "MLB_OPTIONED";
+  if (/minor/.test(value)) return "MINOR_LEAGUE";
+  if (rosterType === "active" || value === "active") return "MLB_ACTIVE";
+  if (rosterType === "40Man") return "MLB_40_MAN";
+  return "UNKNOWN";
+}
+
+function eligibilityFlags(status: EligibilityStatus, requiresIdentityReview: boolean) {
+  const activeSeason = ["MLB_ACTIVE", "MLB_40_MAN", "MLB_IL"].includes(status);
+  return {
+    eligibleTodayResearch: activeSeason && !requiresIdentityReview,
+    eligibleLineupProjection: ["MLB_ACTIVE", "MLB_IL"].includes(status) && !requiresIdentityReview,
+    eligiblePitcherResearch: activeSeason && !requiresIdentityReview,
+    quarantined: !activeSeason || requiresIdentityReview,
+  };
+}
+
+async function upsertEligibility(input: {
+  playerId: number | null;
+  sourceId: string;
+  externalPlayerId: string;
+  sourceDisplayName: string | null;
+  status: EligibilityStatus;
+  effectiveDate: string;
+  currentTeamId: number | null;
+  sourceTeamAbbreviation: string | null;
+  evidence: JsonObject;
+  confidence: "CONFIRMED" | "HIGH_CONFIDENCE" | "REVIEW_REQUIRED";
+  requiresIdentityReview: boolean;
+  quarantineReason: string | null;
+}) {
+  const flags = eligibilityFlags(input.status, input.requiresIdentityReview);
+  await pool.query(
+    `INSERT INTO player_eligibility (
+       player_id, source_id, external_player_id, source_display_name, status, effective_date,
+       current_team_id, source_team_abbreviation, observed_at, evidence, confidence,
+       eligible_today_research, eligible_lineup_projection, eligible_pitcher_research,
+       requires_identity_review, quarantined_from_current_research, quarantine_reason
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), $9, $10, $11, $12, $13, $14, $15, $16)
+     ON CONFLICT (source_id, external_player_id, effective_date) DO UPDATE SET
+       player_id = EXCLUDED.player_id, source_display_name = EXCLUDED.source_display_name,
+       status = EXCLUDED.status, current_team_id = EXCLUDED.current_team_id,
+       source_team_abbreviation = EXCLUDED.source_team_abbreviation, observed_at = EXCLUDED.observed_at,
+       evidence = EXCLUDED.evidence, confidence = EXCLUDED.confidence,
+       eligible_today_research = EXCLUDED.eligible_today_research,
+       eligible_lineup_projection = EXCLUDED.eligible_lineup_projection,
+       eligible_pitcher_research = EXCLUDED.eligible_pitcher_research,
+       requires_identity_review = EXCLUDED.requires_identity_review,
+       quarantined_from_current_research = EXCLUDED.quarantined_from_current_research,
+       quarantine_reason = EXCLUDED.quarantine_reason`,
+    [
+      input.playerId, input.sourceId, input.externalPlayerId, input.sourceDisplayName, input.status,
+      input.effectiveDate, input.currentTeamId, input.sourceTeamAbbreviation, input.evidence,
+      input.confidence, flags.eligibleTodayResearch, flags.eligibleLineupProjection,
+      flags.eligiblePitcherResearch, input.requiresIdentityReview, flags.quarantined,
+      flags.quarantined ? input.quarantineReason ?? "not_current_research_eligible" : null,
+    ],
+  );
+  return flags;
+}
+
+async function officialEligibilityForPlayer(playerId: number, effectiveDate: string) {
+  const result = await pool.query<{
+    status: EligibilityStatus;
+    current_team_id: number | null;
+    abbreviation: string | null;
+  }>(
+    `SELECT pe.status, pe.current_team_id, t.abbreviation
+     FROM player_eligibility pe
+     LEFT JOIN teams t ON t.team_id = pe.current_team_id
+     WHERE pe.source_id = $1 AND pe.player_id = $2 AND pe.effective_date = $3
+     ORDER BY CASE pe.status WHEN 'MLB_ACTIVE' THEN 1 WHEN 'MLB_IL' THEN 2 WHEN 'MLB_40_MAN' THEN 3 ELSE 4 END,
+       pe.observed_at DESC
+     LIMIT 1`,
+    [MLB_SOURCE, playerId, effectiveDate],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function officialPersonFallback(playerId: number, effectiveDate: string) {
+  const response = await fetch(`https://statsapi.mlb.com/api/v1/people/${playerId}`);
+  const payload = await response.json() as JsonObject;
+  if (!response.ok) return null;
+  const person = asArray(payload.people)[0];
+  if (!person) return null;
+  const active = person.active === true;
+  const currentTeamId = Number(asObject(person.currentTeam).id);
+  // The people endpoint can confirm that an inactive player is retired, but
+  // `active` and `currentTeam` do not prove same-date MLB roster membership.
+  const status: EligibilityStatus = active ? "UNKNOWN" : "RETIRED";
+  await upsertEligibility({
+    playerId,
+    sourceId: MLB_SOURCE,
+    externalPlayerId: String(playerId),
+    sourceDisplayName: String(person.fullName ?? person.name ?? playerId),
+    status,
+    effectiveDate,
+    currentTeamId: Number.isSafeInteger(currentTeamId) && currentTeamId > 0 ? currentTeamId : null,
+    sourceTeamAbbreviation: null,
+    evidence: { officialPerson: true, active, currentTeam: asObject(person.currentTeam) },
+    confidence: "CONFIRMED",
+    requiresIdentityReview: status === "UNKNOWN",
+    quarantineReason: status === "RETIRED" ? "official_person_inactive" : "no_same_date_official_roster_observation",
+  });
+  return officialEligibilityForPlayer(playerId, effectiveDate);
+}
+
+async function projectionEligibility(
+  effectiveDate: string,
+  sourcePlayerId: string,
+  rawName: string,
+  sourceTeamAbbreviation: string,
+  playerId: number | null,
+  confidence: "CONFIRMED" | "HIGH_CONFIDENCE" | "REVIEW_REQUIRED",
+) {
+  let official = playerId ? await officialEligibilityForPlayer(playerId, effectiveDate) : null;
+  if (
+    playerId
+    && (!official || ["UNKNOWN", "MINOR_LEAGUE", "FREE_AGENT"].includes(official.status))
+  ) {
+    official = await officialPersonFallback(playerId, effectiveDate);
+  }
+  const status: EligibilityStatus = official?.status ?? "UNKNOWN";
+  const requiresIdentityReview = !playerId || !official;
+  const reason = !playerId ? "missing_authoritative_identity_bridge" : !official ? "no_current_official_roster_observation" : null;
+  const flags = await upsertEligibility({
+    playerId,
+    sourceId: FANTASY_PROS_SOURCE,
+    externalPlayerId: sourcePlayerId,
+    sourceDisplayName: rawName,
+    status,
+    effectiveDate,
+    currentTeamId: official?.current_team_id ?? null,
+    sourceTeamAbbreviation,
+    evidence: {
+      authoritativeRoster: official ? { status: official.status, team: official.abbreviation } : null,
+      sourceTeam: sourceTeamAbbreviation,
+      identityBridge: playerId ? "mlbam" : null,
+    },
+    confidence,
+    requiresIdentityReview,
+    quarantineReason: reason,
+  });
+  return { ...flags, officialTeam: official?.abbreviation ?? null, status, requiresIdentityReview };
+}
+
 function projectionComponents(row: JsonObject) {
   const keys = ["pa", "ab", "hits", "1b", "2b", "3b", "hrs", "bb"] as const;
   return Object.fromEntries(keys.flatMap((key) => {
@@ -161,7 +351,7 @@ function projectionComponents(row: JsonObject) {
   }));
 }
 
-async function upsertOfficialPlayer(entry: JsonObject, teamId: number, effectiveDate: string) {
+async function upsertOfficialPlayer(entry: JsonObject, teamId: number, effectiveDate: string, rosterType = "game_feed") {
   const person = asObject(entry.person);
   const playerId = Number(person.id);
   if (!Number.isSafeInteger(playerId) || playerId <= 0) return null;
@@ -199,7 +389,41 @@ async function upsertOfficialPlayer(entry: JsonObject, teamId: number, effective
       MLB_SOURCE,
     ],
   );
+  if (rosterType !== "game_feed") {
+    const statusDescription = String(asObject(entry.status).description ?? "");
+    await upsertEligibility({
+      playerId,
+      sourceId: MLB_SOURCE,
+      externalPlayerId: String(playerId),
+      sourceDisplayName: String(person.fullName ?? "Unknown player"),
+      status: officialEligibilityStatus(statusDescription, rosterType),
+      effectiveDate,
+      currentTeamId: teamId,
+      sourceTeamAbbreviation: null,
+      evidence: { rosterType, rosterStatus: statusDescription },
+      confidence: "CONFIRMED",
+      requiresIdentityReview: false,
+      quarantineReason: null,
+    });
+  }
   return playerId;
+}
+
+async function persistOfficialTeamRoster(
+  ingestRunId: string,
+  effectiveDate: string,
+  teamId: number,
+  rosterType: "active" | "40Man",
+) {
+  const response = await fetch(`https://statsapi.mlb.com/api/v1/teams/${teamId}/roster?rosterType=${rosterType}`);
+  const payload = await response.json() as JsonObject;
+  if (!response.ok) throw new Error(`MLB ${rosterType} roster for team ${teamId} returned HTTP ${response.status}`);
+  await storeRawPayload(ingestRunId, MLB_SOURCE, `roster_${rosterType}`, effectiveDate, payload);
+  let normalized = 0;
+  for (const entry of asArray(payload.roster)) {
+    if (await upsertOfficialPlayer(entry, teamId, effectiveDate, rosterType)) normalized += 1;
+  }
+  return normalized;
 }
 
 async function persistOfficialGameFeed(
@@ -220,7 +444,7 @@ async function persistOfficialGameFeed(
     const teamBox = asObject(boxscoreTeams[side]);
     const entries = asObject(teamBox.players);
     for (const entry of Object.values(entries)) {
-      await upsertOfficialPlayer(asObject(entry), teamId, effectiveDate);
+        await upsertOfficialPlayer(asObject(entry), teamId, effectiveDate);
     }
     const battingOrder = asNumbers(teamBox.battingOrder);
     if (battingOrder.length) {
@@ -251,7 +475,7 @@ async function persistOfficialGameFeed(
       const player = asObject(entry);
       const pitching = asObject(asObject(player.stats).pitching);
       if (Number(pitching.gamesStarted) > 0) {
-        await upsertStarter(asObject(player.person), teamId, gamePk, "CONFIRMED", player);
+        await upsertStarter(asObject(player.person), teamId, gamePk, "CONFIRMED", player, effectiveDate);
       }
     }
     if (gameStatus === "Final") {
@@ -316,6 +540,7 @@ async function persistFantasyProsLineups(
         checksum: checksum({ gameId: game.game_id, abbreviation, lineupRows }),
         owner: FANTASY_PROS_SOURCE,
         state: "PROJECTED",
+        entries: lineupRows.map((row) => ({ order: row.order, playerId: String(row.value.player_id ?? ""), position: String(row.value.position ?? "") })),
       };
       const existing = await pool.query<{ lineup_snapshot_id: string }>(
         `SELECT lineup_snapshot_id FROM lineup_snapshots
@@ -331,14 +556,38 @@ async function persistFantasyProsLineups(
       );
       for (const row of lineupRows) {
         const externalId = String(row.value.player_id ?? "");
-        const identity = await pool.query<{ player_id: number }>(
-          `SELECT player_id FROM player_external_ids
-           WHERE source_id = $1 AND external_player_id = $2 AND valid_to IS NULL LIMIT 1`,
-          [FANTASY_PROS_SOURCE, externalId],
+        const identity = await pool.query<{ player_id: number; eligible_lineup_projection: boolean; requires_identity_review: boolean }>(
+          `SELECT mapped.player_id, COALESCE(pe.eligible_lineup_projection, false) AS eligible_lineup_projection,
+             COALESCE(pe.requires_identity_review, true) AS requires_identity_review
+           FROM (
+             SELECT player_id FROM player_external_ids WHERE source_id = $1 AND external_player_id = $2 AND valid_to IS NULL
+             UNION ALL
+             SELECT player_id FROM player_external_id_aliases WHERE source_id = $1 AND external_player_id = $2
+           ) mapped
+           LEFT JOIN player_eligibility pe ON pe.source_id = $1 AND pe.external_player_id = $2 AND pe.effective_date = $3
+           LIMIT 1`,
+          [FANTASY_PROS_SOURCE, externalId, effectiveDate],
         );
-        if (!identity.rowCount) {
+        if (!identity.rowCount || !identity.rows[0].eligible_lineup_projection || identity.rows[0].requires_identity_review) {
           unresolvedEntries += 1;
-          await recordIssue(FANTASY_PROS_SOURCE, ingestRunId, "IDENTITY_CONFLICT", "REVIEW", `FantasyPros lineup player ${externalId} could not map to an MLBAM identity.`);
+          await pool.query(
+            `INSERT INTO identity_review_queue (source_id, external_player_id, raw_name, normalized_name, evidence)
+             SELECT $1, $2, $3, $4, $5
+             WHERE NOT EXISTS (
+               SELECT 1 FROM identity_review_queue WHERE source_id = $1 AND external_player_id = $2 AND state = 'OPEN'
+             )`,
+            [
+              FANTASY_PROS_SOURCE, externalId, `FantasyPros projected lineup ID ${externalId}`, normaliseName(externalId),
+              { projectedLineup: true, gamePk: gameTarget.game_pk, team: abbreviation, reason: "identity_or_current_roster_not_confirmed" },
+            ],
+          );
+          await recordIssue(
+            FANTASY_PROS_SOURCE,
+            ingestRunId,
+            "PROJECTED_LINEUP_IDENTITY_BLOCKING",
+            "BLOCKING",
+            `FantasyPros projected lineup player ${externalId} is not a resolved current MLB player and is blocked from research.`,
+          );
           continue;
         }
         await pool.query(
@@ -371,6 +620,25 @@ export async function ingestMlbOfficial(requestedDate: string) {
     const games = dates.flatMap((day) => asArray(day.games));
     let normalized = 0;
     let rejected = 0;
+    const rosterTeams = new Set<number>();
+    try {
+      const teamsResponse = await fetch(MLB_TEAMS_URL);
+      const teamsPayload = await teamsResponse.json() as JsonObject;
+      if (!teamsResponse.ok) throw new Error(`MLB teams endpoint returned HTTP ${teamsResponse.status}`);
+      await storeRawPayload(ingestRunId, MLB_SOURCE, "teams", effectiveDate, teamsPayload);
+      for (const team of asArray(teamsPayload.teams)) {
+        const teamId = Number(team.id);
+        if (!Number.isSafeInteger(teamId) || teamId <= 0) continue;
+        await upsertTeam(team);
+        rosterTeams.add(teamId);
+        normalized += await persistOfficialTeamRoster(ingestRunId, effectiveDate, teamId, "40Man");
+        normalized += await persistOfficialTeamRoster(ingestRunId, effectiveDate, teamId, "active");
+      }
+    } catch (error) {
+      rejected += 1;
+      const detail = error instanceof Error ? error.message : "Unknown official organization roster error";
+      await recordIssue(MLB_SOURCE, ingestRunId, "ROSTER_NORMALIZATION_FAILURE", "WARNING", detail);
+    }
     for (const game of games) {
       const gamePk = Number(game.gamePk);
       const teams = asObject(game.teams);
@@ -385,6 +653,18 @@ export async function ingestMlbOfficial(requestedDate: string) {
       }
       await upsertTeam(away);
       await upsertTeam(home);
+      for (const teamId of [awayId, homeId]) {
+        if (rosterTeams.has(teamId)) continue;
+        rosterTeams.add(teamId);
+        try {
+          normalized += await persistOfficialTeamRoster(ingestRunId, effectiveDate, teamId, "40Man");
+          normalized += await persistOfficialTeamRoster(ingestRunId, effectiveDate, teamId, "active");
+        } catch (error) {
+          rejected += 1;
+          const detail = error instanceof Error ? error.message : "Unknown official roster error";
+          await recordIssue(MLB_SOURCE, ingestRunId, "ROSTER_NORMALIZATION_FAILURE", "WARNING", detail);
+        }
+      }
       if (Number.isFinite(Number(venue.id))) {
         await pool.query(
           `INSERT INTO venues (venue_id, name, metadata) VALUES ($1, $2, $3)
@@ -411,8 +691,8 @@ export async function ingestMlbOfficial(requestedDate: string) {
       );
       const awayProbable = asObject(asObject(teams.away).probablePitcher);
       const homeProbable = asObject(asObject(teams.home).probablePitcher);
-      if (Object.keys(awayProbable).length) await upsertStarter(awayProbable, awayId, gamePk, "PROBABLE", awayProbable);
-      if (Object.keys(homeProbable).length) await upsertStarter(homeProbable, homeId, gamePk, "PROBABLE", homeProbable);
+      if (Object.keys(awayProbable).length) await upsertStarter(awayProbable, awayId, gamePk, "PROBABLE", awayProbable, effectiveDate);
+      if (Object.keys(homeProbable).length) await upsertStarter(homeProbable, homeId, gamePk, "PROBABLE", homeProbable, effectiveDate);
       try {
         normalized += await persistOfficialGameFeed(ingestRunId, effectiveDate, gamePk, awayId, homeId);
       } catch (error) {
@@ -504,16 +784,31 @@ export async function ingestFantasyPros(requestedDate: string) {
     }
     let projectionRows = 0;
     const missingIdentity = new Set<string>();
+    const teamConflicts = new Set<string>();
     for (const item of [
       { label: "Hitter", payload: hitters.payload },
       { label: "Pitcher", payload: pitchers.payload },
     ]) {
       const rows = asArray(item.payload.player);
       const snapshotChecksum = checksum(item.payload);
+      const contentChecksum = normalisedChecksum(item.payload);
+      const snapshotLabel = `${item.label} daily`;
+      const priorSnapshot = await pool.query<{ content_checksum: string }>(
+        `SELECT content_checksum FROM fantasypros_projection_snapshots
+         WHERE effective_date = $1 AND source_id = $2 AND snapshot_label = $3
+         ORDER BY retrieved_at DESC LIMIT 1`,
+        [effectiveDate, FANTASY_PROS_SOURCE, snapshotLabel],
+      );
       const snapshotResult = await pool.query<{ snapshot_id: string }>(
-        `INSERT INTO fantasypros_projection_snapshots (effective_date, source_id, ingest_run_id, snapshot_label, raw_payload_id, checksum)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING snapshot_id`,
-        [effectiveDate, FANTASY_PROS_SOURCE, ingestRunId, `${item.label} daily`, payloadIds.get(item.label === "Hitter" ? "hitter_projections" : "pitcher_projections"), snapshotChecksum],
+        `INSERT INTO fantasypros_projection_snapshots (
+           effective_date, source_id, ingest_run_id, snapshot_label, raw_payload_id, checksum,
+           content_checksum, unchanged_from_prior
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING snapshot_id`,
+        [
+          effectiveDate, FANTASY_PROS_SOURCE, ingestRunId, snapshotLabel,
+          payloadIds.get(item.label === "Hitter" ? "hitter_projections" : "pitcher_projections"),
+          snapshotChecksum, contentChecksum, priorSnapshot.rows[0]?.content_checksum === contentChecksum,
+        ],
       );
       const snapshotId = snapshotResult.rows[0].snapshot_id;
       for (const row of rows) {
@@ -543,12 +838,33 @@ export async function ingestFantasyPros(requestedDate: string) {
               metadata.birthdate ? String(metadata.birthdate) : null,
             ],
           );
+          const primaryExternal = await pool.query<{ external_player_id: string }>(
+            `SELECT external_player_id FROM player_external_ids
+             WHERE player_id = $1 AND source_id = $2 LIMIT 1`,
+            [resolvedPlayerId, FANTASY_PROS_SOURCE],
+          );
+          if (primaryExternal.rowCount && primaryExternal.rows[0].external_player_id !== sourcePlayerId) {
+            await pool.query(
+              `INSERT INTO player_external_id_aliases (player_id, source_id, external_player_id, link_type, evidence)
+               VALUES ($1, $2, $3, 'DUPLICATE_SOURCE_ID', $4)
+               ON CONFLICT (source_id, external_player_id) DO UPDATE SET
+                 player_id = EXCLUDED.player_id, link_type = EXCLUDED.link_type, evidence = EXCLUDED.evidence, observed_at = now()`,
+              [resolvedPlayerId, FANTASY_PROS_SOURCE, sourcePlayerId, { mlbamId: resolvedPlayerId, primaryExternalId: primaryExternal.rows[0].external_player_id }],
+            );
+          } else {
+            await pool.query(
+              `INSERT INTO player_external_ids (player_id, source_id, external_player_id, confidence, evidence, reviewed_at)
+               VALUES ($1, $2, $3, 'CONFIRMED', $4, now())
+               ON CONFLICT (source_id, external_player_id) DO UPDATE SET player_id = EXCLUDED.player_id,
+                 confidence = EXCLUDED.confidence, evidence = EXCLUDED.evidence, reviewed_at = EXCLUDED.reviewed_at`,
+              [resolvedPlayerId, FANTASY_PROS_SOURCE, sourcePlayerId, { mlbamId: resolvedPlayerId, name: metadata.player_name }],
+            );
+          }
           await pool.query(
-            `INSERT INTO player_external_ids (player_id, source_id, external_player_id, confidence, evidence, reviewed_at)
-             VALUES ($1, $2, $3, 'CONFIRMED', $4, now())
-             ON CONFLICT (source_id, external_player_id) DO UPDATE SET player_id = EXCLUDED.player_id,
-               confidence = EXCLUDED.confidence, evidence = EXCLUDED.evidence, reviewed_at = EXCLUDED.reviewed_at`,
-            [resolvedPlayerId, FANTASY_PROS_SOURCE, sourcePlayerId, { mlbamId: resolvedPlayerId, name: metadata.player_name }],
+            `INSERT INTO player_aliases (player_id, alias, normalized_alias, source_id)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (normalized_alias, source_id) DO NOTHING`,
+            [resolvedPlayerId, String(row.name ?? metadata.player_name ?? sourcePlayerId), normaliseName(String(row.name ?? metadata.player_name ?? sourcePlayerId)), FANTASY_PROS_SOURCE],
           );
           await pool.query(
             `INSERT INTO identity_match_events (player_id, source_id, external_player_id, confidence, algorithm_version, evidence)
@@ -568,6 +884,29 @@ export async function ingestFantasyPros(requestedDate: string) {
              )`,
             [FANTASY_PROS_SOURCE, sourcePlayerId, String(row.name ?? sourcePlayerId), normaliseName(String(row.name ?? sourcePlayerId)), { sourceRow: row }],
           );
+        }
+        const sourceName = String(row.name ?? metadata?.player_name ?? sourcePlayerId);
+        const sourceTeam = String(row.team_id ?? "");
+        const eligibility = await projectionEligibility(
+          effectiveDate,
+          sourcePlayerId,
+          sourceName,
+          sourceTeam,
+          resolvedPlayerId,
+          identityConfidence,
+        );
+        if (eligibility.officialTeam && sourceTeam && eligibility.officialTeam !== sourceTeam) {
+          const conflictKey = `${sourcePlayerId}:${sourceTeam}:${eligibility.officialTeam}`;
+          if (!teamConflicts.has(conflictKey)) {
+            teamConflicts.add(conflictKey);
+            await recordIssue(
+              FANTASY_PROS_SOURCE,
+              ingestRunId,
+              "TEAM_ASSIGNMENT_CONFLICT",
+              "REVIEW",
+              `${sourceName}: FantasyPros team ${sourceTeam} disagrees with official MLB organization ${eligibility.officialTeam}.`,
+            );
+          }
         }
         await pool.query(
           `INSERT INTO fantasypros_projection_rows (snapshot_id, source_player_id, canonical_player_id, team_abbreviation, position, projected_stats, normalized_stats, raw_row, identity_confidence)

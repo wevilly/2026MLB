@@ -52,6 +52,18 @@ export const identityConfidenceEnum = pgEnum("identity_confidence", [
   "REVIEW_REQUIRED",
 ]);
 
+export const playerEligibilityStatusEnum = pgEnum("player_eligibility_status", [
+  "MLB_ACTIVE",
+  "MLB_40_MAN",
+  "MLB_IL",
+  "MLB_OPTIONED",
+  "MINOR_LEAGUE",
+  "FREE_AGENT",
+  "HISTORICAL",
+  "RETIRED",
+  "UNKNOWN",
+]);
+
 export const marketTypeEnum = pgEnum("market_type", [
   "TOTAL_BASES_2_PLUS",
   "EXTRA_BASE_HIT",
@@ -184,6 +196,56 @@ export const playerExternalIds = pgTable(
   }),
 );
 
+export const playerExternalIdAliases = pgTable(
+  "player_external_id_aliases",
+  {
+    aliasLinkId: uuid("alias_link_id").primaryKey().defaultRandom(),
+    playerId: integer("player_id").notNull().references(() => players.playerId),
+    sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+    externalPlayerId: text("external_player_id").notNull(),
+    linkType: text("link_type").notNull().default("ALIAS"),
+    evidence: jsonb("evidence").notNull().default({}),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sourceExternalAliasIdx: uniqueIndex("player_external_id_aliases_source_external_idx").on(
+      table.sourceId,
+      table.externalPlayerId,
+    ),
+  }),
+);
+
+export const playerEligibility = pgTable(
+  "player_eligibility",
+  {
+    eligibilityId: uuid("eligibility_id").primaryKey().defaultRandom(),
+    playerId: integer("player_id").references(() => players.playerId),
+    sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+    externalPlayerId: text("external_player_id").notNull(),
+    sourceDisplayName: text("source_display_name"),
+    status: playerEligibilityStatusEnum("status").notNull(),
+    effectiveDate: date("effective_date").notNull(),
+    currentTeamId: integer("current_team_id").references(() => teams.teamId),
+    sourceTeamAbbreviation: text("source_team_abbreviation"),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+    evidence: jsonb("evidence").notNull().default({}),
+    confidence: identityConfidenceEnum("confidence").notNull().default("REVIEW_REQUIRED"),
+    eligibleTodayResearch: boolean("eligible_today_research").notNull().default(false),
+    eligibleLineupProjection: boolean("eligible_lineup_projection").notNull().default(false),
+    eligiblePitcherResearch: boolean("eligible_pitcher_research").notNull().default(false),
+    requiresIdentityReview: boolean("requires_identity_review").notNull().default(false),
+    quarantinedFromCurrentResearch: boolean("quarantined_from_current_research").notNull().default(false),
+    quarantineReason: text("quarantine_reason"),
+  },
+  (table) => ({
+    sourcePlayerDateIdx: uniqueIndex("player_eligibility_source_player_date_idx").on(
+      table.sourceId,
+      table.externalPlayerId,
+      table.effectiveDate,
+    ),
+  }),
+);
+
 export const identityMatchEvents = pgTable("identity_match_events", {
   matchEventId: uuid("match_event_id").primaryKey().defaultRandom(),
   playerId: integer("player_id").references(() => players.playerId),
@@ -293,6 +355,8 @@ export const fantasyProsProjectionSnapshots = pgTable("fantasypros_projection_sn
   snapshotLabel: text("snapshot_label"),
   rawPayloadId: uuid("raw_payload_id").references(() => rawPayloads.rawPayloadId),
   checksum: text("checksum").notNull(),
+  contentChecksum: text("content_checksum").notNull().default(""),
+  unchangedFromPrior: boolean("unchanged_from_prior").notNull().default(false),
 });
 
 export const fantasyProsProjectionRows = pgTable(

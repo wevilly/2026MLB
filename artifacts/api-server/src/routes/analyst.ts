@@ -70,10 +70,95 @@ async function sourceBadges() {
   ];
 }
 
+async function identityCoverage(date: string) {
+  const result = await pool.query<{
+    official_starters_mapped: number; official_starters_total: number;
+    official_lineup_players_mapped: number; official_lineup_players_total: number;
+    projected_lineup_players_mapped: number; projected_lineup_players_total: number;
+    active_projection_players_mapped: number; active_projection_players_total: number;
+    unresolved_active_players: number; quarantined_rows: number;
+    team_assignment_conflicts: number; blocking_projected_lineup_issues: number;
+  }>(
+    `WITH latest_starters AS (
+       SELECT DISTINCT ON (s.game_pk, s.team_id) s.player_id
+       FROM starters s JOIN games g ON g.game_pk = s.game_pk
+       WHERE g.game_date = $1 AND s.source_id = 'MLB_OFFICIAL'
+       ORDER BY s.game_pk, s.team_id, s.observed_at DESC
+     ),
+     latest_official_lineups AS (
+       SELECT DISTINCT ON (ls.game_pk, ls.team_id) ls.lineup_snapshot_id
+       FROM lineup_snapshots ls JOIN games g ON g.game_pk = ls.game_pk
+       WHERE g.game_date = $1 AND ls.source_id = 'MLB_OFFICIAL' AND ls.state = 'POSTED'
+       ORDER BY ls.game_pk, ls.team_id, ls.observed_at DESC
+     ),
+     latest_projected_lineups AS (
+       SELECT DISTINCT ON (ls.game_pk, ls.team_id) ls.lineup_snapshot_id, ls.raw
+       FROM lineup_snapshots ls JOIN games g ON g.game_pk = ls.game_pk
+       WHERE g.game_date = $1 AND ls.source_id = 'FANTASYPROS' AND ls.state = 'PROJECTED'
+       ORDER BY ls.game_pk, ls.team_id, ls.observed_at DESC
+     ),
+     current_projection_rows AS (
+       SELECT DISTINCT ON (s.snapshot_label, f.source_player_id)
+         f.source_player_id, f.canonical_player_id, pe.eligible_today_research, pe.requires_identity_review
+       FROM fantasypros_projection_rows f
+       JOIN fantasypros_projection_snapshots s ON s.snapshot_id = f.snapshot_id
+       LEFT JOIN player_eligibility pe ON pe.source_id = 'FANTASYPROS'
+         AND pe.external_player_id = f.source_player_id AND pe.effective_date = s.effective_date
+       WHERE s.effective_date = $1
+       ORDER BY s.snapshot_label, f.source_player_id, s.retrieved_at DESC
+     )
+     SELECT
+       (SELECT count(*) FILTER (WHERE player_id IS NOT NULL)::int FROM latest_starters) AS official_starters_mapped,
+       (SELECT count(*)::int FROM latest_starters) AS official_starters_total,
+       (SELECT count(*) FILTER (WHERE le.player_id IS NOT NULL)::int FROM lineup_entries le JOIN latest_official_lineups l ON l.lineup_snapshot_id = le.lineup_snapshot_id) AS official_lineup_players_mapped,
+       (SELECT count(*)::int FROM lineup_entries le JOIN latest_official_lineups l ON l.lineup_snapshot_id = le.lineup_snapshot_id) AS official_lineup_players_total,
+       (SELECT count(*)::int FROM lineup_entries le JOIN latest_projected_lineups l ON l.lineup_snapshot_id = le.lineup_snapshot_id) AS projected_lineup_players_mapped,
+       (SELECT COALESCE(sum(
+         CASE WHEN jsonb_typeof(l.raw->'entries') = 'array' THEN jsonb_array_length(l.raw->'entries')
+              ELSE (SELECT count(*)::int FROM lineup_entries le WHERE le.lineup_snapshot_id = l.lineup_snapshot_id)
+         END
+       ), 0)::int FROM latest_projected_lineups l) AS projected_lineup_players_total,
+       (SELECT count(*) FILTER (WHERE canonical_player_id IS NOT NULL AND eligible_today_research)::int FROM current_projection_rows) AS active_projection_players_mapped,
+       (SELECT count(*)::int FROM current_projection_rows) AS active_projection_players_total,
+       (SELECT count(*) FILTER (WHERE requires_identity_review)::int FROM current_projection_rows) AS unresolved_active_players,
+       (SELECT count(*)::int FROM player_eligibility WHERE source_id = 'FANTASYPROS' AND effective_date = $1 AND quarantined_from_current_research) AS quarantined_rows,
+       (SELECT count(*)::int FROM ingest_issues
+        WHERE issue_type = 'TEAM_ASSIGNMENT_CONFLICT'
+          AND ingest_run_id = (
+            SELECT ingest_run_id FROM ingest_runs
+            WHERE source_id = 'FANTASYPROS' AND effective_date = $1
+            ORDER BY started_at DESC LIMIT 1
+          )) AS team_assignment_conflicts,
+       (SELECT count(*)::int FROM ingest_issues
+        WHERE issue_type = 'PROJECTED_LINEUP_IDENTITY_BLOCKING'
+          AND ingest_run_id = (
+            SELECT ingest_run_id FROM ingest_runs
+            WHERE source_id = 'FANTASYPROS' AND effective_date = $1
+            ORDER BY started_at DESC LIMIT 1
+          )) AS blocking_projected_lineup_issues`,
+    [date],
+  );
+  const row = result.rows[0];
+  return {
+    officialStartersMapped: row?.official_starters_mapped ?? 0,
+    officialStartersTotal: row?.official_starters_total ?? 0,
+    officialLineupPlayersMapped: row?.official_lineup_players_mapped ?? 0,
+    officialLineupPlayersTotal: row?.official_lineup_players_total ?? 0,
+    projectedLineupPlayersMapped: row?.projected_lineup_players_mapped ?? 0,
+    projectedLineupPlayersTotal: row?.projected_lineup_players_total ?? 0,
+    activeProjectionPlayersMapped: row?.active_projection_players_mapped ?? 0,
+    activeProjectionPlayersTotal: row?.active_projection_players_total ?? 0,
+    unresolvedActivePlayers: row?.unresolved_active_players ?? 0,
+    quarantinedRows: row?.quarantined_rows ?? 0,
+    teamAssignmentConflicts: row?.team_assignment_conflicts ?? 0,
+    blockingProjectedLineupIssues: row?.blocking_projected_lineup_issues ?? 0,
+  };
+}
+
 router.get("/analyst/today", async (req, res, next) => {
   try {
     const date = requestedDate(req.query.date);
-    const [gameResult, sources] = await Promise.all([
+    const [gameResult, sources, coverage] = await Promise.all([
       pool.query<{
         game_pk: number; start_time_utc: string | null; away: string; home: string; park: string | null;
          away_starter: string | null; home_starter: string | null; away_hand: string | null; home_hand: string | null;
@@ -106,6 +191,7 @@ router.get("/analyst/today", async (req, res, next) => {
         [date],
       ),
       sourceBadges(),
+      identityCoverage(date),
     ]);
     const games = gameResult.rows.map((game) => ({
       id: String(game.game_pk),
@@ -132,10 +218,14 @@ router.get("/analyst/today", async (req, res, next) => {
       timezone: "America/New_York",
       games,
       sources,
+      identityCoverage: coverage,
       alerts: [
         "Pre-model slate status uses READY, PARTIAL, and BLOCKED only.",
         "No forecast, price, odds, implied probability, EV, or CLV data is used in this workflow.",
         games.length ? "Official schedule and starter observations are persisted." : "No official schedule records have been ingested for this date.",
+        coverage.blockingProjectedLineupIssues
+          ? `${coverage.blockingProjectedLineupIssues} projected-lineup identity issue(s) are blocking research eligibility.`
+          : "Projected lineup identities have no current blocking issue.",
       ],
     };
     res.json(GetAnalystTodayResponse.parse(today));
@@ -146,9 +236,12 @@ router.get("/analyst/today", async (req, res, next) => {
 
 router.get("/analyst/projections", async (req, res, next) => {
   try {
+    const date = requestedDate(req.query.date);
     const snapshots = await pool.query<{ snapshot_id: string; retrieved_at: string; snapshot_label: string | null }>(
       `SELECT DISTINCT ON (snapshot_label) snapshot_id, retrieved_at, snapshot_label FROM fantasypros_projection_snapshots
+       WHERE effective_date = $1
        ORDER BY snapshot_label, retrieved_at DESC`,
+      [date],
     );
     const currentAsOf = snapshots.rows.reduce<string | null>((latest, snapshot) => !latest || snapshot.retrieved_at > latest ? snapshot.retrieved_at : latest, null);
     type ProjectionDbRow = {
@@ -160,8 +253,13 @@ router.get("/analyst/projections", async (req, res, next) => {
     };
     const rows: ProjectionDbRow[] = snapshots.rows.length
       ? (await pool.query<ProjectionDbRow>(
-        `SELECT source_player_id, team_abbreviation, position, projected_stats, raw_row
-         FROM fantasypros_projection_rows WHERE snapshot_id = ANY($1) ORDER BY team_abbreviation, source_player_id LIMIT 500`,
+       `SELECT f.source_player_id, f.team_abbreviation, f.position, f.projected_stats, f.raw_row
+          FROM fantasypros_projection_rows f
+          JOIN fantasypros_projection_snapshots s ON s.snapshot_id = f.snapshot_id
+          JOIN player_eligibility pe ON pe.source_id = 'FANTASYPROS'
+            AND pe.external_player_id = f.source_player_id AND pe.effective_date = s.effective_date
+          WHERE f.snapshot_id = ANY($1) AND pe.eligible_today_research AND NOT pe.requires_identity_review
+          ORDER BY f.team_abbreviation, f.source_player_id LIMIT 500`,
         [snapshots.rows.map((snapshot) => snapshot.snapshot_id)],
       )).rows
       : [];
@@ -191,6 +289,7 @@ router.get("/analyst/projections", async (req, res, next) => {
       rows: projectionRows,
       systemNotes: [
         "Each FantasyPros response is stored as an immutable snapshot with raw payload metadata and checksum.",
+        "Only current, authoritative-roster-eligible players appear here; quarantined raw rows remain available to audit.",
         "Walk and home run cells are source components, not predicted market probabilities.",
         "2+ Total Bases and 1+ XBH remain explicitly unmodeled until validated research engines exist.",
       ],
@@ -202,7 +301,8 @@ router.get("/analyst/projections", async (req, res, next) => {
 
 router.get("/analyst/data-health", async (_req, res, next) => {
   try {
-    const [sources, issueResult, lastRun] = await Promise.all([
+    const date = requestedDate(undefined);
+    const [sources, issueResult, lastRun, coverage] = await Promise.all([
       sourceBadges(),
       pool.query<{ issue_type: string; detail: string; severity: string }>(
         `SELECT issue_type, detail, severity FROM ingest_issues WHERE resolved_at IS NULL
@@ -212,6 +312,7 @@ router.get("/analyst/data-health", async (_req, res, next) => {
          ORDER BY issue_type LIMIT 50`,
       ),
       pool.query<{ finished_at: string | null }>("SELECT max(finished_at) AS finished_at FROM ingest_runs"),
+      identityCoverage(date),
     ]);
     const sourceStatus = sources.some((source) => source.status === "BLOCKED" || source.status === "NOT RUN") ? "BLOCKED"
       : sources.some((source) => source.status === "PARTIAL" || source.status === "NOT CONFIGURED") ? "PARTIAL"
@@ -220,6 +321,7 @@ router.get("/analyst/data-health", async (_req, res, next) => {
       overall: sourceStatus,
       sources,
       issues: issueResult.rows.map((issue) => ({ label: issue.issue_type.replaceAll("_", " "), detail: issue.detail, severity: issue.severity })),
+      identityCoverage: coverage,
       lastRun: isoString(lastRun.rows[0]?.finished_at) ?? "No completed ingestion runs recorded",
     }));
   } catch (error) {

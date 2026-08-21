@@ -51,11 +51,27 @@ export interface SlateGame {
   flag: string | null;
 }
 
+export interface IdentityCoverage {
+  officialStartersMapped: number;
+  officialStartersTotal: number;
+  officialLineupPlayersMapped: number;
+  officialLineupPlayersTotal: number;
+  projectedLineupPlayersMapped: number;
+  projectedLineupPlayersTotal: number;
+  activeProjectionPlayersMapped: number;
+  activeProjectionPlayersTotal: number;
+  unresolvedActivePlayers: number;
+  quarantinedRows: number;
+  teamAssignmentConflicts: number;
+  blockingProjectedLineupIssues: number;
+}
+
 export interface TodayDashboard {
   date: string;
   timezone: string;
   games: SlateGame[];
   sources: SourceBadge[];
+  identityCoverage: IdentityCoverage;
   alerts: string[];
 }
 
@@ -91,6 +107,7 @@ export interface DataHealth {
   overall: string;
   sources: SourceBadge[];
   issues: HealthIssue[];
+  identityCoverage: IdentityCoverage;
   lastRun: string;
 }
 
@@ -114,6 +131,10 @@ export interface IngestResult {
   normalizedRowCount: number;
   rejectedRowCount: number;
 }
+
+export type GetAnalystProjectionsParams = {
+date?: string;
+};
 
 export type RefreshMlbOfficialParams = {
 date?: string;
