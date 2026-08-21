@@ -1,0 +1,13 @@
+{
+  "source": "MLB Official",
+  "effectiveDate": "2026-08-20",
+  "gameData": { "game": { "pk": 824474, "id": "2026/08/20/slnmlb-cinmlb-1", "season": "2026" }, "status": { "detailedState": "Final", "statusCode": "F" } },
+  "liveData": {
+    "boxscore": {
+      "teams": {
+        "away": { "team": { "id": 138, "name": "St. Louis Cardinals" }, "battingOrder": [802139, 671056, 676475, 691023, 686780, 665877, 691026, 691458, 677592], "players": [{ "person": { "id": 802139, "fullName": "JJ Wetherholt" }, "position": { "abbreviation": "2B" }, "status": { "description": "Active" } }, { "person": { "id": 691023, "fullName": "Jordan Walker" }, "position": { "abbreviation": "RF" }, "status": { "description": "Active" } }] },
+        "home": { "team": { "id": 113, "name": "Cincinnati Reds" }, "battingOrder": [693304, 677923, 682617, 680911, 682668, 686862, 695520, 691456, 669203], "players": [{ "person": { "id": 693304, "fullName": "Elly De La Cruz" }, "position": { "abbreviation": "SS" }, "status": { "description": "Active" } }] }
+      }
+    }
+  }
+}

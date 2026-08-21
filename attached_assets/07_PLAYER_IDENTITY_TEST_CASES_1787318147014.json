@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Normalization and review-queue tests only. These are not authoritative cross-source ID mappings.",
+  "cases": [
+    {
+      "raw_names": [
+        "José Ramírez",
+        "Jose Ramirez"
+      ],
+      "expected_normalized": "jose ramirez",
+      "expected_behavior": "same candidate identity only when stable IDs or deterministic attributes agree",
+      "confidence_without_ids": "REVIEW_REQUIRED"
+    },
+    {
+      "raw_names": [
+        "Vladimir Guerrero Jr.",
+        "Vladimir Guerrero Jr",
+        "Vladimir Guerrero, Jr."
+      ],
+      "expected_normalized": "vladimir guerrero jr",
+      "expected_behavior": "suffix punctuation should not create duplicate candidate",
+      "confidence_without_ids": "REVIEW_REQUIRED"
+    },
+    {
+      "raw_names": [
+        "Luis García Jr.",
+        "Luis Garcia Jr",
+        "Luis Garcia Jr."
+      ],
+      "expected_normalized": "luis garcia jr",
+      "expected_behavior": "accent/suffix normalization allowed for candidate generation only",
+      "confidence_without_ids": "REVIEW_REQUIRED"
+    },
+    {
+      "raw_names": [
+        "C.J. Abrams",
+        "CJ Abrams",
+        "C J Abrams"
+      ],
+      "expected_normalized": "cj abrams",
+      "expected_behavior": "initial punctuation normalization allowed",
+      "confidence_without_ids": "REVIEW_REQUIRED"
+    },
+    {
+      "raw_names": [
+        "J.P. Crawford",
+        "JP Crawford",
+        "J P Crawford"
+      ],
+      "expected_normalized": "jp crawford",
+      "expected_behavior": "initial punctuation normalization allowed",
+      "confidence_without_ids": "REVIEW_REQUIRED"
+    },
+    {
+      "raw_names": [
+        "O'Neil Cruz",
+        "Oneil Cruz"
+      ],
+      "expected_behavior": "do not assume equivalence based on spelling similarity; rely on stable IDs/attributes",
+      "confidence_without_ids": "REVIEW_REQUIRED"
+    },
+    {
+      "raw_names": [
+        "Michael A. Taylor",
+        "Michael Taylor"
+      ],
+      "expected_behavior": "middle initial removal can be ambiguous; never auto-confirm by name alone",
+      "confidence_without_ids": "REVIEW_REQUIRED"
+    },
+    {
+      "raw_names": [
+        "Will Smith"
+      ],
+      "expected_behavior": "duplicate-name safety test: name alone is insufficient because multiple baseball players can share the same name",
+      "confidence_without_ids": "REVIEW_REQUIRED"
+    }
+  ],
+  "required_tests": [
+    "raw source name is retained",
+    "normalized name is stored separately",
+    "stable ID bridge outranks name matching",
+    "ambiguous matches enter review queue",
+    "duplicate canonical players are not created on rerun"
+  ]
+}

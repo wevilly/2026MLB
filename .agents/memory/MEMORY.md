@@ -1,0 +1,1 @@
+- [FantasyPros lineup state](fantasypros-lineup-state.md) — non-projected lineup responses can contain scheduled games with no hitters; only MLB can establish posted lineups.

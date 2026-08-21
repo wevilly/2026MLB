@@ -1,0 +1,15 @@
+{
+  "source": "FantasyPros",
+  "effectiveDate": "2026-08-21",
+  "schemaKeys": ["sport", "title", "description", "count", "items", "public_api_limited", "tier"],
+  "items": [
+    {
+      "id": 603590,
+      "created": "2026-08-21 11:16:52",
+      "player_id": 39964,
+      "team_id": "BAL",
+      "title": "Kyle Bradish gets tagged for three runs in loss",
+      "sport_id": "MLB"
+    }
+  ]
+}

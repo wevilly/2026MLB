@@ -1,0 +1,6 @@
+{
+  "source": "MLB Official",
+  "people": [
+    { "id": 676475, "fullName": "Alec Burleson", "birthDate": "1998-11-25", "batSide": { "code": "L" }, "pitchHand": { "code": "L" }, "primaryPosition": { "abbreviation": "1B" } }
+  ]
+}

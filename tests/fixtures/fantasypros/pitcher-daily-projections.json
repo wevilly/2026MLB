@@ -1,0 +1,20 @@
+{
+  "source": "FantasyPros",
+  "effectiveDate": "2026-08-21",
+  "schemaKeys": ["season", "week", "date", "type", "position", "experts", "position_name", "count", "player", "public_api_limited", "tier"],
+  "player": [
+    {
+      "fpid": 3207,
+      "player_id": 3207,
+      "team_id": "ATL",
+      "name": "Chris Sale",
+      "gs": 0,
+      "ip": 5.91,
+      "h": 4.55,
+      "er": 2.01,
+      "hr": 0.63,
+      "k": 7.35,
+      "bbi": 1.65
+    }
+  ]
+}

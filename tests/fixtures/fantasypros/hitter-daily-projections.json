@@ -1,0 +1,21 @@
+{
+  "source": "FantasyPros",
+  "effectiveDate": "2026-08-21",
+  "schemaKeys": ["season", "week", "date", "type", "position", "experts", "position_name", "count", "player", "public_api_limited", "tier"],
+  "player": [
+    {
+      "fpid": 3006,
+      "player_id": 3006,
+      "team_id": "CHC",
+      "name": "Aaron Cunningham",
+      "pa": 0.1,
+      "ab": 0.1,
+      "hits": 0,
+      "1b": 0,
+      "2b": 0,
+      "3b": 0,
+      "hrs": 0,
+      "bb": 0
+    }
+  ]
+}

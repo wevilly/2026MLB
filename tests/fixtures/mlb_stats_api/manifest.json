@@ -1,0 +1,11 @@
+{
+  "source": "MLB Official",
+  "sanitized": true,
+  "fixtures": [
+    { "file": "schedule-with-probables.json", "endpoint": "/api/v1/schedule", "method": "GET", "query": { "sportId": "1", "date": "2026-08-21", "hydrate": "team,venue,probablePitcher" }, "effectiveDate": "2026-08-21", "retrievedAt": "2026-08-21T13:30:00.000Z", "httpStatus": 200, "entityCount": 15, "responseChecksum": "10a326479ae7c32c588d05aee34bd6f0d62d52c804aeabcde1b83ffbfdce5633", "pagination": false },
+    { "file": "game-live-feed-posted-lineups.json", "endpoint": "/api/v1.1/game/824474/feed/live", "method": "GET", "query": {}, "effectiveDate": "2026-08-20", "retrievedAt": "2026-08-21T13:30:00.000Z", "httpStatus": 200, "entityCount": 1, "responseChecksum": "9d35a2cd6a4c982f2ea81c2dbd46d971dce7ab5f5c77ed3745657407e0bcb646", "pagination": false },
+    { "file": "active-roster.json", "endpoint": "/api/v1/teams/138/roster/active", "method": "GET", "query": { "hydrate": "person" }, "effectiveDate": "2026-08-20", "retrievedAt": "2026-08-21T13:30:00.000Z", "httpStatus": 200, "entityCount": 26, "responseChecksum": "d52f874287e5325f90ff308dd61c74a4ac13932beaf398293307be1bd5ab74dc", "pagination": false },
+    { "file": "player-person.json", "endpoint": "/api/v1/people/676475", "method": "GET", "query": {}, "effectiveDate": "2026-08-20", "retrievedAt": "2026-08-21T13:30:00.000Z", "httpStatus": 200, "entityCount": 1, "responseChecksum": "1edb4d232362f122d7e7899871a44001d006c7bce3970b951da1b708d147892b", "pagination": false },
+    { "file": "completed-game-box-score.json", "endpoint": "/api/v1.1/game/824474/feed/live", "method": "GET", "query": {}, "effectiveDate": "2026-08-20", "retrievedAt": "2026-08-21T13:30:00.000Z", "httpStatus": 200, "entityCount": 1, "responseChecksum": "9d35a2cd6a4c982f2ea81c2dbd46d971dce7ab5f5c77ed3745657407e0bcb646", "pagination": false }
+  ]
+}

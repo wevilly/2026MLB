@@ -41,6 +41,8 @@ export const starterStateEnum = pgEnum("starter_state", [
 export const lineupStateEnum = pgEnum("lineup_state", [
   "PROJECTED",
   "POSTED",
+  "UPDATED",
+  "SCRATCHED",
   "UNKNOWN",
 ]);
 
@@ -96,6 +98,10 @@ export const ingestIssues = pgTable("ingest_issues", {
   entityType: text("entity_type"),
   entityKey: text("entity_key"),
   detail: text("detail").notNull(),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  latestSeenAt: timestamp("latest_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  state: text("state").notNull().default("OPEN"),
+  resolutionNote: text("resolution_note"),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -163,6 +169,9 @@ export const playerExternalIds = pgTable(
     externalPlayerId: text("external_player_id").notNull(),
     confidence: identityConfidenceEnum("confidence").notNull(),
     evidence: jsonb("evidence").notNull().default({}),
+    validFrom: timestamp("valid_from", { withTimezone: true }).notNull().defaultNow(),
+    validTo: timestamp("valid_to", { withTimezone: true }),
+    provenance: jsonb("provenance").notNull().default({}),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -174,6 +183,30 @@ export const playerExternalIds = pgTable(
     playerSourcePk: primaryKey({ columns: [table.playerId, table.sourceId] }),
   }),
 );
+
+export const identityMatchEvents = pgTable("identity_match_events", {
+  matchEventId: uuid("match_event_id").primaryKey().defaultRandom(),
+  playerId: integer("player_id").references(() => players.playerId),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  externalPlayerId: text("external_player_id").notNull(),
+  confidence: identityConfidenceEnum("confidence").notNull(),
+  algorithmVersion: text("algorithm_version").notNull(),
+  evidence: jsonb("evidence").notNull().default({}),
+  reviewer: text("reviewer"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const identityReviewQueue = pgTable("identity_review_queue", {
+  reviewId: uuid("review_id").primaryKey().defaultRandom(),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  externalPlayerId: text("external_player_id").notNull(),
+  rawName: text("raw_name").notNull(),
+  normalizedName: text("normalized_name").notNull(),
+  evidence: jsonb("evidence").notNull().default({}),
+  state: text("state").notNull().default("OPEN"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+});
 
 export const venues = pgTable("venues", {
   venueId: integer("venue_id").primaryKey(),
@@ -272,6 +305,7 @@ export const fantasyProsProjectionRows = pgTable(
     teamAbbreviation: text("team_abbreviation"),
     position: text("position"),
     projectedStats: jsonb("projected_stats").notNull().default({}),
+    normalizedStats: jsonb("normalized_stats").notNull().default({}),
     rawRow: jsonb("raw_row").notNull().default({}),
     identityConfidence: identityConfidenceEnum("identity_confidence").notNull().default("REVIEW_REQUIRED"),
   },
@@ -316,6 +350,28 @@ export const futureMarketPredictions = pgTable("future_market_predictions", {
   status: text("status"),
   predictedProbability: numeric("predicted_probability"),
   featureSnapshot: jsonb("feature_snapshot").notNull().default({}),
+  lineupSnapshotId: uuid("lineup_snapshot_id").references(() => lineupSnapshots.lineupSnapshotId),
+  sourceFreshness: jsonb("source_freshness").notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   frozen: boolean("frozen").notNull().default(false),
+  frozenAt: timestamp("frozen_at", { withTimezone: true }),
 });
+
+export const marketSettlementOutcomes = pgTable(
+  "market_settlement_outcomes",
+  {
+    gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
+    playerId: integer("player_id").notNull().references(() => players.playerId),
+    singles: integer("singles").notNull().default(0),
+    doubles: integer("doubles").notNull().default(0),
+    triples: integer("triples").notNull().default(0),
+    homeRuns: integer("home_runs").notNull().default(0),
+    totalBases: integer("total_bases").notNull().default(0),
+    walks: integer("walks").notNull().default(0),
+    sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    settlementPk: primaryKey({ columns: [table.gamePk, table.playerId] }),
+  }),
+);

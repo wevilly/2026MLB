@@ -1,0 +1,149 @@
+{
+  "schema_version": "1.0",
+  "effective_rule_date": "2026-08-20",
+  "warning": "Historical lessons are evidence. Current rules override retired pricing, EV, CLV and old market-structure rules.",
+  "markets_current": [
+    "TOTAL_BASES_2_PLUS",
+    "EXTRA_BASE_HIT",
+    "BATTER_WALK",
+    "HOME_RUN"
+  ],
+  "historical_market_note": "XBH was not previously tracked as a first-class market in these historical cards; do not fabricate historical XBH predictions.",
+  "slates": [
+    {
+      "date": "2026-08-08",
+      "source": "MLB 8/8 postmortem family",
+      "lessons": [
+        "Separate bad outcome from bad process.",
+        "Candidate generation and market-specific research matter more than forcing picks.",
+        "Walk research needs hitter discipline plus pitcher command and bullpen context.",
+        "Market-specific park factors are required; generic good-hitting-park labels are inadequate.",
+        "Repeated statistics should come from one source-of-truth table to prevent sheet drift."
+      ],
+      "superseded": [
+        "Any requirement that exact sportsbook price/EV/CLV is necessary for current prediction confidence."
+      ]
+    },
+    {
+      "date": "2026-08-10",
+      "source": "legacy_historical/10.txt",
+      "metrics": {
+        "tb_hits": 10,
+        "tb_legs": 20,
+        "tb_hit_rate": 0.5,
+        "mean_stated_tb": 0.410159,
+        "rr1_pairs_hit": 2,
+        "rr1_pairs_total": 10,
+        "rr2_pairs_hit": 0,
+        "rr2_pairs_total": 10
+      },
+      "lessons": [
+        "Generic same-team correlation should not be assumed from tiny samples.",
+        "RR1 implementation produced illegal cross-team pairs; validation must be structural and deterministic.",
+        "RR2 should lock the best TB anchor and shift the walker, not the anchor.",
+        "Walk research must include pitcher handedness-specific command and hitter discipline context.",
+        "Do not refit a probability model from one small slate."
+      ],
+      "superseded": [
+        "Price-gate and SGP-EV conclusions are historical only and are not current core requirements."
+      ]
+    },
+    {
+      "date": "2026-08-11",
+      "source": "legacy_historical/11 Card Build.txt",
+      "metrics": {
+        "primary_tb_half_games_hits": 4,
+        "primary_tb_half_games_legs": 6,
+        "pass_tb_hits": 2,
+        "pass_tb_legs": 11
+      },
+      "lessons": [
+        "Do not replace a zero correlation prior with a positive prior after only a few observed pairs.",
+        "Low-sample pitchers require explicit uncertainty, not false neutrality.",
+        "Both starters and both lineups must be researched.",
+        "Lineup rescrub near first pitch is operationally important because projected players may disappear.",
+        "Confidence layers can separate stronger research from forced coverage."
+      ],
+      "superseded": [
+        "Any price-based sleeper or pair evaluation requirement."
+      ]
+    },
+    {
+      "date": "2026-08-12",
+      "source": "MLB_Picks_20260812 historical card",
+      "lessons": [
+        "Projected lineups are valid research inputs when labeled honestly.",
+        "Starter/opening-role uncertainty must remain visible.",
+        "Bullpen state must be marked STALE when usage cannot be verified.",
+        "External projection/capper data is a cross-check rather than authority.",
+        "A PASS game can still contain research coverage without pretending it is strong conviction."
+      ],
+      "superseded": [
+        "Best Price and Book columns are historical schema, not current core fields."
+      ]
+    },
+    {
+      "date": "2026-08-14",
+      "source": "MLB_Picks_20260814 historical card",
+      "lessons": [
+        "Official TBD starters remain blocking items.",
+        "Projected lineups and second-feed disagreements must be explicit.",
+        "Do not target a pitcher because ERA is ugly when strikeout/contact shape does not support the market.",
+        "Game-level side selection does not mean every player market belongs to that side."
+      ],
+      "superseded": [
+        "Any price requirement in blocking/price/pen notes."
+      ]
+    },
+    {
+      "date": "2026-08-17",
+      "source": "MLB_Research_Card_20260817_v2_Independent.xlsx",
+      "metrics": {
+        "overall_hits": 27,
+        "overall_legs": 81,
+        "primary_tb_hits": 13,
+        "primary_tb_legs": 22,
+        "primary_walk_hits": 5,
+        "primary_walk_legs": 11,
+        "primary_hr_hits": 1,
+        "primary_hr_legs": 11,
+        "sleeper_tb_hits": 3,
+        "sleeper_tb_legs": 17,
+        "sleeper_walk_hits": 3,
+        "sleeper_walk_legs": 10,
+        "sleeper_hr_hits": 2,
+        "sleeper_hr_legs": 10,
+        "voids": 7
+      },
+      "lessons": [
+        "Old betting algorithm stays disabled.",
+        "Primary TB research performed substantially better than sleeper TB and HR on this slate.",
+        "Do not force sleeper/lower-order selections because a row exists.",
+        "Use lineup position as opportunity cost.",
+        "A good pitcher can still be a viable TB matchup when contact opportunity is high enough.",
+        "Full-game hitter props must account for starter workload and bullpen exposure."
+      ]
+    },
+    {
+      "date": "2026-08-18",
+      "source": "recent research revisions summarized in project history",
+      "lessons": [
+        "Lineup filtering comes before player ranking.",
+        "Preserve DTD/IL/status tags and distinguish stale source tags from current official state.",
+        "Research both teams; a game thesis does not forbid strong individual props from the other side.",
+        "One player should not dominate multiple markets without independent market-specific mechanisms.",
+        "Projection-vs-rolling conflicts should be recorded rather than hand-waved away.",
+        "Sleeper labels do not create confidence by themselves."
+      ]
+    }
+  ],
+  "cross_slate_current_lessons": [
+    "TB emphasizes contact opportunity, expected PA, pitcher contact/K profile, bullpen path, then power as a second route.",
+    "Walks emphasize hitter patience plus pitcher command/count creation and bullpen/umpire context.",
+    "HR should be selective and mechanism-specific; do not force a homer pick in every game.",
+    "XBH is now a new independent market and must be modeled from doubles/triples/HR mechanisms rather than copied from TB or HR.",
+    "Rank continuous evidence; do not turn arbitrary thresholds into false gates.",
+    "Do not fade hitters because of recent unders.",
+    "Broad metrics should contextualize, not erase handedness, pitch mix, contact-inducing profile and market-specific signals."
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "source": "FantasyPros",
+  "effectiveDate": "2026-08-21",
+  "schemaKeys": ["league_key", "season", "start", "end", "count", "games", "public_api_limited", "tier"],
+  "games": [
+    {
+      "game_id": "99904",
+      "status": "scheduled",
+      "teams": { "MIL": { "record": "" }, "ATL": { "record": "" } },
+      "hitters": {},
+      "pitchers": {
+        "ATL": { "player_id": "3207", "player_name": "Chris Sale" },
+        "MIL": { "player_id": "46366", "player_name": "Jacob Misiorowski" }
+      }
+    }
+  ]
+}

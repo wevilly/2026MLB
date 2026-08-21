@@ -1,0 +1,28 @@
+{
+  "source": "FantasyPros",
+  "effectiveDate": "2026-08-21",
+  "schemaKeys": ["sport", "count", "season", "week", "players", "public_api_limited", "tier"],
+  "players": [
+    {
+      "player_id": 3207,
+      "player_name": "Chris Sale",
+      "first_name": "Chris",
+      "last_name": "Sale",
+      "team_id": "ATL",
+      "mlbam_id": "519242",
+      "birthdate": "1989-03-30",
+      "primary_position": "P",
+      "throw_hand": "L",
+      "bat_hand": "L",
+      "status": "A"
+    },
+    {
+      "player_id": 3001,
+      "player_name": "A.J. Burnett",
+      "team_id": "FA",
+      "mlbam_id": null,
+      "primary_position": "P",
+      "status": "FA"
+    }
+  ]
+}

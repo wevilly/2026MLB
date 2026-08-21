@@ -1,0 +1,28 @@
+{
+  "source": "FantasyPros",
+  "effectiveDate": "2026-08-21",
+  "schemaKeys": ["league_key", "season", "start", "end", "count", "games", "public_api_limited", "tier"],
+  "games": [
+    {
+      "game_id": "99904",
+      "status": "scheduled",
+      "teams": { "MIL": { "record": "" }, "ATL": { "record": "" } },
+      "hitters": {
+        "ATL": {
+          "1": { "player_id": "6966", "rank_vbr": 7, "position": "RF" },
+          "2": { "player_id": "46737", "rank_vbr": 50, "position": "C" },
+          "9": { "player_id": "7355269", "rank_vbr": 1123, "position": "SS" }
+        },
+        "MIL": {
+          "1": { "player_id": "4596", "rank_vbr": 162, "position": "DH" },
+          "2": { "player_id": "44592", "rank_vbr": 12, "position": "LF" },
+          "9": { "player_id": "45567", "rank_vbr": 303, "position": "SS" }
+        }
+      },
+      "pitchers": {
+        "ATL": { "player_id": "3207", "player_name": "Chris Sale" },
+        "MIL": { "player_id": "46366", "player_name": "Jacob Misiorowski" }
+      }
+    }
+  ]
+}

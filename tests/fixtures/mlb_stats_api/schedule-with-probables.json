@@ -1,0 +1,13 @@
+{
+  "source": "MLB Official",
+  "effectiveDate": "2026-08-21",
+  "schedule": {
+    "gamePk": 823746,
+    "gameDate": "2026-08-21T20:10:00Z",
+    "gameType": "R",
+    "status": { "detailedState": "Scheduled", "statusCode": "S" },
+    "venue": { "id": 32, "name": "American Family Field" },
+    "away": { "team": { "id": 144, "abbreviation": "ATL", "name": "Atlanta Braves" }, "probablePitcher": { "id": 519242, "fullName": "Chris Sale" } },
+    "home": { "team": { "id": 158, "abbreviation": "MIL", "name": "Milwaukee Brewers" }, "probablePitcher": { "id": 694819, "fullName": "Jacob Misiorowski" } }
+  }
+}

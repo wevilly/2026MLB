@@ -1,0 +1,12 @@
+{
+  "source": "FantasyPros",
+  "sanitized": true,
+  "fixtures": [
+    { "file": "hitter-daily-projections.json", "endpoint": "/mlb/2026/projections", "method": "GET", "query": { "type": "daily", "position": "H", "date": "2026-08-21" }, "effectiveDate": "2026-08-21", "retrievedAt": "2026-08-21T13:30:00.000Z", "httpStatus": 200, "entityCount": 523, "responseChecksum": "12bcc9763ad158680d09fd0a41af1560a8cfbb983b89066fef93ef6cba637f63", "pagination": false, "rateLimitHeaders": {} },
+    { "file": "pitcher-daily-projections.json", "endpoint": "/mlb/2026/projections", "method": "GET", "query": { "type": "daily", "position": "P", "date": "2026-08-21" }, "effectiveDate": "2026-08-21", "retrievedAt": "2026-08-21T13:30:00.000Z", "httpStatus": 200, "entityCount": 271, "responseChecksum": "cd955e3de6c1e5a56aef2a4ff72a740ed49d92849b80fd98678c16af643161e1", "pagination": false, "rateLimitHeaders": {} },
+    { "file": "projected-lineups.json", "endpoint": "/mlb/lineups", "method": "GET", "query": { "start": "2026-08-21", "period": "REG", "projected": "true" }, "effectiveDate": "2026-08-21", "retrievedAt": "2026-08-21T13:30:00.000Z", "httpStatus": 200, "entityCount": 15, "responseChecksum": "d1f4ed41c778a7fcec645f0114b1c385b6ab1f4a9f97d8f239daeb0de50a78da", "pagination": false, "rateLimitHeaders": {} },
+    { "file": "current-lineups.json", "endpoint": "/mlb/lineups", "method": "GET", "query": { "start": "2026-08-21", "period": "REG" }, "effectiveDate": "2026-08-21", "retrievedAt": "2026-08-21T13:30:00.000Z", "httpStatus": 200, "entityCount": 15, "responseChecksum": "ff63e33ecb7cbb6ba668818d8cb9245ccc929b31a6daf1bc851d955df840e75b", "pagination": false, "rateLimitHeaders": {} },
+    { "file": "player-metadata.json", "endpoint": "/mlb/players", "method": "GET", "query": { "external_ids": "mlbam" }, "effectiveDate": "2026-08-21", "retrievedAt": "2026-08-21T13:30:00.000Z", "httpStatus": 200, "entityCount": 14184, "responseChecksum": "38453f4be1201c90b496cfe40a08afa8688c561b1aa5362536bf86412d4222a9", "pagination": false, "rateLimitHeaders": {} },
+    { "file": "news.json", "endpoint": "/mlb/news", "method": "GET", "query": { "limit": "100" }, "effectiveDate": "2026-08-21", "retrievedAt": "2026-08-21T13:30:00.000Z", "httpStatus": 200, "entityCount": 95, "responseChecksum": "8308705c924a6c33083cb701700bf2b412486695d8e9661fbeb32ac5bc39609f", "pagination": false, "rateLimitHeaders": {} }
+  ]
+}

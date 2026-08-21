@@ -1,0 +1,10 @@
+{
+  "source": "MLB Official",
+  "effectiveDate": "2026-08-20",
+  "gamePk": 824474,
+  "status": "Final",
+  "batting": [
+    { "playerId": 802139, "fullName": "JJ Wetherholt", "hits": 1, "doubles": 0, "triples": 0, "homeRuns": 0, "totalBases": 1, "baseOnBalls": 0 },
+    { "playerId": 691023, "fullName": "Jordan Walker", "hits": 1, "doubles": 0, "triples": 0, "homeRuns": 1, "totalBases": 4, "baseOnBalls": 1 }
+  ]
+}
