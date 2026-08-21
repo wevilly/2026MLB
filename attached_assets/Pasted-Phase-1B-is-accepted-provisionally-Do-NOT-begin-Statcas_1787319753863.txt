@@ -1,0 +1,341 @@
+Phase 1B is accepted provisionally.
+
+Do NOT begin Statcast research, market models, predictions, picks, or Phase 2 yet.
+
+One data-foundation problem must be resolved first:
+
+**Current-player identity and active-player hygiene.**
+
+The Phase 1B report shows:
+
+* 794 latest FantasyPros projection rows
+* 667 resolved identities
+* 127 unresolved identities
+* 84.0% overall match rate
+
+Examples of unresolved records include names such as Andy LaRoche, Matt Downs, and Cristian Guzman.
+
+That means the raw FantasyPros universe cannot yet be treated as the current MLB player universe.
+
+The purpose of Phase 1C is to distinguish:
+
+1. CURRENT MLB PLAYER
+2. CURRENT MINOR LEAGUE / NON-ACTIVE PLAYER
+3. HISTORICAL / RETIRED PLAYER
+4. DUPLICATE / ALIAS RECORD
+5. UNRESOLVED CURRENT PLAYER
+
+Only category 1 and properly labeled category 2 records may enter future research pipelines.
+
+Historical, retired, duplicate, or irrelevant rows must remain auditable but must not contaminate Today's research pool.
+
+# 1. BUILD CURRENT-PLAYER ELIGIBILITY
+
+Create an explicit eligibility/state layer for every canonical/source player.
+
+Support states such as:
+
+* MLB_ACTIVE
+* MLB_40_MAN
+* MLB_IL
+* MLB_OPTIONED
+* MINOR_LEAGUE
+* FREE_AGENT
+* HISTORICAL
+* RETIRED
+* UNKNOWN
+
+Do not infer a player's status from age or name.
+
+Use official MLB roster/team state whenever possible.
+
+FantasyPros may contribute evidence but cannot override official MLB roster state.
+
+Store:
+
+* status
+* effective date
+* source
+* retrieval timestamp
+* evidence
+* confidence
+
+# 2. SEPARATE RAW PROJECTION UNIVERSE FROM TODAY CANDIDATE UNIVERSE
+
+The application must distinguish:
+
+RAW FANTASYPROS PROJECTION ROWS
+
+from
+
+CURRENT MLB RESEARCH-ELIGIBLE PLAYERS
+
+Do not discard raw rows.
+
+Preserve them for audit.
+
+But Today's candidate universe should only contain players who satisfy a valid current-state path such as:
+
+* official MLB active roster
+* official injured list with active-season status
+* official 40-man roster
+* officially scheduled/probable starter
+* official posted lineup
+* FantasyPros projected lineup that maps to a current MLB organization/player identity
+
+A historical player record must never appear in Today, Game Lab, Player Lab candidate lists, or future prediction pools simply because FantasyPros returned it.
+
+# 3. AUDIT ALL 127 UNRESOLVED IDENTITIES
+
+Classify every unresolved latest FantasyPros record.
+
+Return counts for:
+
+* current MLB players needing identity resolution
+* current minor-league players
+* historical/retired players
+* duplicate/alias records
+* stale FantasyPros records
+* genuinely unresolved records
+
+Do not report one 84% aggregate match rate without this decomposition.
+
+The important metric is:
+
+**Identity coverage among players who could actually matter to today's MLB slate.**
+
+# 4. HARD COVERAGE REQUIREMENTS FOR CRITICAL ENTITIES
+
+Before Phase 2:
+
+Every official MLB starter must have a canonical player identity.
+
+Every player in an official POSTED lineup must have a canonical player identity.
+
+Every player in a FantasyPros PROJECTED starting lineup must either:
+
+* resolve to a canonical current player
+
+OR
+
+* generate a visible blocking identity-review issue.
+
+No silently unresolved projected starter may enter future market research.
+
+Bench/minor/historical raw projection rows do not need to be force-matched merely to improve a headline percentage.
+
+# 5. USE AUTHORITATIVE ID BRIDGES
+
+Use public sources already identified in the project.
+
+At minimum inspect/use:
+
+* MLBAM identifiers from MLB Stats API
+* Chadwick Register
+* FanGraphs identifiers where available
+* Baseball-Reference / Retrosheet bridges where useful
+* FantasyPros source IDs
+
+Do not fuzzy-match based only on name.
+
+Name similarity may generate a candidate match but cannot finalize one without corroborating evidence such as:
+
+* team
+* organization
+* birth date
+* position
+* handedness
+* MLBAM mapping
+* historical ID bridge
+
+# 6. HANDLE ACCENTS / SUFFIXES / NAME VARIANTS
+
+Canonical normalization should safely support:
+
+* José / Jose
+* Jr. / Jr
+* III
+* hyphens
+* apostrophes
+* middle initials
+* abbreviated first names
+* known alternate professional names
+
+Preserve the original source display name.
+
+Never destroy diacritics in the canonical display name merely for matching.
+
+# 7. DUPLICATE DETECTION
+
+Detect cases where multiple FantasyPros IDs map to the same real player.
+
+Create an auditable merge/link event.
+
+Do not delete historical source IDs.
+
+A canonical player may have multiple historical aliases/source records.
+
+# 8. CURRENT TEAM / ORGANIZATION VALIDATION
+
+For every research-eligible player store:
+
+* current MLB organization
+* current roster state
+* source effective date
+
+Flag disagreement when:
+
+FantasyPros team != official MLB current organization.
+
+Do not silently accept stale team assignments.
+
+Create:
+
+TEAM_ASSIGNMENT_CONFLICT
+
+in Data Health.
+
+# 9. PROJECTION ELIGIBILITY FLAGS
+
+Add explicit fields or derived state such as:
+
+* eligible_today_research
+* eligible_lineup_projection
+* eligible_pitcher_research
+* requires_identity_review
+
+The future modeling system must consume the eligible research universe, not the entire raw FantasyPros directory.
+
+# 10. SNAPSHOT CONTENT DEDUPLICATION
+
+Continue storing every retrieval event.
+
+Do NOT overwrite immutable snapshots.
+
+However, compute and store normalized content checksums.
+
+If a newly retrieved projection payload is identical to the immediately prior payload for the same source/effective scope, mark:
+
+UNCHANGED_FROM_PRIOR = true
+
+Preserve the observation timestamp.
+
+Do not pretend an identical retrieval represents projection movement.
+
+Projection Center should eventually collapse or visually group unchanged observations.
+
+# 11. TODAY DATA QUALITY METRICS
+
+Add to Data Health:
+
+CURRENT SLATE IDENTITY COVERAGE
+
+Display separately:
+
+* official starters mapped / total
+* official lineup players mapped / total
+* projected lineup players mapped / total
+* active MLB projection players mapped / total
+* unresolved active MLB players
+* quarantined historical/stale source rows
+
+Do not rely primarily on a global directory match percentage.
+
+# 12. HISTORICAL / STALE PLAYER QUARANTINE
+
+Historical/stale FantasyPros rows must remain in raw data and source audit records.
+
+They should be marked:
+
+QUARANTINED_FROM_CURRENT_RESEARCH
+
+with reason.
+
+Examples:
+
+* historical player
+* retired
+* no current organization
+* stale source identity
+* duplicate source record
+
+Do not delete them merely to make metrics look cleaner.
+
+# 13. ADD TESTS
+
+Create automated tests proving:
+
+### Critical identity
+
+100% of official starters resolve.
+
+100% of official posted-lineup players resolve.
+
+Projected-lineup unresolved identities generate a blocking issue.
+
+### Historical quarantine
+
+A historical player returned by FantasyPros does not enter Today's candidate universe.
+
+### Team conflict
+
+A stale source team assignment produces a Data Health conflict.
+
+### Alias resolution
+
+Accent/suffix variants resolve correctly when corroborating identity data exists.
+
+### Duplicate IDs
+
+Two external IDs for the same canonical player do not create duplicate players.
+
+### Snapshot equality
+
+Identical projection payloads create a new retrieval observation but are marked unchanged rather than projection movement.
+
+# 14. DO NOT START PHASE 2
+
+Do not add:
+
+* Statcast research
+* FanGraphs research
+* TB model
+* XBH model
+* Walk model
+* HR model
+* FIRE/HALF/HOLD prediction statuses
+* bettor intelligence
+* AI predictions
+
+This remains data foundation.
+
+# PHASE 1C ACCEPTANCE REPORT
+
+Stop and return:
+
+1. Breakdown of all 127 previously unresolved FantasyPros identities.
+2. Number classified historical/retired.
+3. Number classified current minor league.
+4. Number classified current MLB.
+5. Number duplicate/alias.
+6. Number genuinely unresolved after authoritative lookup.
+7. Official starter identity coverage.
+8. Posted-lineup identity coverage.
+9. FantasyPros projected-lineup identity coverage.
+10. Current active-player projection identity coverage.
+11. Number of quarantined stale/historical records.
+12. Team-assignment conflicts found.
+13. Alias/duplicate resolutions performed.
+14. Tests and results.
+15. Updated Data Health screenshot.
+16. Updated Today screenshot.
+17. Any source limitations.
+18. Any deviation from this prompt.
+
+Do not proceed automatically.
+
+The next approved phase after this will be:
+
+**Phase 2A - Player, Pitcher, Park, and Statcast Research Data Foundation**
+
+NOT market modeling yet.
