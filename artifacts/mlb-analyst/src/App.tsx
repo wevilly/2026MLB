@@ -281,11 +281,11 @@ function ProjectionsPage() {
         <>
           <Panel className="snapshot-banner">
             <div><Kicker>Active snapshot</Kicker><strong>{data.snapshotLabel}</strong></div>
-            <div className="snapshot-times"><div><span>Current as of</span><strong>{data.currentAsOf}</strong></div><div><span>Prior as of</span><strong>{data.priorAsOf ?? 'Not available'}</strong></div></div>
+            <div className="snapshot-times"><div><span>Effective date</span><strong>{data.effectiveDate.slice(0, 10)}</strong></div><div><span>Current as of</span><strong>{data.currentAsOf}</strong></div><div><span>Prior as of</span><strong>{data.priorAsOf ?? 'Not available'}</strong></div></div>
             <Badge tone="good"><StatusDot tone="good" /> Reproducible view</Badge>
           </Panel>
           <Panel className="projection-panel">
-            <SectionHeading eyebrow="Player source components" title="Four-market foundation" detail={`${data.rows?.length ?? 0} rows / source components only`} action={<button className="icon-button" onClick={() => refreshFantasyPros.mutate({})} disabled={refreshFantasyPros.isPending} aria-label="Ingest FantasyPros projection table" data-testid="button-refresh-projection-table"><RefreshCw size={15} /></button>} />
+            <SectionHeading eyebrow="Latest current-date source components" title="Four-market foundation" detail={`${data.uniqueEligiblePlayers ?? 0} unique players · ${data.uniqueEligibleHitters ?? 0} hitters / ${data.uniqueEligiblePitchers ?? 0} pitchers · ${data.rows?.length ?? 0} component rows`} action={<button className="icon-button" onClick={() => refreshFantasyPros.mutate({})} disabled={refreshFantasyPros.isPending} aria-label="Ingest FantasyPros projection table" data-testid="button-refresh-projection-table"><RefreshCw size={15} /></button>} />
             {data.rows?.length ? <ProjectionTable rows={data.rows} /> : <QueryMessage kind="empty" />}
           </Panel>
           <Panel className="notes-panel"><div className="notes-title"><BookOpen size={16} /><Kicker>System notes</Kicker></div>{data.systemNotes?.length ? <div className="notes-grid">{data.systemNotes.map((note, index) => <div key={`${note}-${index}`} data-testid={`system-note-${index}`}><span>0{index + 1}</span><p>{note}</p></div>)}</div> : <p className="muted-copy">No notes attached to this snapshot.</p>}</Panel>

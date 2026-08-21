@@ -9,6 +9,11 @@ import type { ProjectionRow } from './projectionRow';
 
 export interface ProjectionCenter {
   snapshotLabel: string;
+  effectiveDate: Date;
+  snapshotIds: string[];
+  uniqueEligibleHitters: number;
+  uniqueEligiblePitchers: number;
+  uniqueEligiblePlayers: number;
   currentAsOf: string;
   /** @nullable */
   priorAsOf: string | null;

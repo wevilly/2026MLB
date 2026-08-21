@@ -182,11 +182,16 @@ components:
       type: object
       properties:
         snapshotLabel: { type: string }
+        effectiveDate: { type: string, format: date }
+        snapshotIds: { type: array, items: { type: string } }
+        uniqueEligibleHitters: { type: number }
+        uniqueEligiblePitchers: { type: number }
+        uniqueEligiblePlayers: { type: number }
         currentAsOf: { type: string }
         priorAsOf: { type: ["string", "null"] }
         rows: { type: array, items: { $ref: "#/components/schemas/ProjectionRow" } }
         systemNotes: { type: array, items: { type: string } }
-      required: [snapshotLabel, currentAsOf, priorAsOf, rows, systemNotes]
+      required: [snapshotLabel, effectiveDate, snapshotIds, uniqueEligibleHitters, uniqueEligiblePitchers, uniqueEligiblePlayers, currentAsOf, priorAsOf, rows, systemNotes]
     HealthIssue:
       type: object
       properties:

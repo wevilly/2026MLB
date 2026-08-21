@@ -129,4 +129,6 @@ test("projection reads are scoped to the current effective date", () => {
   const routes = readText("artifacts/api-server/src/routes/analyst.ts");
   assert.ok(routes.includes('const date = requestedDate(req.query.date);'));
   assert.ok(routes.includes("WHERE effective_date = $1"), "Projection Center must not fall back to a historical snapshot");
+  assert.ok(!routes.includes("ORDER BY f.team_abbreviation, f.source_player_id LIMIT 500"), "Latest Projection Center must include every current eligible player, not a truncated component subset");
+  assert.ok(routes.includes("uniqueEligiblePlayers"), "Latest Projection Center must distinguish unique players from component rows");
 });

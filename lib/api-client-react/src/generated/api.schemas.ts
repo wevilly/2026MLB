@@ -90,6 +90,11 @@ export interface ProjectionRow {
 
 export interface ProjectionCenter {
   snapshotLabel: string;
+  effectiveDate: string;
+  snapshotIds: string[];
+  uniqueEligibleHitters: number;
+  uniqueEligiblePitchers: number;
+  uniqueEligiblePlayers: number;
   currentAsOf: string;
   /** @nullable */
   priorAsOf: string | null;

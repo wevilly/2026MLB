@@ -259,19 +259,20 @@ router.get("/analyst/projections", async (req, res, next) => {
           JOIN player_eligibility pe ON pe.source_id = 'FANTASYPROS'
             AND pe.external_player_id = f.source_player_id AND pe.effective_date = s.effective_date
           WHERE f.snapshot_id = ANY($1) AND pe.eligible_today_research AND NOT pe.requires_identity_review
-          ORDER BY f.team_abbreviation, f.source_player_id LIMIT 500`,
+           ORDER BY f.team_abbreviation, f.source_player_id`,
         [snapshots.rows.map((snapshot) => snapshot.snapshot_id)],
       )).rows
       : [];
     const playerFilter = String(req.query.player ?? "").trim().toLowerCase();
     const teamFilter = String(req.query.team ?? "").trim().toLowerCase();
     const roleFilter = String(req.query.role ?? "").trim().toLowerCase();
-    const projectionRows = rows.filter((row) => {
+    const filteredRows = rows.filter((row) => {
       const player = String(row.raw_row?.player_name ?? row.raw_row?.name ?? row.source_player_id).toLowerCase();
       return (!playerFilter || player.includes(playerFilter))
         && (!teamFilter || String(row.team_abbreviation ?? "").toLowerCase() === teamFilter)
         && (!roleFilter || String(row.position ?? "").toLowerCase() === roleFilter);
-    }).flatMap((row) => {
+    });
+    const projectionRows = filteredRows.flatMap((row) => {
       const stats = row.projected_stats ?? {};
       const player = String(row.raw_row?.player_name ?? row.raw_row?.name ?? row.source_player_id);
       const base = { player, team: row.team_abbreviation ?? "—", position: row.position ?? "—", prior: null, asOf: isoString(currentAsOf) ?? "NOT FOUND", movement: "No prior snapshot" };
@@ -284,12 +285,18 @@ router.get("/analyst/projections", async (req, res, next) => {
     });
     res.json(GetAnalystProjectionsResponse.parse({
       snapshotLabel: snapshots.rows.length ? "FantasyPros · current hitter and pitcher snapshots" : (fantasyProsConfigured ? "FantasyPros · waiting for first ingest" : "FantasyPros · credential required"),
+      effectiveDate: date.slice(0, 10),
+      snapshotIds: snapshots.rows.map((snapshot) => snapshot.snapshot_id),
+      uniqueEligibleHitters: filteredRows.filter((row) => row.position === "H").length,
+      uniqueEligiblePitchers: filteredRows.filter((row) => row.position === "P").length,
+      uniqueEligiblePlayers: new Set(filteredRows.map((row) => row.source_player_id)).size,
       currentAsOf: isoString(currentAsOf) ?? "NOT FOUND",
       priorAsOf: null,
       rows: projectionRows,
       systemNotes: [
         "Each FantasyPros response is stored as an immutable snapshot with raw payload metadata and checksum.",
         "Only current, authoritative-roster-eligible players appear here; quarantined raw rows remain available to audit.",
+        "Latest uses only the listed snapshots for this effective date; component rows are not distinct current players.",
         "Walk and home run cells are source components, not predicted market probabilities.",
         "2+ Total Bases and 1+ XBH remain explicitly unmodeled until validated research engines exist.",
       ],

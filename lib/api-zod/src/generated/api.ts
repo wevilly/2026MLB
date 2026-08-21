@@ -82,6 +82,11 @@ export const GetAnalystProjectionsQueryParams = zod.object({
 
 export const GetAnalystProjectionsResponse = zod.object({
   "snapshotLabel": zod.string(),
+  "effectiveDate": zod.coerce.date(),
+  "snapshotIds": zod.array(zod.string()),
+  "uniqueEligibleHitters": zod.number(),
+  "uniqueEligiblePitchers": zod.number(),
+  "uniqueEligiblePlayers": zod.number(),
   "currentAsOf": zod.string(),
   "priorAsOf": zod.string().nullable(),
   "rows": zod.array(zod.object({

@@ -56,3 +56,59 @@ mtime_ms = 1787321491124
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/f092435f-5f99-401c-bacb-cca1751476b0/aa294204-172e-42f8-a7f3-d7e9ae347543"
 storage_version_token = "1787321515659853"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "ZBYUlnDO3VxqRzWnoEWug"
+uri = "file://screenshots/phase-1c-acceptance-today.jpg"
+type = "image"
+title = "Phase 1C acceptance — Today"
+description = "Current identity coverage and slate state."
+logical_id = "25fc94d8-d924-4123-bda9-d88162ac5dcf"
+content_hash = "sha256:476298a883201ebe3508f86f630f3b29154cccfa3510c6fea881229aee0cf77b"
+size = 139150
+mtime_ms = 1787323462543
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/25fc94d8-d924-4123-bda9-d88162ac5dcf/743a9cb0-af59-41cf-b1fd-db54438a5d0f"
+storage_version_token = "1787323527525591"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "-OnJDNU3i2MCXvRilu-6a"
+uri = "file://screenshots/phase-1c-acceptance-projection-center-final.jpg"
+type = "image"
+title = "Phase 1C acceptance — Projection Center"
+description = "Current effective-date Latest view with unique-player and component-row counts."
+logical_id = "26a80c3b-03b0-4a18-99d8-d955654000cc"
+content_hash = "sha256:614e201570b58ecee202ac9447cf83b065fbedd544827c4378fa6fcb0d258208"
+size = 139814
+mtime_ms = 1787323515967
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/26a80c3b-03b0-4a18-99d8-d955654000cc/425c628a-0702-409a-bda6-a27718ddcb61"
+storage_version_token = "1787323528122042"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "uN5bMDUXGpvik46mMsaE5"
+uri = "file://screenshots/phase-1c-acceptance-data-health.jpg"
+type = "image"
+title = "Phase 1C acceptance — Data Health"
+description = "Current eligibility coverage, quarantine, conflict, and source freshness metrics."
+logical_id = "82b90600-7177-4f27-b307-82a271cccc82"
+content_hash = "sha256:35634cedb68b2c61f0f92f39af1e259090e20b5bc9665ddc8e208875010a6c7b"
+size = 138353
+mtime_ms = 1787323471631
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/82b90600-7177-4f27-b307-82a271cccc82/56a25674-5818-4aef-bbc5-2b18c07aa7eb"
+storage_version_token = "1787323528751100"
+content_type = "image/jpeg"
+
+[[outputs]]
+id = "OSQe7Xtz6tbPCWXIrfwJq"
+uri = "file://screenshots/phase-1c-acceptance-settings.jpg"
+type = "image"
+title = "Phase 1C acceptance — Settings"
+description = "Safe connection metadata and read-only controls."
+logical_id = "24933886-7a85-4e2d-8a05-a95b72aa699f"
+content_hash = "sha256:8fed41cd044ccf53d3046b2a686138e43612dac0c49bcc39937ab885e6bb95bd"
+size = 82949
+mtime_ms = 1787323474503
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/24933886-7a85-4e2d-8a05-a95b72aa699f/df8350e2-e92f-4062-96f4-9212e4568067"
+storage_version_token = "1787323529335093"
+content_type = "image/jpeg"
