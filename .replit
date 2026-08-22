@@ -41,3 +41,14 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+
+[userenv.shared."postgresql:"]
+
+[userenv.shared."postgresql:".""]
+
+[userenv.shared."postgresql:".""."postgres:password@helium"]
+"heliumdb?sslmode=disable" = "postgresql://postgres:password@helium/heliumdb?sslmode=disable"
