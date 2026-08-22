@@ -1,5 +1,5 @@
 import { Router, type IRouter, type RequestHandler } from "express";
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   GetAnalystBullpenRoomResponse,
   GetAnalystDataHealthResponse,
@@ -1555,19 +1555,58 @@ function aiWorkflowErrorResponse(error: unknown, res: Parameters<RequestHandler>
   return false;
 }
 
-function hasOperatorApprovalCapability(req: Parameters<RequestHandler>[0], res: Parameters<RequestHandler>[1]) {
+function matchesOperatorApprovalKey(received: unknown, expected: string) {
+  return typeof received === "string"
+    && Buffer.byteLength(received) === Buffer.byteLength(expected)
+    && timingSafeEqual(Buffer.from(received), Buffer.from(expected));
+}
+
+const APPROVAL_OPERATOR_ID = "AI_REVIEW_OPERATOR";
+
+function issueOperatorApprovalSession(res: Parameters<RequestHandler>[1], secret: string): void {
+  const payload = Buffer.from(JSON.stringify({ operatorId: APPROVAL_OPERATOR_ID, expiresAt: Date.now() + 15 * 60 * 1000 })).toString("base64url");
+  const signature = createHmac("sha256", secret).update(payload).digest("base64url");
+  res.cookie("ai_operator_approval", `${payload}.${signature}`, {
+    httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production", maxAge: 15 * 60 * 1000, path: "/api/analyst/ai",
+  });
+}
+
+function hasOperatorApprovalCapability(req: Parameters<RequestHandler>[0], res: Parameters<RequestHandler>[1]): string | null {
   const expected = process.env.AI_ANALYST_OPERATOR_APPROVAL_KEY;
-  const received = req.get("x-analyst-approval-key");
   if (!expected) {
     res.status(503).json({ error: "Operator approval is unavailable until AI_ANALYST_OPERATOR_APPROVAL_KEY is configured." });
-    return false;
+    return null;
   }
-  if (!received || Buffer.byteLength(received) !== Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(received), Buffer.from(expected))) {
-    res.status(403).json({ error: "A valid operator approval capability is required for this action." });
-    return false;
+  const rawCookie = req.headers.cookie?.split(";").map((item) => item.trim()).find((item) => item.startsWith("ai_operator_approval="))?.slice("ai_operator_approval=".length);
+  const [payload, signature] = rawCookie?.split(".") ?? [];
+  const expectedSignature = payload ? createHmac("sha256", expected).update(payload).digest("base64url") : "";
+  if (!payload || !signature || !matchesOperatorApprovalKey(signature, expectedSignature)) {
+    res.status(403).json({ error: "A valid operator approval session is required for this action." });
+    return null;
   }
-  return true;
+  try {
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { operatorId?: unknown; expiresAt?: unknown };
+    if (session.operatorId !== APPROVAL_OPERATOR_ID || typeof session.expiresAt !== "number" || session.expiresAt < Date.now()) throw new Error("expired");
+    return APPROVAL_OPERATOR_ID;
+  } catch {
+    res.status(403).json({ error: "The operator approval session is expired or invalid." });
+    return null;
+  }
 }
+
+router.post("/analyst/ai/operator-session", (req, res) => {
+  const secret = process.env.AI_ANALYST_OPERATOR_APPROVAL_KEY;
+  if (!secret) {
+    res.status(503).json({ error: "Operator approval is unavailable until AI_ANALYST_OPERATOR_APPROVAL_KEY is configured." });
+    return;
+  }
+  if (!matchesOperatorApprovalKey(req.body?.approvalKey, secret)) {
+    res.status(403).json({ error: "Invalid operator approval key." });
+    return;
+  }
+  issueOperatorApprovalSession(res, secret);
+  res.json({ operatorId: APPROVAL_OPERATOR_ID, expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+});
 
 router.post("/analyst/ai/chat", async (req, res, next) => {
   try {
@@ -1616,14 +1655,15 @@ router.post("/analyst/ai/drafts", async (req, res, next) => {
 
 router.post("/analyst/ai/drafts/:draftId/approve", async (req, res, next) => {
   try {
-    if (!hasOperatorApprovalCapability(req, res)) return;
+    const operatorName = hasOperatorApprovalCapability(req, res);
+    if (!operatorName) return;
     const params = ApproveAnalystAiDraftParams.safeParse(req.params);
     const body = ApproveAnalystAiDraftBody.safeParse(req.body);
     if (!params.success || !body.success) {
       res.status(400).json({ error: "Invalid AI draft approval payload." });
       return;
     }
-    const result = await reviewAiResearchDraft(params.data.draftId, body.data, "APPROVED");
+    const result = await reviewAiResearchDraft(params.data.draftId, { ...body.data, reviewedBy: operatorName }, "APPROVED");
     res.json(ApproveAnalystAiDraftResponse.parse(result));
   } catch (error) {
     if (aiWorkflowErrorResponse(error, res)) return;
@@ -1633,14 +1673,15 @@ router.post("/analyst/ai/drafts/:draftId/approve", async (req, res, next) => {
 
 router.post("/analyst/ai/drafts/:draftId/reject", async (req, res, next) => {
   try {
-    if (!hasOperatorApprovalCapability(req, res)) return;
+    const operatorName = hasOperatorApprovalCapability(req, res);
+    if (!operatorName) return;
     const params = RejectAnalystAiDraftParams.safeParse(req.params);
     const body = RejectAnalystAiDraftBody.safeParse(req.body);
     if (!params.success || !body.success) {
       res.status(400).json({ error: "Invalid AI draft rejection payload." });
       return;
     }
-    const result = await reviewAiResearchDraft(params.data.draftId, body.data, "REJECTED");
+    const result = await reviewAiResearchDraft(params.data.draftId, { ...body.data, reviewedBy: operatorName }, "REJECTED");
     res.json(RejectAnalystAiDraftResponse.parse(result));
   } catch (error) {
     if (aiWorkflowErrorResponse(error, res)) return;
@@ -1665,14 +1706,15 @@ router.get("/analyst/ai/sourcing-register", async (req, res, next) => {
 
 router.patch("/analyst/ai/sourcing-register/:claimId", async (req, res, next) => {
   try {
-    if (!hasOperatorApprovalCapability(req, res)) return;
+    const operatorName = hasOperatorApprovalCapability(req, res);
+    if (!operatorName) return;
     const params = DecideAnalystAiSourcingClaimParams.safeParse(req.params);
     const body = DecideAnalystAiSourcingClaimBody.safeParse(req.body);
     if (!params.success || !body.success) {
       res.status(400).json({ error: "Invalid sourcing-register decision." });
       return;
     }
-    const claim = await decideAiSourcingClaim(params.data.claimId, body.data);
+    const claim = await decideAiSourcingClaim(params.data.claimId, { ...body.data, reviewedBy: operatorName });
     res.json(DecideAnalystAiSourcingClaimResponse.parse(claim));
   } catch (error) {
     if (aiWorkflowErrorResponse(error, res)) return;

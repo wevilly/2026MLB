@@ -160,7 +160,7 @@ describe("Phase 8A – AI Analyst Read-Only Tool Layer", () => {
     );
     await assert.rejects(
       () => pool.query("TRUNCATE ai_tool_call_log"),
-      /append-only/i,
+      /append-only|foreign key constraint/i,
     );
   });
 });

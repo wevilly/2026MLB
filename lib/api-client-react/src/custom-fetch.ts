@@ -358,13 +358,6 @@ export async function customFetch<T = unknown>(
     }
   }
 
-  // Human-only AI approvals use a server-held capability. It is deliberately
-  // session-scoped in the browser, never persisted in application data.
-  if (typeof window !== "undefined" && !headers.has("x-analyst-approval-key")) {
-    const approvalKey = window.sessionStorage?.getItem("mlb-ai-analyst-approval-key");
-    if (approvalKey) headers.set("x-analyst-approval-key", approvalKey);
-  }
-
   const requestInfo = { method, url: resolveUrl(input) };
 
   const response = await fetch(input, { ...init, method, headers });

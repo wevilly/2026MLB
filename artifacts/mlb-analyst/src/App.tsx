@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useRef, useState } from 'react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore, useGetAnalystDailyMarketBoard, useGetAnalystDailyBoardGameSummary, useRefreshAnalystDailyMarketBoard, useGetAnalystBettorEvaluation, useChatWithAnalystAi, useGetAnalystAiDrafts, useCreateAnalystAiDraft, useApproveAnalystAiDraft, useRejectAnalystAiDraft, useGetAnalystAiSourcingRegister, useDecideAnalystAiSourcingClaim, useGetAnalystAiResearchNotes } from '@workspace/api-client-react';
@@ -2304,11 +2304,11 @@ function BettorIntelligencePage() {
 
 function AiAnalystPage() {
   const [sessionId, setSessionId] = useState(() => localStorage.getItem('mlb-ai-analyst-session') || `operator-${crypto.randomUUID()}`);
-  const [operatorName, setOperatorName] = useState(() => localStorage.getItem('mlb-ai-analyst-operator') || '');
   const [question, setQuestion] = useState('');
   const [claimNote, setClaimNote] = useState('');
   const [history, setHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
-  const [approvalKey, setApprovalKey] = useState('');
+  const approvalKeyRef = useRef<HTMLInputElement>(null);
+  const [approvalReady, setApprovalReady] = useState(false);
   const [latestResponse, setLatestResponse] = useState<{ response: string; sourcingClaimIds: string[]; toolName: string } | null>(null);
 
   const chat = useChatWithAnalystAi();
@@ -2324,6 +2324,20 @@ function AiAnalystPage() {
     drafts.refetch();
     claims.refetch();
     notes.refetch();
+  };
+
+  const unlockReview = async () => {
+    const approvalKey = approvalKeyRef.current?.value ?? '';
+    if (!approvalKey) return;
+    const response = await fetch('/api/analyst/ai/operator-session', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approvalKey }),
+    });
+    if (response.ok) {
+      approvalKeyRef.current!.value = '';
+      setApprovalReady(true);
+    }
   };
 
   const submitQuestion = () => {
@@ -2355,27 +2369,27 @@ function AiAnalystPage() {
   };
 
   const reviewDraft = (draftId: string, approved: boolean) => {
-    if (!operatorName.trim()) return;
+    if (!approvalReady) return;
     const mutation = approved ? approveDraft : rejectDraft;
     mutation.mutate(
       {
         draftId,
         data: approved
-          ? { reviewedBy: operatorName.trim() }
-          : { reviewedBy: operatorName.trim(), rejectionReason: 'Operator rejected this AI-sourced research draft.' },
+          ? { reviewedBy: 'SESSION_OPERATOR' }
+          : { reviewedBy: 'SESSION_OPERATOR', rejectionReason: 'Operator rejected this AI-sourced research draft.' },
       },
       { onSuccess: refreshReviewData },
     );
   };
 
   const reviewClaim = (claimId: string, accepted: boolean) => {
-    if (!operatorName.trim()) return;
+    if (!approvalReady) return;
     decideClaim.mutate(
       {
         claimId,
         data: {
           accepted,
-          reviewedBy: operatorName.trim(),
+          reviewedBy: 'SESSION_OPERATOR',
           ...(accepted ? {} : { rejectionReason: claimNote.trim() || 'Operator rejected this sourced claim.' }),
           ...(claimNote.trim() ? { operatorNote: claimNote.trim() } : {}),
         },
@@ -2403,17 +2417,18 @@ function AiAnalystPage() {
       <div className="ai-workspace">
         <Panel className="ai-chat-panel">
           <SectionHeading eyebrow="Conversation" title="Ask the evidence layer" detail="The assistant selects a bounded read tool and explains only its returned evidence." />
-          <div className="ai-session-row">
+          <form className="ai-session-row" onSubmit={(event) => event.preventDefault()}>
             <label>Session
               <input value={sessionId} onChange={(event) => { setSessionId(event.target.value); localStorage.setItem('mlb-ai-analyst-session', event.target.value); }} data-testid="input-ai-session" />
             </label>
-            <label>Operator
-              <input value={operatorName} onChange={(event) => { setOperatorName(event.target.value); localStorage.setItem('mlb-ai-analyst-operator', event.target.value); }} placeholder="Required for review" data-testid="input-ai-operator" />
+            <label>Review identity
+              <input value="Authorized review operator" readOnly aria-label="Review identity" />
             </label>
             <label>Approval key
-              <input type="password" value={approvalKey} onChange={(event) => { setApprovalKey(event.target.value); sessionStorage.setItem('mlb-ai-analyst-approval-key', event.target.value); }} placeholder="Required for review" data-testid="input-ai-approval-key" />
+              <input ref={approvalKeyRef} type="password" autoComplete="current-password" placeholder="Unlocks a 15-minute review session" data-testid="input-ai-approval-key" />
             </label>
-          </div>
+            <button className="button button-quiet" type="button" onClick={unlockReview}>{approvalReady ? 'Review unlocked' : 'Unlock review'}</button>
+          </form>
           <div className="ai-transcript" data-testid="ai-transcript">
             {history.length === 0 && <div className="ai-empty"><Sparkles size={18} /><p>Ask about today’s market board, a bullpen, settlements, snapshots, bettor picks, or recent web research.</p></div>}
             {history.map((entry, index) => (
@@ -2446,8 +2461,8 @@ function AiAnalystPage() {
                   <Badge tone="warn">DRAFT</Badge>
                   <p>{draft.draftContent}</p>
                   <div className="ai-queue-actions">
-                    <button className="button button-dark" onClick={() => reviewDraft(draft.draftId, true)} disabled={!operatorName.trim() || approveDraft.isPending} data-testid={`button-approve-draft-${draft.draftId}`}><Check size={14} /> Approve</button>
-                    <button className="button button-quiet" onClick={() => reviewDraft(draft.draftId, false)} disabled={!operatorName.trim() || rejectDraft.isPending} data-testid={`button-reject-draft-${draft.draftId}`}><X size={14} /> Reject</button>
+                    <button className="button button-dark" onClick={() => reviewDraft(draft.draftId, true)} disabled={!approvalReady || approveDraft.isPending} data-testid={`button-approve-draft-${draft.draftId}`}><Check size={14} /> Approve</button>
+                    <button className="button button-quiet" onClick={() => reviewDraft(draft.draftId, false)} disabled={!approvalReady || rejectDraft.isPending} data-testid={`button-reject-draft-${draft.draftId}`}><X size={14} /> Reject</button>
                   </div>
                 </article>
               ))}
@@ -2484,8 +2499,8 @@ function AiAnalystPage() {
                   {claim.operatorNote && <small>Operator note: {claim.operatorNote}</small>}
                 </div>
                 {claim.accepted === null && <div className="ai-claim-actions">
-                  <button className="button button-dark" onClick={() => reviewClaim(claim.claimId, true)} disabled={!operatorName.trim() || decideClaim.isPending} data-testid={`button-accept-claim-${claim.claimId}`}><ThumbsUp size={14} /> Accept</button>
-                  <button className="button button-quiet" onClick={() => reviewClaim(claim.claimId, false)} disabled={!operatorName.trim() || decideClaim.isPending} data-testid={`button-reject-claim-${claim.claimId}`}><ThumbsDown size={14} /> Reject</button>
+                  <button className="button button-dark" onClick={() => reviewClaim(claim.claimId, true)} disabled={!approvalReady || decideClaim.isPending} data-testid={`button-accept-claim-${claim.claimId}`}><ThumbsUp size={14} /> Accept</button>
+                  <button className="button button-quiet" onClick={() => reviewClaim(claim.claimId, false)} disabled={!approvalReady || decideClaim.isPending} data-testid={`button-reject-claim-${claim.claimId}`}><ThumbsDown size={14} /> Reject</button>
                 </div>}
               </article>
             ))}

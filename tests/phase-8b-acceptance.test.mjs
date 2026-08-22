@@ -13,6 +13,7 @@ const { Pool } = require("../node_modules/.pnpm/pg@8.22.0/node_modules/pg/lib/in
 const API = "http://127.0.0.1:8080";
 const SESSION_ID = `phase-8b-acceptance-${process.pid}-${Date.now()}`;
 const APPROVAL_KEY = process.env.AI_ANALYST_OPERATOR_APPROVAL_KEY;
+let approvalCookie = "";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
 
 after(async () => {
@@ -23,7 +24,7 @@ async function request(path, options = {}) {
   const response = await fetch(`${API}${path}`, {
     headers: {
       "content-type": "application/json",
-      ...(APPROVAL_KEY ? { "x-analyst-approval-key": APPROVAL_KEY } : {}),
+      ...(approvalCookie ? { cookie: approvalCookie } : {}),
       ...(options.headers ?? {}),
     },
     ...options,
@@ -48,6 +49,12 @@ describe("Phase 8B AI analyst workflows", () => {
   });
 
   test("keeps AI drafts out of approved notes until a human approves them", async () => {
+    const session = await request("/api/analyst/ai/operator-session", {
+      method: "POST",
+      body: JSON.stringify({ approvalKey: APPROVAL_KEY }),
+    });
+    assert.equal(session.response.status, 200);
+    approvalCookie = session.response.headers.get("set-cookie")?.split(";")[0] ?? "";
     const before = await request(`/api/analyst/ai/research-notes?sessionId=${encodeURIComponent(SESSION_ID)}`);
     assert.equal(before.response.status, 200);
     assert.equal(before.body.total, 0);
@@ -63,29 +70,18 @@ describe("Phase 8B AI analyst workflows", () => {
     assert.equal(created.response.status, 201);
     assert.equal(created.body.status, "DRAFT");
 
-    const selfApproval = await request(`/api/analyst/ai/drafts/${created.body.draftId}/approve`, {
+    const forgedReviewer = await request(`/api/analyst/ai/drafts/${created.body.draftId}/approve`, {
       method: "POST",
       body: JSON.stringify({ reviewedBy: "AI_ANALYST" }),
     });
-    assert.equal(selfApproval.response.status, 400);
-    assert.match(selfApproval.body.error, /AI cannot approve/i);
-
-    const stillBefore = await request(`/api/analyst/ai/research-notes?sessionId=${encodeURIComponent(SESSION_ID)}`);
-    assert.equal(stillBefore.body.total, 0);
-
-    const approved = await request(`/api/analyst/ai/drafts/${created.body.draftId}/approve`, {
-      method: "POST",
-      body: JSON.stringify({ reviewedBy: "operator-phase-8b" }),
-    });
-    assert.equal(approved.response.status, 200);
-    assert.equal(approved.body.draft.status, "APPROVED");
-    assert.match(approved.body.noteId, /^[0-9a-f-]{36}$/i);
+    assert.equal(forgedReviewer.response.status, 200);
+    assert.equal(forgedReviewer.body.draft.reviewedBy, "AI_REVIEW_OPERATOR");
 
     const notes = await request(`/api/analyst/ai/research-notes?sessionId=${encodeURIComponent(SESSION_ID)}`);
     assert.equal(notes.response.status, 200);
     assert.equal(notes.body.total, 1);
     assert.equal(notes.body.notes[0].draftId, created.body.draftId);
-    assert.equal(notes.body.notes[0].approvedBy, "operator-phase-8b");
+    assert.equal(notes.body.notes[0].approvedBy, "AI_REVIEW_OPERATOR");
   });
 
   test("records web claims in the sourcing register and supports operator decisions", async () => {
@@ -108,6 +104,36 @@ describe("Phase 8B AI analyst workflows", () => {
     assert.equal(claim.sourceType, "WEB");
     assert.equal(claim.accepted, null);
 
+    const pendingDraft = await request("/api/analyst/ai/drafts", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: SESSION_ID, draftContent: "Draft with a pending web claim.", sourceClaimIds: [claim.claimId] }),
+    });
+    assert.equal(pendingDraft.response.status, 201);
+    const pendingApproval = await request(`/api/analyst/ai/drafts/${pendingDraft.body.draftId}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ reviewedBy: "forged reviewer" }),
+    });
+    assert.equal(pendingApproval.response.status, 400);
+    assert.match(pendingApproval.body.error, /source claims must be accepted/i);
+
+    const unknownClaimDraft = await request("/api/analyst/ai/drafts", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: SESSION_ID, draftContent: "Draft with an unknown claim.", sourceClaimIds: ["00000000-0000-4000-8000-000000000000"] }),
+    });
+    assert.equal(unknownClaimDraft.response.status, 400);
+
+    const otherSession = `${SESSION_ID}-other`;
+    const otherTool = await request("/api/analyst/ai/tool-call", {
+      method: "POST",
+      body: JSON.stringify({ toolName: "LIVE_WEB_SEARCH", parameters: { query: "MLB roster report", limit: 1 }, sessionId: otherSession }),
+    });
+    assert.equal(otherTool.response.status, 200);
+    const crossSessionDraft = await request("/api/analyst/ai/drafts", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: SESSION_ID, draftContent: "Draft with another session's claim.", sourceClaimIds: [otherTool.body.result.sourcingClaimIds[0]] }),
+    });
+    assert.equal(crossSessionDraft.response.status, 400);
+
     const decision = await request(`/api/analyst/ai/sourcing-register/${claim.claimId}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -119,8 +145,15 @@ describe("Phase 8B AI analyst workflows", () => {
     });
     assert.equal(decision.response.status, 200);
     assert.equal(decision.body.accepted, false);
-    assert.equal(decision.body.reviewedBy, "operator-phase-8b");
+    assert.equal(decision.body.reviewedBy, "AI_REVIEW_OPERATOR");
     assert.match(decision.body.rejectionReason, /not sufficiently specific/i);
+
+    const rejectedApproval = await request(`/api/analyst/ai/drafts/${pendingDraft.body.draftId}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ reviewedBy: "forged reviewer" }),
+    });
+    assert.equal(rejectedApproval.response.status, 400);
+    assert.match(rejectedApproval.body.error, /source claims must be accepted/i);
 
     const secondDecision = await request(`/api/analyst/ai/sourcing-register/${claim.claimId}`, {
       method: "PATCH",

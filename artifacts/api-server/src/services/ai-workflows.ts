@@ -100,8 +100,12 @@ function optionalMarket(value: unknown) {
 
 function optionalClaimIds(value: unknown) {
   if (value == null) return [];
-  if (!Array.isArray(value) || value.length > 50 || value.some((item) => typeof item !== "string")) {
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!Array.isArray(value) || value.length > 50 || value.some((item) => typeof item !== "string" || !uuidPattern.test(item))) {
     throw new AiWorkflowValidationError("sourceClaimIds must be an array of at most 50 IDs");
+  }
+  if (new Set(value).size !== value.length) {
+    throw new AiWorkflowValidationError("sourceClaimIds must not contain duplicates");
   }
   return value;
 }
@@ -122,6 +126,16 @@ export async function createAiResearchDraft(input: {
   try {
     await client.query("BEGIN");
     await client.query("SET LOCAL app.writer_context = 'AI'");
+    if (sourceClaimIds.length) {
+      const claims = await client.query<{ claim_id: string }>(
+        `SELECT claim_id FROM ai_sourcing_register
+         WHERE session_id = $1 AND claim_id = ANY($2::uuid[]) FOR SHARE`,
+        [sessionId, sourceClaimIds],
+      );
+      if (claims.rows.length !== sourceClaimIds.length) {
+        throw new AiWorkflowValidationError("sourceClaimIds must reference claims from this draft session");
+      }
+    }
     const result = await client.query<DraftRow>(
       `INSERT INTO ai_research_drafts
          (session_id, player_id, market, draft_content, source_claim_ids)
@@ -198,6 +212,18 @@ export async function reviewAiResearchDraft(
     if (draft.status !== "DRAFT") throw new AiWorkflowValidationError(`draft is already ${draft.status}`);
     const now = new Date();
     if (decision === "APPROVED") {
+      const sourceClaimIds = optionalClaimIds(draft.source_claim_ids);
+      if (sourceClaimIds.length) {
+        const acceptedClaims = await client.query<{ claim_id: string }>(
+          `SELECT claim_id FROM ai_sourcing_register
+           WHERE session_id = $1 AND claim_id = ANY($2::uuid[]) AND accepted = TRUE
+           FOR UPDATE`,
+          [draft.session_id, sourceClaimIds],
+        );
+        if (acceptedClaims.rows.length !== sourceClaimIds.length) {
+          throw new AiWorkflowValidationError("All source claims must be accepted before this draft can be approved");
+        }
+      }
       const noteResult = await client.query<{ note_id: string }>(
         `INSERT INTO research_notes
            (draft_id, session_id, player_id, market, note_content, source_claim_ids, approved_by, approved_at)
