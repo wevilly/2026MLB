@@ -17,6 +17,8 @@ import {
   RefreshMarketResearchWALKResponse,
   RefreshMarketResearchHRResponse,
   WriteFeatureStoreOutcomeBody,
+  TrainAnalystModelResponse,
+  GetAnalystModelsResponse,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
@@ -42,6 +44,13 @@ import {
   settleOfficialGame,
   SettlementValidationError,
 } from "../services/settlement";
+import {
+  MODEL_MARKETS,
+  ModelTrainingValidationError,
+  queryModelVersions,
+  trainMarketModel,
+  type ModelMarket,
+} from "../services/model-training";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -1111,6 +1120,41 @@ router.get("/analyst/postmortems", async (req, res, next) => {
     res.json({ postmortems: results, total: results.length });
   } catch (error) {
     if (error instanceof SettlementValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+function requestedModelMarket(value: unknown): ModelMarket {
+  const market = typeof value === "string" ? value.toUpperCase() : "";
+  if (!MODEL_MARKETS.includes(market as ModelMarket)) {
+    throw new ModelTrainingValidationError("market must be TB, XBH, WALK, or HR");
+  }
+  return market as ModelMarket;
+}
+
+router.post("/analyst/models/train", async (req, res, next) => {
+  try {
+    const result = await trainMarketModel(requestedModelMarket(req.query.market));
+    res.status(201).json(TrainAnalystModelResponse.parse(result));
+  } catch (error) {
+    if (error instanceof ModelTrainingValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.get("/analyst/models", async (req, res, next) => {
+  try {
+    const market = req.query.market == null ? null : requestedModelMarket(req.query.market);
+    const versions = await queryModelVersions(market);
+    res.json(GetAnalystModelsResponse.parse({ versions, total: versions.length }));
+  } catch (error) {
+    if (error instanceof ModelTrainingValidationError) {
       res.status(400).json({ error: error.message });
       return;
     }

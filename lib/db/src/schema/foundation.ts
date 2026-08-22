@@ -5,6 +5,7 @@ import {
   boolean,
   date,
   integer,
+  index,
   jsonb,
   numeric,
   pgEnum,
@@ -79,6 +80,20 @@ export const settlementStateEnum = pgEnum("settlement_state", [
   "POSTPONED",
   "NO_ACTION",
   "DISPUTED",
+]);
+
+export const modelVersionStatusEnum = pgEnum("model_version_status", [
+  "DRAFT",
+  "CANDIDATE",
+  "ACTIVE",
+  "RETIRED",
+  "FAILED",
+]);
+
+export const modelTrainingStatusEnum = pgEnum("model_training_status", [
+  "RUNNING",
+  "SUCCESS",
+  "FAILED",
 ]);
 
 export const researchWindowEnum = pgEnum("research_window", [
@@ -787,7 +802,7 @@ export const futureMarketPredictions = pgTable("future_market_predictions", {
   gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
   playerId: integer("player_id").notNull().references(() => players.playerId),
   market: marketTypeEnum("market").notNull(),
-  modelVersionId: text("model_version_id"),
+  modelVersionId: text("model_version_id").references(() => modelVersions.versionId),
   status: text("status"),
   predictedProbability: numeric("predicted_probability"),
   featureSnapshot: jsonb("feature_snapshot").notNull().default({}),
@@ -1110,6 +1125,66 @@ export const marketPostmortems = pgTable("market_postmortems", {
 }, (table) => ({
   snapshotOutcomeUniqueIdx: uniqueIndex("market_postmortems_snapshot_outcome_idx")
     .on(table.snapshotId, table.outcomeId),
+}));
+
+/**
+ * A versioned, market-specific trained artifact. Activation is deliberately
+ * guarded by the Phase 5B walk-forward acceptance record.
+ */
+export const modelVersions = pgTable("model_versions", {
+  versionId: text("version_id").primaryKey(),
+  market: marketTypeEnum("market").notNull(),
+  trainedAt: timestamp("trained_at", { withTimezone: true }).notNull().defaultNow(),
+  trainingSeasons: jsonb("training_seasons").notNull().default([]),
+  featureSetHash: text("feature_set_hash").notNull(),
+  algorithm: text("algorithm").notNull(),
+  hyperparameters: jsonb("hyperparameters").notNull().default({}),
+  trainingSampleCount: integer("training_sample_count").notNull(),
+  status: modelVersionStatusEnum("status").notNull().default("DRAFT"),
+  artifactKey: text("artifact_key").notNull(),
+  artifactGeneration: text("artifact_generation").notNull(),
+  artifactContentHash: text("artifact_content_hash").notNull(),
+  walkForwardAcceptanceId: uuid("walk_forward_acceptance_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  marketStatusIdx: index("model_versions_market_status_idx").on(table.market, table.status),
+}));
+
+/**
+ * Training attempts are retained independently from the version they produce,
+ * including failed attempts with a diagnostic error.
+ */
+export const modelTrainingRuns = pgTable("model_training_runs", {
+  trainingRunId: uuid("training_run_id").primaryKey().defaultRandom(),
+  modelVersionId: text("model_version_id").references(() => modelVersions.versionId),
+  market: marketTypeEnum("market").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  status: modelTrainingStatusEnum("status").notNull(),
+  trainingSeasons: jsonb("training_seasons").notNull().default([]),
+  featureSetHash: text("feature_set_hash"),
+  algorithm: text("algorithm"),
+  hyperparameters: jsonb("hyperparameters").notNull().default({}),
+  trainingSampleCount: integer("training_sample_count"),
+  featureImportance: jsonb("feature_importance").notNull().default({}),
+  artifactContentHash: text("artifact_content_hash"),
+  errorMessage: text("error_message"),
+  metadata: jsonb("metadata").notNull().default({}),
+});
+
+/**
+ * Phase 5B writes an acceptance row here before requesting ACTIVE status.
+ * Keeping this table now lets the database enforce the lifecycle boundary.
+ */
+export const modelWalkForwardAcceptances = pgTable("model_walk_forward_acceptances", {
+  acceptanceId: uuid("acceptance_id").primaryKey().defaultRandom(),
+  modelVersionId: text("model_version_id").notNull().references(() => modelVersions.versionId),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+  validationRunId: text("validation_run_id"),
+  metrics: jsonb("metrics").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  modelVersionUniqueIdx: uniqueIndex("model_walk_forward_acceptances_model_version_idx").on(table.modelVersionId),
 }));
 
 // ─── End Phase 4A ─────────────────────────────────────────────────────────────

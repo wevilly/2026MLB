@@ -40,6 +40,8 @@ import type {
   GetAnalystFeatureStoreParams,
   GetAnalystGameLabParams,
   GetAnalystMarketResearchParams,
+  GetAnalystModels400,
+  GetAnalystModelsParams,
   GetAnalystPitcherLabParams,
   GetAnalystPlayerLabParams,
   GetAnalystPostmortemsParams,
@@ -53,6 +55,8 @@ import type {
   IngestResult,
   MarketPostmortem,
   MarketResearch,
+  ModelTrainingResult,
+  ModelVersionList,
   OfficialGameSettlementResult,
   OfficialSettlementRefreshResult,
   PostmortemList,
@@ -75,6 +79,8 @@ import type {
   SettlementList,
   TBEngineResult,
   TodayDashboard,
+  TrainAnalystModel400,
+  TrainAnalystModelParams,
   WALKEngineResult,
   WriteFeatureStoreOutcome400,
   WriteHistoricalOutcomeResult,
@@ -2367,6 +2373,172 @@ export function useGetAnalystPostmortems<TData = Awaited<ReturnType<typeof getAn
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAnalystPostmortemsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getTrainAnalystModelUrl = (params: TrainAnalystModelParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/models/train?${stringifiedParams}` : `/api/analyst/models/train`
+}
+
+/**
+ * Trains a deterministic, market-specific candidate from frozen pregame feature
+ * snapshots joined only to current official MLB settled outcomes. The artifact is
+ * stored in private App Storage and pinned by content hash. Training does not
+ * publish predictions to the market board or activate the model.
+ * @summary Train one independent market model
+ */
+export const trainAnalystModel = async (params: TrainAnalystModelParams, options?: Parameters<typeof customFetch>[1]): Promise<ModelTrainingResult> => {
+
+  return customFetch<ModelTrainingResult>(getTrainAnalystModelUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getTrainAnalystModelMutationOptions = <TError = ErrorType<TrainAnalystModel400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof trainAnalystModel>>, TError,{params: TrainAnalystModelParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof trainAnalystModel>>, TError,{params: TrainAnalystModelParams}, TContext> => {
+
+const mutationKey = ['trainAnalystModel'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof trainAnalystModel>>, {params: TrainAnalystModelParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  trainAnalystModel(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TrainAnalystModelMutationResult = NonNullable<Awaited<ReturnType<typeof trainAnalystModel>>>
+
+    export type TrainAnalystModelMutationError = ErrorType<TrainAnalystModel400>
+
+    /**
+ * @summary Train one independent market model
+ */
+export const useTrainAnalystModel = <TError = ErrorType<TrainAnalystModel400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof trainAnalystModel>>, TError,{params: TrainAnalystModelParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof trainAnalystModel>>,
+        TError,
+        {params: TrainAnalystModelParams},
+        TContext
+      > => {
+      return useMutation(getTrainAnalystModelMutationOptions(options));
+    }
+
+export const getGetAnalystModelsUrl = (params?: GetAnalystModelsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/models?${stringifiedParams}` : `/api/analyst/models`
+}
+
+/**
+ * @summary List versioned market model candidates
+ */
+export const getAnalystModels = async (params?: GetAnalystModelsParams, options?: Parameters<typeof customFetch>[1]): Promise<ModelVersionList> => {
+
+  return customFetch<ModelVersionList>(getGetAnalystModelsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystModelsQueryKey = (params?: GetAnalystModelsParams,) => {
+    return [
+    `/api/analyst/models`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystModelsQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystModels>>, TError = ErrorType<GetAnalystModels400>>(params?: GetAnalystModelsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystModels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystModelsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystModels>>> = ({ signal }) => getAnalystModels(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystModels>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystModelsQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystModels>>>
+export type GetAnalystModelsQueryError = ErrorType<GetAnalystModels400>
+
+
+/**
+ * @summary List versioned market model candidates
+ */
+
+export function useGetAnalystModels<TData = Awaited<ReturnType<typeof getAnalystModels>>, TError = ErrorType<GetAnalystModels400>>(
+ params?: GetAnalystModelsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystModels>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystModelsQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

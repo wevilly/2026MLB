@@ -834,6 +834,85 @@ export interface OfficialSettlementRefreshResult {
   games: OfficialGameSettlementResult[];
 }
 
+export type ModelTrainingResultMarket = typeof ModelTrainingResultMarket[keyof typeof ModelTrainingResultMarket];
+
+
+export const ModelTrainingResultMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type ModelTrainingResultStatus = typeof ModelTrainingResultStatus[keyof typeof ModelTrainingResultStatus];
+
+
+export const ModelTrainingResultStatus = {
+  CANDIDATE: 'CANDIDATE',
+} as const;
+
+export interface ModelTrainingResult {
+  trainingRunId: string;
+  versionId: string;
+  market: ModelTrainingResultMarket;
+  status: ModelTrainingResultStatus;
+  /** @minimum 1 */
+  trainingSampleCount: number;
+  trainingSeasons: string[];
+  featureSetHash: string;
+  algorithm: string;
+  artifactKey: string;
+  artifactGeneration: string;
+  artifactContentHash: string;
+}
+
+export type ModelVersionMarket = typeof ModelVersionMarket[keyof typeof ModelVersionMarket];
+
+
+export const ModelVersionMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type ModelVersionHyperparameters = { [key: string]: unknown };
+
+export type ModelVersionStatus = typeof ModelVersionStatus[keyof typeof ModelVersionStatus];
+
+
+export const ModelVersionStatus = {
+  DRAFT: 'DRAFT',
+  CANDIDATE: 'CANDIDATE',
+  ACTIVE: 'ACTIVE',
+  RETIRED: 'RETIRED',
+  FAILED: 'FAILED',
+} as const;
+
+export interface ModelVersion {
+  versionId: string;
+  market: ModelVersionMarket;
+  trainedAt: string;
+  trainingSeasons: string[];
+  featureSetHash: string;
+  algorithm: string;
+  hyperparameters: ModelVersionHyperparameters;
+  /** @minimum 1 */
+  trainingSampleCount: number;
+  status: ModelVersionStatus;
+  artifactKey: string;
+  artifactGeneration: string;
+  artifactContentHash: string;
+  /** @nullable */
+  walkForwardAcceptanceId: string | null;
+}
+
+export interface ModelVersionList {
+  versions: ModelVersion[];
+  /** @minimum 0 */
+  total: number;
+}
+
 export interface SettlementComponents {
   /**
      * @minimum 0
@@ -1303,6 +1382,42 @@ export const GetAnalystPostmortemsMarket = {
   WALK: 'WALK',
   HR: 'HR',
 } as const;
+
+export type TrainAnalystModelParams = {
+market: TrainAnalystModelMarket;
+};
+
+export type TrainAnalystModelMarket = typeof TrainAnalystModelMarket[keyof typeof TrainAnalystModelMarket];
+
+
+export const TrainAnalystModelMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type TrainAnalystModel400 = {
+  error: string;
+};
+
+export type GetAnalystModelsParams = {
+market?: GetAnalystModelsMarket;
+};
+
+export type GetAnalystModelsMarket = typeof GetAnalystModelsMarket[keyof typeof GetAnalystModelsMarket];
+
+
+export const GetAnalystModelsMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type GetAnalystModels400 = {
+  error: string;
+};
 
 export type GetAnalystBullpenRoomParams = {
 date?: string;

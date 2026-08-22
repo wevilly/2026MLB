@@ -1138,6 +1138,69 @@ export const GetAnalystPostmortemsResponse = zod.object({
 
 
 /**
+ * Trains a deterministic, market-specific candidate from frozen pregame feature
+ * snapshots joined only to current official MLB settled outcomes. The artifact is
+ * stored in private App Storage and pinned by content hash. Training does not
+ * publish predictions to the market board or activate the model.
+ * @summary Train one independent market model
+ */
+export const TrainAnalystModelQueryParams = zod.object({
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR'])
+})
+
+
+
+
+export const TrainAnalystModelResponse = zod.object({
+  "trainingRunId": zod.string(),
+  "versionId": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "status": zod.enum(['CANDIDATE']),
+  "trainingSampleCount": zod.number().int().min(1),
+  "trainingSeasons": zod.array(zod.string()),
+  "featureSetHash": zod.string(),
+  "algorithm": zod.string(),
+  "artifactKey": zod.string(),
+  "artifactGeneration": zod.string(),
+  "artifactContentHash": zod.string()
+})
+
+
+/**
+ * @summary List versioned market model candidates
+ */
+export const GetAnalystModelsQueryParams = zod.object({
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional()
+})
+
+
+export const getAnalystModelsResponseTotalMin = 0;
+
+
+
+export const GetAnalystModelsResponse = zod.object({
+  "versions": zod.array(zod.object({
+  "versionId": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "trainedAt": zod.coerce.date(),
+  "trainingSeasons": zod.array(zod.string()),
+  "featureSetHash": zod.string(),
+  "algorithm": zod.string(),
+  "hyperparameters": zod.object({
+
+}).passthrough(),
+  "trainingSampleCount": zod.number().int().min(1),
+  "status": zod.enum(['DRAFT', 'CANDIDATE', 'ACTIVE', 'RETIRED', 'FAILED']),
+  "artifactKey": zod.string(),
+  "artifactGeneration": zod.string(),
+  "artifactContentHash": zod.string(),
+  "walkForwardAcceptanceId": zod.string().nullable()
+})),
+  "total": zod.number().int().min(getAnalystModelsResponseTotalMin)
+})
+
+
+/**
  * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage for all 30 teams
  */
 export const GetAnalystBullpenRoomQueryParams = zod.object({

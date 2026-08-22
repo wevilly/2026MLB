@@ -691,6 +691,63 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PostmortemList"
+  /analyst/models/train:
+    post:
+      operationId: trainAnalystModel
+      tags: [analyst]
+      summary: Train one independent market model
+      description: |
+        Trains a deterministic, market-specific candidate from frozen pregame feature
+        snapshots joined only to current official MLB settled outcomes. The artifact is
+        stored in private App Storage and pinned by content hash. Training does not
+        publish predictions to the market board or activate the model.
+      parameters:
+        - name: market
+          in: query
+          required: true
+          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+      responses:
+        "201":
+          description: Candidate model training completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelTrainingResult"
+        "400":
+          description: Invalid market or no official settled training rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
+  /analyst/models:
+    get:
+      operationId: getAnalystModels
+      tags: [analyst]
+      summary: List versioned market model candidates
+      parameters:
+        - name: market
+          in: query
+          required: false
+          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+      responses:
+        "200":
+          description: Model versions and lifecycle state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelVersionList"
+        "400":
+          description: Invalid market
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -1414,6 +1471,53 @@ components:
           type: array
           items: { $ref: "#/components/schemas/OfficialGameSettlementResult" }
       required: [source, slateDate, gamesFound, gamesSettled, outcomesWritten, corrections, games]
+    ModelTrainingResult:
+      type: object
+      additionalProperties: false
+      properties:
+        trainingRunId: { type: string }
+        versionId: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        status: { type: string, enum: [CANDIDATE] }
+        trainingSampleCount: { type: integer, minimum: 1 }
+        trainingSeasons:
+          type: array
+          items: { type: string }
+        featureSetHash: { type: string }
+        algorithm: { type: string }
+        artifactKey: { type: string }
+        artifactGeneration: { type: string }
+        artifactContentHash: { type: string }
+      required: [trainingRunId, versionId, market, status, trainingSampleCount, trainingSeasons, featureSetHash, algorithm, artifactKey, artifactGeneration, artifactContentHash]
+    ModelVersion:
+      type: object
+      additionalProperties: false
+      properties:
+        versionId: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        trainedAt: { type: string, format: date-time }
+        trainingSeasons:
+          type: array
+          items: { type: string }
+        featureSetHash: { type: string }
+        algorithm: { type: string }
+        hyperparameters: { type: object }
+        trainingSampleCount: { type: integer, minimum: 1 }
+        status: { type: string, enum: [DRAFT, CANDIDATE, ACTIVE, RETIRED, FAILED] }
+        artifactKey: { type: string }
+        artifactGeneration: { type: string }
+        artifactContentHash: { type: string }
+        walkForwardAcceptanceId: { type: ["string", "null"] }
+      required: [versionId, market, trainedAt, trainingSeasons, featureSetHash, algorithm, hyperparameters, trainingSampleCount, status, artifactKey, artifactGeneration, artifactContentHash, walkForwardAcceptanceId]
+    ModelVersionList:
+      type: object
+      additionalProperties: false
+      properties:
+        versions:
+          type: array
+          items: { $ref: "#/components/schemas/ModelVersion" }
+        total: { type: integer, minimum: 0 }
+      required: [versions, total]
     SettlementComponents:
       type: object
       additionalProperties: false
