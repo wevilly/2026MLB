@@ -1398,6 +1398,228 @@ export interface DailyBoardGameSummary {
   total: number;
 }
 
+export interface ErrorResponse {
+  error: string;
+}
+
+export interface BettorSourceInput {
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  platform: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  accountHandle: string;
+  /**
+     * @maxLength 160
+     * @nullable
+     */
+  personIdentityKey?: string | null;
+  personLevelCrossPlatform?: boolean;
+}
+
+export interface BettorSourceUpdateInput {
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  platform?: string;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  accountHandle?: string;
+  /**
+     * @maxLength 160
+     * @nullable
+     */
+  personIdentityKey?: string | null;
+  personLevelCrossPlatform?: boolean;
+}
+
+export interface BettorSource {
+  sourceId: string;
+  platform: string;
+  accountHandle: string;
+  /** @nullable */
+  personIdentityKey: string | null;
+  personLevelCrossPlatform: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BettorSourceList {
+  sources: BettorSource[];
+  /** @minimum 0 */
+  total: number;
+}
+
+export interface BettorSourceDeleteResult {
+  sourceId: string;
+  deleted: boolean;
+}
+
+export type BettorMechanism = typeof BettorMechanism[keyof typeof BettorMechanism];
+
+
+export const BettorMechanism = {
+  CONTACT_VOLUME: 'CONTACT_VOLUME',
+  POWER_ROUTE: 'POWER_ROUTE',
+  MULTI_PATH: 'MULTI_PATH',
+  DOUBLE_ROUTE: 'DOUBLE_ROUTE',
+  TRIPLE_ROUTE: 'TRIPLE_ROUTE',
+  HOME_RUN_ROUTE: 'HOME_RUN_ROUTE',
+  PATIENCE_VS_COMMAND: 'PATIENCE_VS_COMMAND',
+  COUNT_CREATION: 'COUNT_CREATION',
+  BULLPEN_WALK_PATH: 'BULLPEN_WALK_PATH',
+  PULL_AIR: 'PULL_AIR',
+  BARREL_POWER: 'BARREL_POWER',
+  PITCH_SHAPE_MISMATCH: 'PITCH_SHAPE_MISMATCH',
+  PARK_ENVIRONMENT: 'PARK_ENVIRONMENT',
+} as const;
+
+export type BettorDuplicationLineagePriorSource = {
+  sourceId: string;
+  platform: string;
+  accountHandle: string;
+};
+
+export interface BettorDuplicationLineage {
+  lineageId: string;
+  priorPickId: string;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  confidence: number;
+  method: string;
+  priorSource: BettorDuplicationLineagePriorSource;
+}
+
+export interface BettorPickSource {
+  sourceId: string;
+  platform: string;
+  accountHandle: string;
+  /** @nullable */
+  personIdentityKey: string | null;
+  personLevelCrossPlatform: boolean;
+}
+
+export type BettorPickIngestInputMarket = typeof BettorPickIngestInputMarket[keyof typeof BettorPickIngestInputMarket];
+
+
+export const BettorPickIngestInputMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type BettorPickIngestInputPickDirection = typeof BettorPickIngestInputPickDirection[keyof typeof BettorPickIngestInputPickDirection];
+
+
+export const BettorPickIngestInputPickDirection = {
+  YES: 'YES',
+  NO: 'NO',
+} as const;
+
+export interface BettorPickIngestInput {
+  sourceId: string;
+  slateDate: string;
+  /** @minimum 1 */
+  playerId: number;
+  market: BettorPickIngestInputMarket;
+  pickDirection: BettorPickIngestInputPickDirection;
+  /** @maxItems 6 */
+  mechanismTags: BettorMechanism[];
+  /** @maxLength 20000 */
+  reasoning: string;
+  /**
+     * @maxLength 2048
+     * @nullable
+     */
+  sourceUrl?: string | null;
+  postedAt: string;
+}
+
+export type BettorPickMarket = typeof BettorPickMarket[keyof typeof BettorPickMarket];
+
+
+export const BettorPickMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type BettorPickPickDirection = typeof BettorPickPickDirection[keyof typeof BettorPickPickDirection];
+
+
+export const BettorPickPickDirection = {
+  YES: 'YES',
+  NO: 'NO',
+} as const;
+
+export type BettorPickDuplicationFlag = typeof BettorPickDuplicationFlag[keyof typeof BettorPickDuplicationFlag];
+
+
+export const BettorPickDuplicationFlag = {
+  INDEPENDENT: 'INDEPENDENT',
+  IS_LIKELY_COPY: 'IS_LIKELY_COPY',
+} as const;
+
+export interface BettorPick {
+  pickId: string;
+  slateDate: string;
+  playerId: number;
+  playerName: string;
+  market: BettorPickMarket;
+  pickDirection: BettorPickPickDirection;
+  mechanismTags: BettorMechanism[];
+  /** @maxLength 500 */
+  reasoningParaphrase: string;
+  originalTextRetainedFlag: boolean;
+  /** @nullable */
+  sourceUrl: string | null;
+  postedAt: string;
+  ingestedAt: string;
+  duplicationFlag: BettorPickDuplicationFlag;
+  isLikelyCopy: boolean;
+  source: BettorPickSource;
+  duplicationLineage: BettorDuplicationLineage[];
+}
+
+export interface BettorPickIngestResult {
+  pick: BettorPick;
+  /** @minimum 0 */
+  lineageCreated: number;
+}
+
+/**
+ * @nullable
+ */
+export type BettorPickListMarket = typeof BettorPickListMarket[keyof typeof BettorPickListMarket] | null;
+
+
+export const BettorPickListMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export interface BettorPickList {
+  date: string;
+  /** @nullable */
+  market: BettorPickListMarket;
+  picks: BettorPick[];
+  /** @minimum 0 */
+  total: number;
+}
+
 export type GetAnalystProjectionsParams = {
 date?: string;
 };
@@ -1719,6 +1941,21 @@ export type GetAnalystDailyMarketBoard400 = {
 export type GetAnalystDailyBoardGameSummaryParams = {
 date?: string;
 };
+
+export type GetAnalystBettorPicksParams = {
+date: string;
+market?: GetAnalystBettorPicksMarket;
+};
+
+export type GetAnalystBettorPicksMarket = typeof GetAnalystBettorPicksMarket[keyof typeof GetAnalystBettorPicksMarket];
+
+
+export const GetAnalystBettorPicksMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
 
 export type GetAnalystBullpenRoomParams = {
 date?: string;

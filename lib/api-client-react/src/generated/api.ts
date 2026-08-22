@@ -22,6 +22,14 @@ import type {
 import type {
   AnalystSettings,
   BackfillFeatureStoreParams,
+  BettorPickIngestInput,
+  BettorPickIngestResult,
+  BettorPickList,
+  BettorSource,
+  BettorSourceDeleteResult,
+  BettorSourceInput,
+  BettorSourceList,
+  BettorSourceUpdateInput,
   BullpenIngestResult,
   BullpenRoom,
   CaptureFeatureStoreSlateParams,
@@ -33,12 +41,14 @@ import type {
   DailyMarketBoard,
   DailyMarketBoardRefreshResult,
   DataHealth,
+  ErrorResponse,
   FeatureSnapshotCorrectionInput,
   FeatureStoreBackfillResult,
   FeatureStoreCaptureResult,
   FeatureStoreCorrectionResult,
   FeatureStoreResult,
   GameLab,
+  GetAnalystBettorPicksParams,
   GetAnalystBullpenRoomParams,
   GetAnalystDailyBoardGameSummaryParams,
   GetAnalystDailyMarketBoard400,
@@ -2973,6 +2983,461 @@ export function useGetAnalystDailyBoardGameSummary<TData = Awaited<ReturnType<ty
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAnalystDailyBoardGameSummaryQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAnalystBettorSourcesUrl = () => {
+
+
+
+
+  return `/api/analyst/bettor/sources`
+}
+
+/**
+ * Sources remain independent at the platform-account level. When an
+ * operator has determined that accounts belong to the same person, the
+ * optional person-level identity key is returned for lineage auditing.
+ * @summary List tracked bettor source identities
+ */
+export const getAnalystBettorSources = async ( options?: Parameters<typeof customFetch>[1]): Promise<BettorSourceList> => {
+
+  return customFetch<BettorSourceList>(getGetAnalystBettorSourcesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystBettorSourcesQueryKey = () => {
+    return [
+    `/api/analyst/bettor/sources`
+    ] as const;
+    }
+
+
+export const getGetAnalystBettorSourcesQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystBettorSources>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystBettorSources>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystBettorSourcesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystBettorSources>>> = ({ signal }) => getAnalystBettorSources({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystBettorSources>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystBettorSourcesQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystBettorSources>>>
+export type GetAnalystBettorSourcesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List tracked bettor source identities
+ */
+
+export function useGetAnalystBettorSources<TData = Awaited<ReturnType<typeof getAnalystBettorSources>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystBettorSources>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystBettorSourcesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateAnalystBettorSourceUrl = () => {
+
+
+
+
+  return `/api/analyst/bettor/sources`
+}
+
+/**
+ * @summary Create or update a bettor platform-account identity
+ */
+export const createAnalystBettorSource = async (bettorSourceInput: BettorSourceInput, options?: Parameters<typeof customFetch>[1]): Promise<BettorSource> => {
+
+  return customFetch<BettorSource>(getCreateAnalystBettorSourceUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(bettorSourceInput)
+  }
+);}
+
+
+
+
+
+export const getCreateAnalystBettorSourceMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAnalystBettorSource>>, TError,{data: BodyType<BettorSourceInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAnalystBettorSource>>, TError,{data: BodyType<BettorSourceInput>}, TContext> => {
+
+const mutationKey = ['createAnalystBettorSource'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAnalystBettorSource>>, {data: BodyType<BettorSourceInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createAnalystBettorSource(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateAnalystBettorSourceMutationResult = NonNullable<Awaited<ReturnType<typeof createAnalystBettorSource>>>
+    export type CreateAnalystBettorSourceMutationBody = BodyType<BettorSourceInput>
+    export type CreateAnalystBettorSourceMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Create or update a bettor platform-account identity
+ */
+export const useCreateAnalystBettorSource = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAnalystBettorSource>>, TError,{data: BodyType<BettorSourceInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createAnalystBettorSource>>,
+        TError,
+        {data: BodyType<BettorSourceInput>},
+        TContext
+      > => {
+      return useMutation(getCreateAnalystBettorSourceMutationOptions(options));
+    }
+
+export const getUpdateAnalystBettorSourceUrl = (sourceId: string,) => {
+
+
+
+
+  return `/api/analyst/bettor/sources/${sourceId}`
+}
+
+/**
+ * @summary Update a bettor source identity
+ */
+export const updateAnalystBettorSource = async (sourceId: string,
+    bettorSourceUpdateInput: BettorSourceUpdateInput, options?: Parameters<typeof customFetch>[1]): Promise<BettorSource> => {
+
+  return customFetch<BettorSource>(getUpdateAnalystBettorSourceUrl(sourceId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(bettorSourceUpdateInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateAnalystBettorSourceMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAnalystBettorSource>>, TError,{sourceId: string;data: BodyType<BettorSourceUpdateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateAnalystBettorSource>>, TError,{sourceId: string;data: BodyType<BettorSourceUpdateInput>}, TContext> => {
+
+const mutationKey = ['updateAnalystBettorSource'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAnalystBettorSource>>, {sourceId: string;data: BodyType<BettorSourceUpdateInput>}> = (props) => {
+          const {sourceId,data} = props ?? {};
+
+          return  updateAnalystBettorSource(sourceId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateAnalystBettorSourceMutationResult = NonNullable<Awaited<ReturnType<typeof updateAnalystBettorSource>>>
+    export type UpdateAnalystBettorSourceMutationBody = BodyType<BettorSourceUpdateInput>
+    export type UpdateAnalystBettorSourceMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Update a bettor source identity
+ */
+export const useUpdateAnalystBettorSource = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAnalystBettorSource>>, TError,{sourceId: string;data: BodyType<BettorSourceUpdateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateAnalystBettorSource>>,
+        TError,
+        {sourceId: string;data: BodyType<BettorSourceUpdateInput>},
+        TContext
+      > => {
+      return useMutation(getUpdateAnalystBettorSourceMutationOptions(options));
+    }
+
+export const getDeleteAnalystBettorSourceUrl = (sourceId: string,) => {
+
+
+
+
+  return `/api/analyst/bettor/sources/${sourceId}`
+}
+
+/**
+ * @summary Delete a source with no historical picks
+ */
+export const deleteAnalystBettorSource = async (sourceId: string, options?: Parameters<typeof customFetch>[1]): Promise<BettorSourceDeleteResult> => {
+
+  return customFetch<BettorSourceDeleteResult>(getDeleteAnalystBettorSourceUrl(sourceId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteAnalystBettorSourceMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAnalystBettorSource>>, TError,{sourceId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteAnalystBettorSource>>, TError,{sourceId: string}, TContext> => {
+
+const mutationKey = ['deleteAnalystBettorSource'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteAnalystBettorSource>>, {sourceId: string}> = (props) => {
+          const {sourceId} = props ?? {};
+
+          return  deleteAnalystBettorSource(sourceId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteAnalystBettorSourceMutationResult = NonNullable<Awaited<ReturnType<typeof deleteAnalystBettorSource>>>
+
+    export type DeleteAnalystBettorSourceMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Delete a source with no historical picks
+ */
+export const useDeleteAnalystBettorSource = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteAnalystBettorSource>>, TError,{sourceId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteAnalystBettorSource>>,
+        TError,
+        {sourceId: string},
+        TContext
+      > => {
+      return useMutation(getDeleteAnalystBettorSourceMutationOptions(options));
+    }
+
+export const getIngestAnalystBettorPickUrl = () => {
+
+
+
+
+  return `/api/analyst/bettor/ingest`
+}
+
+/**
+ * Accepts baseball research evidence only. mechanismTags must be drawn
+ * from the approved Phase 3 vocabulary. The endpoint does not accept
+ * odds, prices, EV, CLV, popularity, or vote counts. Source text is
+ * retained only when it fits the bounded reasoning limit; otherwise the
+ * persisted field is a marked paraphrase. AI writers are blocked at the
+ * database layer from writing source, pick, or lineage rows.
+ * @summary Ingest one structured bettor pick and its evidence lineage
+ */
+export const ingestAnalystBettorPick = async (bettorPickIngestInput: BettorPickIngestInput, options?: Parameters<typeof customFetch>[1]): Promise<BettorPickIngestResult> => {
+
+  return customFetch<BettorPickIngestResult>(getIngestAnalystBettorPickUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(bettorPickIngestInput)
+  }
+);}
+
+
+
+
+
+export const getIngestAnalystBettorPickMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestAnalystBettorPick>>, TError,{data: BodyType<BettorPickIngestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof ingestAnalystBettorPick>>, TError,{data: BodyType<BettorPickIngestInput>}, TContext> => {
+
+const mutationKey = ['ingestAnalystBettorPick'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof ingestAnalystBettorPick>>, {data: BodyType<BettorPickIngestInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  ingestAnalystBettorPick(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type IngestAnalystBettorPickMutationResult = NonNullable<Awaited<ReturnType<typeof ingestAnalystBettorPick>>>
+    export type IngestAnalystBettorPickMutationBody = BodyType<BettorPickIngestInput>
+    export type IngestAnalystBettorPickMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Ingest one structured bettor pick and its evidence lineage
+ */
+export const useIngestAnalystBettorPick = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestAnalystBettorPick>>, TError,{data: BodyType<BettorPickIngestInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof ingestAnalystBettorPick>>,
+        TError,
+        {data: BodyType<BettorPickIngestInput>},
+        TContext
+      > => {
+      return useMutation(getIngestAnalystBettorPickMutationOptions(options));
+    }
+
+export const getGetAnalystBettorPicksUrl = (params: GetAnalystBettorPicksParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/bettor/picks?${stringifiedParams}` : `/api/analyst/bettor/picks`
+}
+
+/**
+ * @summary Get bettor picks and duplication lineage flags
+ */
+export const getAnalystBettorPicks = async (params: GetAnalystBettorPicksParams, options?: Parameters<typeof customFetch>[1]): Promise<BettorPickList> => {
+
+  return customFetch<BettorPickList>(getGetAnalystBettorPicksUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystBettorPicksQueryKey = (params?: GetAnalystBettorPicksParams,) => {
+    return [
+    `/api/analyst/bettor/picks`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystBettorPicksQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystBettorPicks>>, TError = ErrorType<ErrorResponse>>(params: GetAnalystBettorPicksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystBettorPicks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystBettorPicksQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystBettorPicks>>> = ({ signal }) => getAnalystBettorPicks(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystBettorPicks>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystBettorPicksQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystBettorPicks>>>
+export type GetAnalystBettorPicksQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get bettor picks and duplication lineage flags
+ */
+
+export function useGetAnalystBettorPicks<TData = Awaited<ReturnType<typeof getAnalystBettorPicks>>, TError = ErrorType<ErrorResponse>>(
+ params: GetAnalystBettorPicksParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystBettorPicks>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystBettorPicksQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

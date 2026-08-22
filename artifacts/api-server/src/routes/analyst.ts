@@ -24,6 +24,17 @@ import {
   GetAnalystDailyMarketBoardResponse,
   GetAnalystDailyBoardGameSummaryResponse,
   RefreshAnalystDailyMarketBoardResponse,
+  GetAnalystBettorSourcesResponse,
+  CreateAnalystBettorSourceBody,
+  CreateAnalystBettorSourceResponse,
+  UpdateAnalystBettorSourceBody,
+  UpdateAnalystBettorSourceParams,
+  UpdateAnalystBettorSourceResponse,
+  DeleteAnalystBettorSourceParams,
+  DeleteAnalystBettorSourceResponse,
+  IngestAnalystBettorPickBody,
+  IngestAnalystBettorPickResponse,
+  GetAnalystBettorPicksResponse,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
@@ -68,6 +79,18 @@ import {
   queryDailyBoardGameSummary,
   queryDailyMarketBoard,
 } from "../services/daily-market-board";
+import {
+  BETTOR_MARKETS,
+  BettorIntelligenceConflictError,
+  BettorIntelligenceValidationError,
+  createBettorSource,
+  deleteBettorSource,
+  ingestBettorPick,
+  queryBettorPicks,
+  queryBettorSources,
+  updateBettorSource,
+  type BettorMarket,
+} from "../services/bettor-intelligence";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -94,6 +117,22 @@ function requestedBoardDate(value: unknown) {
     throw new DailyMarketBoardValidationError("date must be a real calendar date");
   }
   return date;
+}
+
+function requestedBettorDate(value: unknown) {
+  try {
+    if (value == null || value === "") {
+      throw new Error("date is required and must use YYYY-MM-DD");
+    }
+    const date = requestedDate(value);
+    const parsed = new Date(`${date}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+      throw new Error("date must be a real calendar date using YYYY-MM-DD");
+    }
+    return date;
+  } catch (error) {
+    throw new BettorIntelligenceValidationError(error instanceof Error ? error.message : "date must use YYYY-MM-DD");
+  }
 }
 
 function dateOnly(value: Date): string {
@@ -1284,6 +1323,127 @@ router.get("/analyst/market-board/game-summary", async (req, res, next) => {
       res.status(400).json({ error: error.message });
       return;
     }
+    next(error);
+  }
+});
+
+// ── Phase 7A – Bettor Intelligence Ingestion and Lineage ──────────────────────
+
+function requestedBettorMarket(value: unknown): BettorMarket | null {
+  if (value == null || value === "") return null;
+  const market = String(value).trim().toUpperCase();
+  if (!BETTOR_MARKETS.includes(market as BettorMarket)) {
+    throw new BettorIntelligenceValidationError("market must be TB, XBH, WALK, or HR");
+  }
+  return market as BettorMarket;
+}
+
+function bettorErrorResponse(
+  error: unknown,
+  res: Parameters<RequestHandler>[1],
+) {
+  if (error instanceof BettorIntelligenceConflictError) {
+    res.status(409).json({ error: error.message });
+    return true;
+  }
+  if (error instanceof BettorIntelligenceValidationError) {
+    res.status(400).json({ error: error.message });
+    return true;
+  }
+  return false;
+}
+
+router.get("/analyst/bettor/sources", async (_req, res, next) => {
+  try {
+    const sources = await queryBettorSources();
+    res.json(GetAnalystBettorSourcesResponse.parse({ sources, total: sources.length }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/bettor/sources", async (req, res, next) => {
+  try {
+    const parsed = CreateAnalystBettorSourceBody.safeParse(req.body);
+    if (!parsed.success) {
+      req.log.warn({ issues: parsed.error.issues }, "Rejected invalid bettor source payload");
+      res.status(400).json({ error: "Invalid bettor source payload" });
+      return;
+    }
+    const source = await createBettorSource(parsed.data);
+    res.status(201).json(CreateAnalystBettorSourceResponse.parse(source));
+  } catch (error) {
+    if (bettorErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+router.patch("/analyst/bettor/sources/:sourceId", async (req, res, next) => {
+  try {
+    const params = UpdateAnalystBettorSourceParams.safeParse(req.params);
+    const body = UpdateAnalystBettorSourceBody.safeParse(req.body);
+    if (!params.success || !body.success || Object.keys(body.success ? body.data : {}).length === 0) {
+      req.log.warn({ paramIssues: params.success ? null : params.error.issues, bodyIssues: body.success ? null : body.error.issues }, "Rejected invalid bettor source update");
+      res.status(400).json({ error: "Invalid bettor source update payload" });
+      return;
+    }
+    const source = await updateBettorSource(params.data.sourceId, body.data);
+    res.json(UpdateAnalystBettorSourceResponse.parse(source));
+  } catch (error) {
+    if (bettorErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+router.delete("/analyst/bettor/sources/:sourceId", async (req, res, next) => {
+  try {
+    const params = DeleteAnalystBettorSourceParams.safeParse(req.params);
+    if (!params.success) {
+      res.status(400).json({ error: "sourceId must be a UUID" });
+      return;
+    }
+    const result = await deleteBettorSource(params.data.sourceId);
+    res.json(DeleteAnalystBettorSourceResponse.parse(result));
+  } catch (error) {
+    if (bettorErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+router.post("/analyst/bettor/ingest", async (req, res, next) => {
+  try {
+    // Validate the uncoerced request value first. z.coerce.date intentionally
+    // accepts JavaScript-normalized dates (such as February 30), which must not
+    // silently move a source pick onto a different slate.
+    const slateDate = requestedBettorDate(
+      req.body && typeof req.body === "object" ? (req.body as Record<string, unknown>).slateDate : undefined,
+    );
+    const parsed = IngestAnalystBettorPickBody.safeParse(req.body);
+    if (!parsed.success) {
+      req.log.warn({ issues: parsed.error.issues }, "Rejected invalid bettor pick payload");
+      res.status(400).json({ error: "Invalid bettor pick payload: use documented baseball evidence fields only" });
+      return;
+    }
+    const result = await ingestBettorPick({
+      ...parsed.data,
+      slateDate,
+      postedAt: parsed.data.postedAt.toISOString(),
+    });
+    res.status(201).json(IngestAnalystBettorPickResponse.parse(result));
+  } catch (error) {
+    if (bettorErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+router.get("/analyst/bettor/picks", async (req, res, next) => {
+  try {
+    const date = requestedBettorDate(req.query.date);
+    const market = requestedBettorMarket(req.query.market);
+    const picks = await queryBettorPicks({ date, market });
+    res.json(GetAnalystBettorPicksResponse.parse({ date, market, picks, total: picks.length }));
+  } catch (error) {
+    if (bettorErrorResponse(error, res)) return;
     next(error);
   }
 });

@@ -892,6 +892,164 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DailyBoardGameSummary"
+  /analyst/bettor/sources:
+    get:
+      operationId: getAnalystBettorSources
+      tags: [analyst]
+      summary: List tracked bettor source identities
+      description: |
+        Sources remain independent at the platform-account level. When an
+        operator has determined that accounts belong to the same person, the
+        optional person-level identity key is returned for lineage auditing.
+      responses:
+        "200":
+          description: Bettor source identities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BettorSourceList"
+    post:
+      operationId: createAnalystBettorSource
+      tags: [analyst]
+      summary: Create or update a bettor platform-account identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BettorSourceInput"
+      responses:
+        "201":
+          description: Bettor source stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BettorSource"
+        "400":
+          description: Invalid source payload
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /analyst/bettor/sources/{sourceId}:
+    patch:
+      operationId: updateAnalystBettorSource
+      tags: [analyst]
+      summary: Update a bettor source identity
+      parameters:
+        - name: sourceId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BettorSourceUpdateInput"
+      responses:
+        "200":
+          description: Bettor source updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BettorSource"
+        "400":
+          description: Invalid update or unknown source
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: A different source already uses the platform account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    delete:
+      operationId: deleteAnalystBettorSource
+      tags: [analyst]
+      summary: Delete a source with no historical picks
+      parameters:
+        - name: sourceId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Source deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BettorSourceDeleteResult"
+        "400":
+          description: Unknown source
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Historical source cannot be deleted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /analyst/bettor/ingest:
+    post:
+      operationId: ingestAnalystBettorPick
+      tags: [analyst]
+      summary: Ingest one structured bettor pick and its evidence lineage
+      description: |
+        Accepts baseball research evidence only. mechanismTags must be drawn
+        from the approved Phase 3 vocabulary. The endpoint does not accept
+        odds, prices, EV, CLV, popularity, or vote counts. Source text is
+        retained only when it fits the bounded reasoning limit; otherwise the
+        persisted field is a marked paraphrase. AI writers are blocked at the
+        database layer from writing source, pick, or lineage rows.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BettorPickIngestInput"
+      responses:
+        "201":
+          description: Bettor pick and any duplication lineage stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BettorPickIngestResult"
+        "400":
+          description: Invalid pick payload, mechanism vocabulary, or source
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: Source already has a pick for the player-market-date
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /analyst/bettor/picks:
+    get:
+      operationId: getAnalystBettorPicks
+      tags: [analyst]
+      summary: Get bettor picks and duplication lineage flags
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: market
+          in: query
+          required: false
+          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+      responses:
+        "200":
+          description: Structured bettor picks with source and copy lineage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BettorPickList"
+        "400":
+          description: Invalid date or market
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -1936,4 +2094,147 @@ components:
           items: { $ref: "#/components/schemas/DailyBoardGameSummaryGame" }
         total: { type: integer, minimum: 0 }
       required: [date, games, total]
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        error: { type: string }
+      required: [error]
+    BettorSourceInput:
+      type: object
+      additionalProperties: false
+      properties:
+        platform: { type: string, minLength: 1, maxLength: 160 }
+        accountHandle: { type: string, minLength: 1, maxLength: 160 }
+        personIdentityKey: { type: ["string", "null"], maxLength: 160 }
+        personLevelCrossPlatform: { type: boolean }
+      required: [platform, accountHandle]
+    BettorSourceUpdateInput:
+      type: object
+      additionalProperties: false
+      properties:
+        platform: { type: string, minLength: 1, maxLength: 160 }
+        accountHandle: { type: string, minLength: 1, maxLength: 160 }
+        personIdentityKey: { type: ["string", "null"], maxLength: 160 }
+        personLevelCrossPlatform: { type: boolean }
+      minProperties: 1
+    BettorSource:
+      type: object
+      additionalProperties: false
+      properties:
+        sourceId: { type: string, format: uuid }
+        platform: { type: string }
+        accountHandle: { type: string }
+        personIdentityKey: { type: ["string", "null"] }
+        personLevelCrossPlatform: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+      required: [sourceId, platform, accountHandle, personIdentityKey, personLevelCrossPlatform, createdAt, updatedAt]
+    BettorSourceList:
+      type: object
+      additionalProperties: false
+      properties:
+        sources:
+          type: array
+          items: { $ref: "#/components/schemas/BettorSource" }
+        total: { type: integer, minimum: 0 }
+      required: [sources, total]
+    BettorSourceDeleteResult:
+      type: object
+      additionalProperties: false
+      properties:
+        sourceId: { type: string, format: uuid }
+        deleted: { type: boolean }
+      required: [sourceId, deleted]
+    BettorMechanism:
+      type: string
+      enum: [CONTACT_VOLUME, POWER_ROUTE, MULTI_PATH, DOUBLE_ROUTE, TRIPLE_ROUTE, HOME_RUN_ROUTE, PATIENCE_VS_COMMAND, COUNT_CREATION, BULLPEN_WALK_PATH, PULL_AIR, BARREL_POWER, PITCH_SHAPE_MISMATCH, PARK_ENVIRONMENT]
+    BettorDuplicationLineage:
+      type: object
+      additionalProperties: false
+      properties:
+        lineageId: { type: string, format: uuid }
+        priorPickId: { type: string, format: uuid }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        method: { type: string }
+        priorSource:
+          type: object
+          additionalProperties: false
+          properties:
+            sourceId: { type: string, format: uuid }
+            platform: { type: string }
+            accountHandle: { type: string }
+          required: [sourceId, platform, accountHandle]
+      required: [lineageId, priorPickId, confidence, method, priorSource]
+    BettorPickSource:
+      type: object
+      additionalProperties: false
+      properties:
+        sourceId: { type: string, format: uuid }
+        platform: { type: string }
+        accountHandle: { type: string }
+        personIdentityKey: { type: ["string", "null"] }
+        personLevelCrossPlatform: { type: boolean }
+      required: [sourceId, platform, accountHandle, personIdentityKey, personLevelCrossPlatform]
+    BettorPickIngestInput:
+      type: object
+      additionalProperties: false
+      properties:
+        sourceId: { type: string, format: uuid }
+        slateDate: { type: string, format: date }
+        playerId: { type: integer, minimum: 1 }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        pickDirection: { type: string, enum: [YES, NO] }
+        mechanismTags:
+          type: array
+          items: { $ref: "#/components/schemas/BettorMechanism" }
+          maxItems: 6
+          uniqueItems: true
+        reasoning: { type: string, maxLength: 20000 }
+        sourceUrl: { type: ["string", "null"], format: uri, maxLength: 2048 }
+        postedAt: { type: string, format: date-time }
+      required: [sourceId, slateDate, playerId, market, pickDirection, mechanismTags, reasoning, postedAt]
+    BettorPick:
+      type: object
+      additionalProperties: false
+      properties:
+        pickId: { type: string, format: uuid }
+        slateDate: { type: string, format: date }
+        playerId: { type: integer }
+        playerName: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        pickDirection: { type: string, enum: [YES, NO] }
+        mechanismTags:
+          type: array
+          items: { $ref: "#/components/schemas/BettorMechanism" }
+        reasoningParaphrase: { type: string, maxLength: 500 }
+        originalTextRetainedFlag: { type: boolean }
+        sourceUrl: { type: ["string", "null"] }
+        postedAt: { type: string, format: date-time }
+        ingestedAt: { type: string, format: date-time }
+        duplicationFlag: { type: string, enum: [INDEPENDENT, IS_LIKELY_COPY] }
+        isLikelyCopy: { type: boolean }
+        source: { $ref: "#/components/schemas/BettorPickSource" }
+        duplicationLineage:
+          type: array
+          items: { $ref: "#/components/schemas/BettorDuplicationLineage" }
+      required: [pickId, slateDate, playerId, playerName, market, pickDirection, mechanismTags, reasoningParaphrase, originalTextRetainedFlag, sourceUrl, postedAt, ingestedAt, duplicationFlag, isLikelyCopy, source, duplicationLineage]
+    BettorPickIngestResult:
+      type: object
+      additionalProperties: false
+      properties:
+        pick: { $ref: "#/components/schemas/BettorPick" }
+        lineageCreated: { type: integer, minimum: 0 }
+      required: [pick, lineageCreated]
+    BettorPickList:
+      type: object
+      additionalProperties: false
+      properties:
+        date: { type: string, format: date }
+        market: { type: ["string", "null"], enum: [TB, XBH, WALK, HR] }
+        picks:
+          type: array
+          items: { $ref: "#/components/schemas/BettorPick" }
+        total: { type: integer, minimum: 0 }
+      required: [date, market, picks, total]
 

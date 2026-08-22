@@ -3,6 +3,7 @@ import {
   type AnyPgColumn,
   bigint,
   boolean,
+  check,
   date,
   integer,
   index,
@@ -72,6 +73,37 @@ export const marketTypeEnum = pgEnum("market_type", [
   "EXTRA_BASE_HIT",
   "BATTER_WALK",
   "HOME_RUN",
+]);
+
+/**
+ * Bettor evidence may only reference mechanisms already approved by the
+ * Phase 3 research engines. This is intentionally a union: the API validates
+ * market-specific meaning, while the database prevents free-form categories.
+ */
+export const bettorMechanismEnum = pgEnum("bettor_mechanism", [
+  "CONTACT_VOLUME",
+  "POWER_ROUTE",
+  "MULTI_PATH",
+  "DOUBLE_ROUTE",
+  "TRIPLE_ROUTE",
+  "HOME_RUN_ROUTE",
+  "PATIENCE_VS_COMMAND",
+  "COUNT_CREATION",
+  "BULLPEN_WALK_PATH",
+  "PULL_AIR",
+  "BARREL_POWER",
+  "PITCH_SHAPE_MISMATCH",
+  "PARK_ENVIRONMENT",
+]);
+
+export const bettorPickDirectionEnum = pgEnum("bettor_pick_direction", [
+  "YES",
+  "NO",
+]);
+
+export const bettorDuplicationFlagEnum = pgEnum("bettor_duplication_flag", [
+  "INDEPENDENT",
+  "IS_LIKELY_COPY",
 ]);
 
 export const settlementStateEnum = pgEnum("settlement_state", [
@@ -157,6 +189,38 @@ export const sourceRegistry = pgTable("source_registry", {
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * A bettor/capper identity at the platform-account level. personIdentityKey
+ * is an operator-supplied stable identity when the same person is identified
+ * across multiple platforms; it is deliberately nullable when unknown.
+ */
+export const bettorSources = pgTable(
+  "bettor_sources",
+  {
+    sourceId: uuid("source_id").primaryKey().defaultRandom(),
+    platform: text("platform").notNull(),
+    accountHandle: text("account_handle").notNull(),
+    personIdentityKey: text("person_identity_key"),
+    personLevelCrossPlatform: boolean("person_level_cross_platform").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    platformAccountIdx: uniqueIndex("bettor_sources_platform_account_idx").on(
+      table.platform,
+      table.accountHandle,
+    ),
+    personIdentityIdx: index("bettor_sources_person_identity_idx").on(table.personIdentityKey),
+    identityTextCheck: check(
+      "bettor_sources_identity_text_check",
+      sql`char_length(btrim(${table.platform})) BETWEEN 1 AND 160
+        AND char_length(btrim(${table.accountHandle})) BETWEEN 1 AND 160
+        AND (${table.personIdentityKey} IS NULL
+          OR char_length(btrim(${table.personIdentityKey})) BETWEEN 1 AND 160)`,
+    ),
+  }),
+);
 
 export const ingestRuns = pgTable("ingest_runs", {
   ingestRunId: uuid("ingest_run_id").primaryKey().defaultRandom(),
@@ -963,6 +1027,80 @@ export const marketResearchProvenance = pgTable("market_research_provenance", {
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * A bettor's stated baseball pick. This table records evidence and lineage,
+ * not price, odds, expected value, or a platform-derived recommendation.
+ * Reasoning is normalized by the ingestion service to a bounded paraphrase.
+ */
+export const bettorPicks = pgTable(
+  "bettor_picks",
+  {
+    pickId: uuid("pick_id").primaryKey().defaultRandom(),
+    slateDate: date("slate_date").notNull(),
+    playerId: integer("player_id").notNull().references(() => players.playerId),
+    market: marketTypeEnum("market").notNull(),
+    pickDirection: bettorPickDirectionEnum("pick_direction").notNull(),
+    mechanismTags: bettorMechanismEnum("mechanism_tags").array().notNull().default([]),
+    reasoningParaphrase: text("reasoning_paraphrase").notNull(),
+    originalTextRetainedFlag: boolean("original_text_retained_flag").notNull().default(false),
+    sourceUrl: text("source_url"),
+    postedAt: timestamp("posted_at", { withTimezone: true }).notNull(),
+    ingestedAt: timestamp("ingested_at", { withTimezone: true }).notNull().defaultNow(),
+    sourceId: uuid("source_id").notNull().references(() => bettorSources.sourceId),
+    duplicationFlag: bettorDuplicationFlagEnum("duplication_flag").notNull().default("INDEPENDENT"),
+  },
+  (table) => ({
+    sourcePickIdx: uniqueIndex("bettor_picks_source_date_player_market_idx").on(
+      table.sourceId,
+      table.slateDate,
+      table.playerId,
+      table.market,
+    ),
+    dateMarketIdx: index("bettor_picks_date_market_idx").on(table.slateDate, table.market),
+    playerDateIdx: index("bettor_picks_player_date_idx").on(table.playerId, table.slateDate),
+    reasoningLengthCheck: check(
+      "bettor_picks_reasoning_length_check",
+      sql`char_length(${table.reasoningParaphrase}) <= 500`,
+    ),
+    mechanismTagCountCheck: check(
+      "bettor_picks_mechanism_tag_count_check",
+      sql`cardinality(${table.mechanismTags}) BETWEEN 1 AND 6`,
+    ),
+  }),
+);
+
+/**
+ * A directed, append-only edge from a newly ingested pick to an earlier pick
+ * that it may duplicate. Multiple candidate predecessors are retained so the
+ * operator can audit why a pick was flagged.
+ */
+export const pickDuplicationLineage = pgTable(
+  "pick_duplication_lineage",
+  {
+    lineageId: uuid("lineage_id").primaryKey().defaultRandom(),
+    pickId: uuid("pick_id").notNull().references(() => bettorPicks.pickId, { onDelete: "cascade" }),
+    priorPickId: uuid("prior_pick_id").notNull().references(() => bettorPicks.pickId),
+    confidence: numeric("confidence").notNull(),
+    method: text("method").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pickPriorUniqueIdx: uniqueIndex("pick_duplication_lineage_pick_prior_idx").on(
+      table.pickId,
+      table.priorPickId,
+    ),
+    priorPickIdx: index("pick_duplication_lineage_prior_pick_idx").on(table.priorPickId),
+    confidenceRangeCheck: check(
+      "pick_duplication_lineage_confidence_range_check",
+      sql`${table.confidence} >= 0 AND ${table.confidence} <= 1`,
+    ),
+    distinctPickCheck: check(
+      "pick_duplication_lineage_distinct_picks_check",
+      sql`${table.pickId} <> ${table.priorPickId}`,
+    ),
+  }),
+);
 
 /**
  * PLACEHOLDER — extended by Phase 4B (Official Settlement and Postmortem Engine).

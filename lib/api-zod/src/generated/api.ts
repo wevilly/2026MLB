@@ -1428,6 +1428,241 @@ export const GetAnalystDailyBoardGameSummaryResponse = zod.object({
 
 
 /**
+ * Sources remain independent at the platform-account level. When an
+ * operator has determined that accounts belong to the same person, the
+ * optional person-level identity key is returned for lineage auditing.
+ * @summary List tracked bettor source identities
+ */
+export const getAnalystBettorSourcesResponseTotalMin = 0;
+
+
+
+export const GetAnalystBettorSourcesResponse = zod.object({
+  "sources": zod.array(zod.object({
+  "sourceId": zod.string().uuid(),
+  "platform": zod.string(),
+  "accountHandle": zod.string(),
+  "personIdentityKey": zod.string().nullable(),
+  "personLevelCrossPlatform": zod.boolean(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})),
+  "total": zod.number().int().min(getAnalystBettorSourcesResponseTotalMin)
+})
+
+
+/**
+ * @summary Create or update a bettor platform-account identity
+ */
+export const createAnalystBettorSourceBodyPlatformMax = 160;
+
+export const createAnalystBettorSourceBodyAccountHandleMax = 160;
+
+export const createAnalystBettorSourceBodyPersonIdentityKeyMax = 160;
+
+
+
+export const CreateAnalystBettorSourceBody = zod.object({
+  "platform": zod.string().min(1).max(createAnalystBettorSourceBodyPlatformMax),
+  "accountHandle": zod.string().min(1).max(createAnalystBettorSourceBodyAccountHandleMax),
+  "personIdentityKey": zod.string().max(createAnalystBettorSourceBodyPersonIdentityKeyMax).nullish(),
+  "personLevelCrossPlatform": zod.boolean().optional()
+}).strict()
+
+export const CreateAnalystBettorSourceResponse = zod.object({
+  "sourceId": zod.string().uuid(),
+  "platform": zod.string(),
+  "accountHandle": zod.string(),
+  "personIdentityKey": zod.string().nullable(),
+  "personLevelCrossPlatform": zod.boolean(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Update a bettor source identity
+ */
+export const UpdateAnalystBettorSourceParams = zod.object({
+  "sourceId": zod.coerce.string().uuid()
+})
+
+export const updateAnalystBettorSourceBodyPlatformMax = 160;
+
+export const updateAnalystBettorSourceBodyAccountHandleMax = 160;
+
+export const updateAnalystBettorSourceBodyPersonIdentityKeyMax = 160;
+
+
+
+export const UpdateAnalystBettorSourceBody = zod.object({
+  "platform": zod.string().min(1).max(updateAnalystBettorSourceBodyPlatformMax).optional(),
+  "accountHandle": zod.string().min(1).max(updateAnalystBettorSourceBodyAccountHandleMax).optional(),
+  "personIdentityKey": zod.string().max(updateAnalystBettorSourceBodyPersonIdentityKeyMax).nullish(),
+  "personLevelCrossPlatform": zod.boolean().optional()
+}).strict()
+
+export const UpdateAnalystBettorSourceResponse = zod.object({
+  "sourceId": zod.string().uuid(),
+  "platform": zod.string(),
+  "accountHandle": zod.string(),
+  "personIdentityKey": zod.string().nullable(),
+  "personLevelCrossPlatform": zod.boolean(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Delete a source with no historical picks
+ */
+export const DeleteAnalystBettorSourceParams = zod.object({
+  "sourceId": zod.coerce.string().uuid()
+})
+
+export const DeleteAnalystBettorSourceResponse = zod.object({
+  "sourceId": zod.string().uuid(),
+  "deleted": zod.boolean()
+})
+
+
+/**
+ * Accepts baseball research evidence only. mechanismTags must be drawn
+ * from the approved Phase 3 vocabulary. The endpoint does not accept
+ * odds, prices, EV, CLV, popularity, or vote counts. Source text is
+ * retained only when it fits the bounded reasoning limit; otherwise the
+ * persisted field is a marked paraphrase. AI writers are blocked at the
+ * database layer from writing source, pick, or lineage rows.
+ * @summary Ingest one structured bettor pick and its evidence lineage
+ */
+
+export const ingestAnalystBettorPickBodyMechanismTagsMax = 6;
+
+export const ingestAnalystBettorPickBodyReasoningMax = 20000;
+
+export const ingestAnalystBettorPickBodySourceUrlMax = 2048;
+
+
+
+export const IngestAnalystBettorPickBody = zod.object({
+  "sourceId": zod.string().uuid(),
+  "slateDate": zod.coerce.date(),
+  "playerId": zod.number().int().min(1),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "pickDirection": zod.enum(['YES', 'NO']),
+  "mechanismTags": zod.array(zod.enum(['CONTACT_VOLUME', 'POWER_ROUTE', 'MULTI_PATH', 'DOUBLE_ROUTE', 'TRIPLE_ROUTE', 'HOME_RUN_ROUTE', 'PATIENCE_VS_COMMAND', 'COUNT_CREATION', 'BULLPEN_WALK_PATH', 'PULL_AIR', 'BARREL_POWER', 'PITCH_SHAPE_MISMATCH', 'PARK_ENVIRONMENT'])).max(ingestAnalystBettorPickBodyMechanismTagsMax),
+  "reasoning": zod.string().max(ingestAnalystBettorPickBodyReasoningMax),
+  "sourceUrl": zod.string().url().max(ingestAnalystBettorPickBodySourceUrlMax).nullish(),
+  "postedAt": zod.coerce.date()
+}).strict()
+
+export const ingestAnalystBettorPickResponsePickReasoningParaphraseMax = 500;
+
+export const ingestAnalystBettorPickResponsePickDuplicationLineageItemConfidenceMin = 0;
+export const ingestAnalystBettorPickResponsePickDuplicationLineageItemConfidenceMax = 1;
+
+export const ingestAnalystBettorPickResponseLineageCreatedMin = 0;
+
+
+
+export const IngestAnalystBettorPickResponse = zod.object({
+  "pick": zod.object({
+  "pickId": zod.string().uuid(),
+  "slateDate": zod.coerce.date(),
+  "playerId": zod.number().int(),
+  "playerName": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "pickDirection": zod.enum(['YES', 'NO']),
+  "mechanismTags": zod.array(zod.enum(['CONTACT_VOLUME', 'POWER_ROUTE', 'MULTI_PATH', 'DOUBLE_ROUTE', 'TRIPLE_ROUTE', 'HOME_RUN_ROUTE', 'PATIENCE_VS_COMMAND', 'COUNT_CREATION', 'BULLPEN_WALK_PATH', 'PULL_AIR', 'BARREL_POWER', 'PITCH_SHAPE_MISMATCH', 'PARK_ENVIRONMENT'])),
+  "reasoningParaphrase": zod.string().max(ingestAnalystBettorPickResponsePickReasoningParaphraseMax),
+  "originalTextRetainedFlag": zod.boolean(),
+  "sourceUrl": zod.string().nullable(),
+  "postedAt": zod.coerce.date(),
+  "ingestedAt": zod.coerce.date(),
+  "duplicationFlag": zod.enum(['INDEPENDENT', 'IS_LIKELY_COPY']),
+  "isLikelyCopy": zod.boolean(),
+  "source": zod.object({
+  "sourceId": zod.string().uuid(),
+  "platform": zod.string(),
+  "accountHandle": zod.string(),
+  "personIdentityKey": zod.string().nullable(),
+  "personLevelCrossPlatform": zod.boolean()
+}),
+  "duplicationLineage": zod.array(zod.object({
+  "lineageId": zod.string().uuid(),
+  "priorPickId": zod.string().uuid(),
+  "confidence": zod.number().min(ingestAnalystBettorPickResponsePickDuplicationLineageItemConfidenceMin).max(ingestAnalystBettorPickResponsePickDuplicationLineageItemConfidenceMax),
+  "method": zod.string(),
+  "priorSource": zod.object({
+  "sourceId": zod.string().uuid(),
+  "platform": zod.string(),
+  "accountHandle": zod.string()
+})
+}))
+}),
+  "lineageCreated": zod.number().int().min(ingestAnalystBettorPickResponseLineageCreatedMin)
+})
+
+
+/**
+ * @summary Get bettor picks and duplication lineage flags
+ */
+export const GetAnalystBettorPicksQueryParams = zod.object({
+  "date": zod.date(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional()
+})
+
+export const getAnalystBettorPicksResponsePicksItemReasoningParaphraseMax = 500;
+
+export const getAnalystBettorPicksResponsePicksItemDuplicationLineageItemConfidenceMin = 0;
+export const getAnalystBettorPicksResponsePicksItemDuplicationLineageItemConfidenceMax = 1;
+
+export const getAnalystBettorPicksResponseTotalMin = 0;
+
+
+
+export const GetAnalystBettorPicksResponse = zod.object({
+  "date": zod.coerce.date(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).nullable(),
+  "picks": zod.array(zod.object({
+  "pickId": zod.string().uuid(),
+  "slateDate": zod.coerce.date(),
+  "playerId": zod.number().int(),
+  "playerName": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "pickDirection": zod.enum(['YES', 'NO']),
+  "mechanismTags": zod.array(zod.enum(['CONTACT_VOLUME', 'POWER_ROUTE', 'MULTI_PATH', 'DOUBLE_ROUTE', 'TRIPLE_ROUTE', 'HOME_RUN_ROUTE', 'PATIENCE_VS_COMMAND', 'COUNT_CREATION', 'BULLPEN_WALK_PATH', 'PULL_AIR', 'BARREL_POWER', 'PITCH_SHAPE_MISMATCH', 'PARK_ENVIRONMENT'])),
+  "reasoningParaphrase": zod.string().max(getAnalystBettorPicksResponsePicksItemReasoningParaphraseMax),
+  "originalTextRetainedFlag": zod.boolean(),
+  "sourceUrl": zod.string().nullable(),
+  "postedAt": zod.coerce.date(),
+  "ingestedAt": zod.coerce.date(),
+  "duplicationFlag": zod.enum(['INDEPENDENT', 'IS_LIKELY_COPY']),
+  "isLikelyCopy": zod.boolean(),
+  "source": zod.object({
+  "sourceId": zod.string().uuid(),
+  "platform": zod.string(),
+  "accountHandle": zod.string(),
+  "personIdentityKey": zod.string().nullable(),
+  "personLevelCrossPlatform": zod.boolean()
+}),
+  "duplicationLineage": zod.array(zod.object({
+  "lineageId": zod.string().uuid(),
+  "priorPickId": zod.string().uuid(),
+  "confidence": zod.number().min(getAnalystBettorPicksResponsePicksItemDuplicationLineageItemConfidenceMin).max(getAnalystBettorPicksResponsePicksItemDuplicationLineageItemConfidenceMax),
+  "method": zod.string(),
+  "priorSource": zod.object({
+  "sourceId": zod.string().uuid(),
+  "platform": zod.string(),
+  "accountHandle": zod.string()
+})
+}))
+})),
+  "total": zod.number().int().min(getAnalystBettorPicksResponseTotalMin)
+})
+
+
+/**
  * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage for all 30 teams
  */
 export const GetAnalystBullpenRoomQueryParams = zod.object({
