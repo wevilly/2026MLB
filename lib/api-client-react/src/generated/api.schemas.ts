@@ -1738,6 +1738,68 @@ export interface BettorEvaluation {
   totalPicks: number;
 }
 
+export type AiToolDefinitionAccessLevel = typeof AiToolDefinitionAccessLevel[keyof typeof AiToolDefinitionAccessLevel];
+
+
+export const AiToolDefinitionAccessLevel = {
+  READ_ONLY: 'READ_ONLY',
+} as const;
+
+export interface AiToolDefinition {
+  toolName: string;
+  description: string;
+  dataSource: string;
+  accessLevel: AiToolDefinitionAccessLevel;
+  prohibitedActions: string[];
+  active: boolean;
+}
+
+export interface AiToolRegistry {
+  tools: AiToolDefinition[];
+  /** @minimum 0 */
+  total: number;
+}
+
+export type AiToolCallInputParameters = { [key: string]: unknown };
+
+export interface AiToolCallInput {
+  /**
+     * @minLength 3
+     * @maxLength 100
+     */
+  toolName: string;
+  parameters: AiToolCallInputParameters;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  sessionId: string;
+}
+
+export type AiToolCallResultStatus = typeof AiToolCallResultStatus[keyof typeof AiToolCallResultStatus];
+
+
+export const AiToolCallResultStatus = {
+  SUCCESS: 'SUCCESS',
+  REJECTED: 'REJECTED',
+  ERROR: 'ERROR',
+} as const;
+
+/**
+ * @nullable
+ */
+export type AiToolCallResultResult = { [key: string]: unknown } | null;
+
+export interface AiToolCallResult {
+  callId: string;
+  toolName: string;
+  status: AiToolCallResultStatus;
+  /** @nullable */
+  result: AiToolCallResultResult;
+  /** @nullable */
+  error: string | null;
+}
+
 export type GetAnalystProjectionsParams = {
 date?: string;
 };

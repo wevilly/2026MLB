@@ -1753,6 +1753,53 @@ export const GetAnalystBettorEvaluationResponse = zod.object({
 
 
 /**
+ * @summary List the documented read-only tools available to the AI Analyst
+ */
+export const getAnalystAiToolRegistryResponseTotalMin = 0;
+
+
+
+export const GetAnalystAiToolRegistryResponse = zod.object({
+  "tools": zod.array(zod.object({
+  "toolName": zod.string(),
+  "description": zod.string(),
+  "dataSource": zod.string(),
+  "accessLevel": zod.enum(['READ_ONLY']),
+  "prohibitedActions": zod.array(zod.string()),
+  "active": zod.boolean()
+})),
+  "total": zod.number().int().min(getAnalystAiToolRegistryResponseTotalMin)
+})
+
+
+/**
+ * The gateway accepts only active READ_ONLY registry tools. Unknown tool
+ * names and any attempted write operation are rejected and logged.
+ * @summary Execute one audited read-only AI Analyst tool call
+ */
+export const callAnalystAiToolBodyToolNameMin = 3;
+export const callAnalystAiToolBodyToolNameMax = 100;
+
+export const callAnalystAiToolBodySessionIdMax = 160;
+
+
+
+export const CallAnalystAiToolBody = zod.object({
+  "toolName": zod.string().min(callAnalystAiToolBodyToolNameMin).max(callAnalystAiToolBodyToolNameMax),
+  "parameters": zod.record(zod.string(), zod.unknown()),
+  "sessionId": zod.string().min(1).max(callAnalystAiToolBodySessionIdMax)
+}).strict()
+
+export const CallAnalystAiToolResponse = zod.object({
+  "callId": zod.string().uuid(),
+  "toolName": zod.string(),
+  "status": zod.enum(['SUCCESS', 'REJECTED', 'ERROR']),
+  "result": zod.record(zod.string(), zod.unknown()).nullable(),
+  "error": zod.string().nullable()
+})
+
+
+/**
  * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage for all 30 teams
  */
 export const GetAnalystBullpenRoomQueryParams = zod.object({

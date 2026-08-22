@@ -37,6 +37,9 @@ import {
   GetAnalystBettorPicksResponse,
   GetAnalystBettorEvaluationQueryParams,
   GetAnalystBettorEvaluationResponse,
+  GetAnalystAiToolRegistryResponse,
+  CallAnalystAiToolBody,
+  CallAnalystAiToolResponse,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
@@ -94,6 +97,7 @@ import {
   updateBettorSource,
   type BettorMarket,
 } from "../services/bettor-intelligence";
+import { executeAiToolCall, queryAiToolRegistry, rejectAiToolCall } from "../services/ai-tool-gateway";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -1469,6 +1473,46 @@ router.get("/analyst/bettor/evaluation", async (req, res, next) => {
     res.json(GetAnalystBettorEvaluationResponse.parse(evaluation));
   } catch (error) {
     if (bettorErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+// ── Phase 8A – AI Analyst read-only tool gateway ────────────────────────────
+
+router.get("/analyst/ai/tool-registry", async (_req, res, next) => {
+  try {
+    const tools = await queryAiToolRegistry();
+    res.json(GetAnalystAiToolRegistryResponse.parse({ tools, total: tools.length }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/ai/tool-call", async (req, res, next) => {
+  try {
+    const parsed = CallAnalystAiToolBody.safeParse(req.body);
+    if (!parsed.success) {
+      const raw = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
+      const result = await rejectAiToolCall(
+        {
+          toolName: typeof raw.toolName === "string" ? raw.toolName.slice(0, 100) : "INVALID_TOOL_CALL",
+          parameters: raw.parameters && typeof raw.parameters === "object" && !Array.isArray(raw.parameters)
+            ? raw.parameters as Record<string, unknown>
+            : {},
+          sessionId: typeof raw.sessionId === "string" && raw.sessionId.trim()
+            ? raw.sessionId.slice(0, 160)
+            : "invalid-request",
+          requestId: String(req.id),
+        },
+        "Invalid AI tool-call payload: toolName, parameters, and sessionId are required.",
+      );
+      res.status(400).json(CallAnalystAiToolResponse.parse(result));
+      return;
+    }
+    const result = await executeAiToolCall({ ...parsed.data, requestId: String(req.id) });
+    const response = CallAnalystAiToolResponse.parse(result);
+    res.status(result.status === "SUCCESS" ? 200 : result.status === "REJECTED" ? 400 : 502).json(response);
+  } catch (error) {
     next(error);
   }
 });

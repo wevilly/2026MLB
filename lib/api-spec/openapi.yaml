@@ -1081,6 +1081,46 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /analyst/ai/tool-registry:
+    get:
+      operationId: getAnalystAiToolRegistry
+      tags: [analyst]
+      summary: List the documented read-only tools available to the AI Analyst
+      responses:
+        "200":
+          description: Active and inactive AI tool registry entries
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiToolRegistry" }
+  /analyst/ai/tool-call:
+    post:
+      operationId: callAnalystAiTool
+      tags: [analyst]
+      summary: Execute one audited read-only AI Analyst tool call
+      description: |
+        The gateway accepts only active READ_ONLY registry tools. Unknown tool
+        names and any attempted write operation are rejected and logged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AiToolCallInput" }
+      responses:
+        "200":
+          description: Read-only tool result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiToolCallResult" }
+        "400":
+          description: Invalid input or prohibited tool operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiToolCallResult" }
+        "502":
+          description: A permitted live research provider failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiToolCallResult" }
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -2344,4 +2384,48 @@ components:
         totalRecords: { type: integer, minimum: 0 }
         totalPicks: { type: integer, minimum: 0 }
       required: [evaluationWindow, computedAt, records, picks, sources, totalRecords, totalPicks]
+    AiToolDefinition:
+      type: object
+      additionalProperties: false
+      properties:
+        toolName: { type: string }
+        description: { type: string }
+        dataSource: { type: string }
+        accessLevel: { type: string, enum: [READ_ONLY] }
+        prohibitedActions:
+          type: array
+          items: { type: string }
+        active: { type: boolean }
+      required: [toolName, description, dataSource, accessLevel, prohibitedActions, active]
+    AiToolRegistry:
+      type: object
+      additionalProperties: false
+      properties:
+        tools:
+          type: array
+          items: { $ref: "#/components/schemas/AiToolDefinition" }
+        total: { type: integer, minimum: 0 }
+      required: [tools, total]
+    AiToolCallInput:
+      type: object
+      additionalProperties: false
+      properties:
+        toolName: { type: string, minLength: 3, maxLength: 100 }
+        parameters:
+          type: object
+          additionalProperties: true
+        sessionId: { type: string, minLength: 1, maxLength: 160 }
+      required: [toolName, parameters, sessionId]
+    AiToolCallResult:
+      type: object
+      additionalProperties: false
+      properties:
+        callId: { type: string, format: uuid }
+        toolName: { type: string }
+        status: { type: string, enum: [SUCCESS, REJECTED, ERROR] }
+        result:
+          type: ["object", "null"]
+          additionalProperties: true
+        error: { type: ["string", "null"] }
+      required: [callId, toolName, status, result, error]
 

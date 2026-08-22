@@ -106,6 +106,20 @@ export const bettorDuplicationFlagEnum = pgEnum("bettor_duplication_flag", [
   "IS_LIKELY_COPY",
 ]);
 
+/**
+ * AI tools are a deliberately narrow read gateway. There is no write-capable
+ * access level: the application must never grant an agent a mutation tool.
+ */
+export const aiToolAccessLevelEnum = pgEnum("ai_tool_access_level", [
+  "READ_ONLY",
+]);
+
+export const aiToolCallStatusEnum = pgEnum("ai_tool_call_status", [
+  "SUCCESS",
+  "REJECTED",
+  "ERROR",
+]);
+
 export const settlementStateEnum = pgEnum("settlement_state", [
   "PENDING",
   "SETTLED",
@@ -1145,6 +1159,63 @@ export const bettorPerformanceRecords = pgTable(
     evaluationWindowCheck: check(
       "bettor_performance_evaluation_window_check",
       sql`char_length(btrim(${table.evaluationWindow})) BETWEEN 1 AND 80`,
+    ),
+  }),
+);
+
+/**
+ * Documented allowlist for the AI Analyst gateway. Registry changes are
+ * controlled server configuration, not AI-generated state.
+ */
+export const aiToolRegistry = pgTable(
+  "ai_tool_registry",
+  {
+    toolName: text("tool_name").primaryKey(),
+    description: text("description").notNull(),
+    dataSource: text("data_source").notNull(),
+    accessLevel: aiToolAccessLevelEnum("access_level").notNull().default("READ_ONLY"),
+    prohibitedActions: jsonb("prohibited_actions").notNull().default([]),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    toolNameLengthCheck: check(
+      "ai_tool_registry_tool_name_length_check",
+      sql`char_length(btrim(${table.toolName})) BETWEEN 3 AND 100`,
+    ),
+  }),
+);
+
+/**
+ * Append-only audit trail of every request that enters the AI tool gateway.
+ * Rejected and failed calls are retained alongside successful reads.
+ */
+export const aiToolCallLog = pgTable(
+  "ai_tool_call_log",
+  {
+    callId: uuid("call_id").primaryKey().defaultRandom(),
+    calledAt: timestamp("called_at", { withTimezone: true }).notNull().defaultNow(),
+    toolName: text("tool_name").notNull(),
+    parameters: jsonb("parameters").notNull().default({}),
+    responseSummary: jsonb("response_summary").notNull().default({}),
+    toolDefinition: jsonb("tool_definition").notNull().default({}),
+    /** Server-assigned request correlation; never supplied by the AI caller. */
+    requestId: text("request_id").notNull().default("legacy-unattributed"),
+    /** Session is caller correlation only, not authenticated actor attribution. */
+    sessionId: text("session_id").notNull(),
+    status: aiToolCallStatusEnum("status").notNull(),
+    rejectionReason: text("rejection_reason"),
+  },
+  (table) => ({
+    calledAtIdx: index("ai_tool_call_log_called_at_idx").on(table.calledAt),
+    sessionCalledAtIdx: index("ai_tool_call_log_session_called_at_idx").on(
+      table.sessionId,
+      table.calledAt,
+    ),
+    sessionLengthCheck: check(
+      "ai_tool_call_log_session_length_check",
+      sql`char_length(btrim(${table.sessionId})) BETWEEN 1 AND 160`,
     ),
   }),
 );

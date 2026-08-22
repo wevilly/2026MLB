@@ -20,6 +20,9 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AiToolCallInput,
+  AiToolCallResult,
+  AiToolRegistry,
   AnalystSettings,
   BackfillFeatureStoreParams,
   BettorEvaluation,
@@ -3539,6 +3542,156 @@ export function useGetAnalystBettorEvaluation<TData = Awaited<ReturnType<typeof 
 
 
 
+
+export const getGetAnalystAiToolRegistryUrl = () => {
+
+
+
+
+  return `/api/analyst/ai/tool-registry`
+}
+
+/**
+ * @summary List the documented read-only tools available to the AI Analyst
+ */
+export const getAnalystAiToolRegistry = async ( options?: Parameters<typeof customFetch>[1]): Promise<AiToolRegistry> => {
+
+  return customFetch<AiToolRegistry>(getGetAnalystAiToolRegistryUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystAiToolRegistryQueryKey = () => {
+    return [
+    `/api/analyst/ai/tool-registry`
+    ] as const;
+    }
+
+
+export const getGetAnalystAiToolRegistryQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystAiToolRegistry>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiToolRegistry>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystAiToolRegistryQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystAiToolRegistry>>> = ({ signal }) => getAnalystAiToolRegistry({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiToolRegistry>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystAiToolRegistryQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystAiToolRegistry>>>
+export type GetAnalystAiToolRegistryQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the documented read-only tools available to the AI Analyst
+ */
+
+export function useGetAnalystAiToolRegistry<TData = Awaited<ReturnType<typeof getAnalystAiToolRegistry>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiToolRegistry>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystAiToolRegistryQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCallAnalystAiToolUrl = () => {
+
+
+
+
+  return `/api/analyst/ai/tool-call`
+}
+
+/**
+ * The gateway accepts only active READ_ONLY registry tools. Unknown tool
+ * names and any attempted write operation are rejected and logged.
+ * @summary Execute one audited read-only AI Analyst tool call
+ */
+export const callAnalystAiTool = async (aiToolCallInput: AiToolCallInput, options?: Parameters<typeof customFetch>[1]): Promise<AiToolCallResult> => {
+
+  return customFetch<AiToolCallResult>(getCallAnalystAiToolUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(aiToolCallInput)
+  }
+);}
+
+
+
+
+
+export const getCallAnalystAiToolMutationOptions = <TError = ErrorType<AiToolCallResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof callAnalystAiTool>>, TError,{data: BodyType<AiToolCallInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof callAnalystAiTool>>, TError,{data: BodyType<AiToolCallInput>}, TContext> => {
+
+const mutationKey = ['callAnalystAiTool'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof callAnalystAiTool>>, {data: BodyType<AiToolCallInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  callAnalystAiTool(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CallAnalystAiToolMutationResult = NonNullable<Awaited<ReturnType<typeof callAnalystAiTool>>>
+    export type CallAnalystAiToolMutationBody = BodyType<AiToolCallInput>
+    export type CallAnalystAiToolMutationError = ErrorType<AiToolCallResult>
+
+    /**
+ * @summary Execute one audited read-only AI Analyst tool call
+ */
+export const useCallAnalystAiTool = <TError = ErrorType<AiToolCallResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof callAnalystAiTool>>, TError,{data: BodyType<AiToolCallInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof callAnalystAiTool>>,
+        TError,
+        {data: BodyType<AiToolCallInput>},
+        TContext
+      > => {
+      return useMutation(getCallAnalystAiToolMutationOptions(options));
+    }
 
 export const getGetAnalystBullpenRoomUrl = (params?: GetAnalystBullpenRoomParams,) => {
   const normalizedParams = new URLSearchParams();
