@@ -112,3 +112,17 @@ mtime_ms = 1787323474503
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/24933886-7a85-4e2d-8a05-a95b72aa699f/df8350e2-e92f-4062-96f4-9212e4568067"
 storage_version_token = "1787323529335093"
 content_type = "image/jpeg"
+
+[[outputs]]
+id = "F97xem4SvKHxBvyAIFzU6"
+uri = "file://.agents/outputs/mlb-round-robin-research-2026-08-22.xls"
+type = "table"
+title = "Today’s MLB Round Robin Research — August 22, 2026"
+description = "Excel-compatible workbook with all five Round Robin boards, 15 games, and 1,044 persisted research legs for 2026-08-22 ET. Includes a README and Eligible Legs sheet; research only, with no odds or recommendations."
+logical_id = "06e45796-ca8e-4c22-88a9-1a583049d7d4"
+content_hash = "sha256:c75e622bd25ba4a3c863c8e6cc8e214b5e5c5ca2b2f9c5dcc36f77c47acba539"
+size = 2353377
+mtime_ms = 1787421450734
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/06e45796-ca8e-4c22-88a9-1a583049d7d4/b10b7c7b-3a42-4645-b074-363ad24851ce"
+storage_version_token = "1787421461703917"
+content_type = "application/vnd.ms-excel"
