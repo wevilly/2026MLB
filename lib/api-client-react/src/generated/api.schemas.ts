@@ -788,6 +788,211 @@ export interface WriteHistoricalOutcomeResult {
   outcomeHit: boolean;
 }
 
+export type OfficialGameSettlementResultState = typeof OfficialGameSettlementResultState[keyof typeof OfficialGameSettlementResultState];
+
+
+export const OfficialGameSettlementResultState = {
+  PENDING: 'PENDING',
+  SETTLED: 'SETTLED',
+  POSTPONED: 'POSTPONED',
+  NO_ACTION: 'NO_ACTION',
+  DISPUTED: 'DISPUTED',
+} as const;
+
+export interface OfficialGameSettlementResult {
+  /** @minimum 1 */
+  gamePk: number;
+  slateDate: string;
+  ingestRunId: string;
+  state: OfficialGameSettlementResultState;
+  /** @minimum 0 */
+  lines: number;
+  /** @minimum 0 */
+  outcomesWritten: number;
+  /** @minimum 0 */
+  corrections: number;
+}
+
+export type OfficialSettlementRefreshResultSource = typeof OfficialSettlementRefreshResultSource[keyof typeof OfficialSettlementRefreshResultSource];
+
+
+export const OfficialSettlementRefreshResultSource = {
+  MLB_Official: 'MLB Official',
+} as const;
+
+export interface OfficialSettlementRefreshResult {
+  source: OfficialSettlementRefreshResultSource;
+  slateDate: string;
+  /** @minimum 0 */
+  gamesFound: number;
+  /** @minimum 0 */
+  gamesSettled: number;
+  /** @minimum 0 */
+  outcomesWritten: number;
+  /** @minimum 0 */
+  corrections: number;
+  games: OfficialGameSettlementResult[];
+}
+
+export interface SettlementComponents {
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  singles?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  doubles?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  triples?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  homeRuns?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  walks?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  plateAppearances?: number | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  atBats?: number | null;
+}
+
+export type SettlementOutcomeMarket = typeof SettlementOutcomeMarket[keyof typeof SettlementOutcomeMarket];
+
+
+export const SettlementOutcomeMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type SettlementOutcomeSettlementState = typeof SettlementOutcomeSettlementState[keyof typeof SettlementOutcomeSettlementState];
+
+
+export const SettlementOutcomeSettlementState = {
+  PENDING: 'PENDING',
+  SETTLED: 'SETTLED',
+  POSTPONED: 'POSTPONED',
+  NO_ACTION: 'NO_ACTION',
+  DISPUTED: 'DISPUTED',
+} as const;
+
+export type SettlementOutcomeSourceId = typeof SettlementOutcomeSourceId[keyof typeof SettlementOutcomeSourceId];
+
+
+export const SettlementOutcomeSourceId = {
+  MLB_OFFICIAL: 'MLB_OFFICIAL',
+} as const;
+
+export type SettlementOutcomeOfficialSourceMetadata = { [key: string]: unknown };
+
+export interface SettlementOutcome {
+  outcomeId: string;
+  /** @minimum 1 */
+  playerId: number;
+  playerName: string;
+  /** @minimum 1 */
+  gamePk: number;
+  slateDate: string;
+  market: SettlementOutcomeMarket;
+  /** @minimum 0 */
+  outcomeValue: number;
+  outcomeHit: boolean;
+  components: SettlementComponents;
+  settlementState: SettlementOutcomeSettlementState;
+  /** @nullable */
+  settledAt: string | null;
+  sourceId: SettlementOutcomeSourceId;
+  /** @nullable */
+  ingestRunId: string | null;
+  officialSourceMetadata: SettlementOutcomeOfficialSourceMetadata;
+  /** @nullable */
+  correctionOf: string | null;
+  /** @nullable */
+  processErrorTaxonomy: string | null;
+  /** @nullable */
+  correctionNote: string | null;
+}
+
+export type SettlementListSource = typeof SettlementListSource[keyof typeof SettlementListSource];
+
+
+export const SettlementListSource = {
+  MLB_Official: 'MLB Official',
+} as const;
+
+export interface SettlementList {
+  source: SettlementListSource;
+  settlements: SettlementOutcome[];
+  /** @minimum 0 */
+  total: number;
+  systemNote: string;
+}
+
+export interface CreateMarketPostmortemInput {
+  snapshotId: string;
+  outcomeId: string;
+  /** @nullable */
+  notes?: string | null;
+}
+
+export type MarketPostmortemMarket = typeof MarketPostmortemMarket[keyof typeof MarketPostmortemMarket];
+
+
+export const MarketPostmortemMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export interface MarketPostmortem {
+  postmortemId: string;
+  snapshotId: string;
+  outcomeId: string;
+  /** @minimum 1 */
+  playerId: number;
+  playerName: string;
+  /** @minimum 1 */
+  gamePk: number;
+  market: MarketPostmortemMarket;
+  snapshotFeatureHash: string;
+  /** @minimum 0 */
+  outcomeValue: number;
+  outcomeHit: boolean;
+  /** @nullable */
+  researchRank: number | null;
+  /** @nullable */
+  researchState: string | null;
+  /** @nullable */
+  primaryMechanism: string | null;
+  /** @nullable */
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface PostmortemList {
+  postmortems: MarketPostmortem[];
+  /** @minimum 0 */
+  total: number;
+}
+
 export interface FeatureStoreCorrectionResult {
   newSnapshotId: string;
   originalSnapshotId: string;
@@ -1032,6 +1237,72 @@ export type CorrectFeatureStoreSnapshot404 = {
 export type WriteFeatureStoreOutcome400 = {
   error: string;
 };
+
+export type RefreshOfficialSettlementParams = {
+date: string;
+};
+
+export type RefreshOfficialSettlement400 = {
+  error: string;
+};
+
+export type IngestOfficialSettlementsParams = {
+date: string;
+};
+
+export type IngestOfficialSettlements400 = {
+  error: string;
+};
+
+export type SettleOfficialGame400 = {
+  error: string;
+};
+
+export type GetAnalystSettlementsParams = {
+/**
+ * @minimum 1
+ */
+gamePk?: number;
+/**
+ * @minimum 1
+ */
+playerId?: number;
+market?: GetAnalystSettlementsMarket;
+dateFrom?: string;
+dateTo?: string;
+};
+
+export type GetAnalystSettlementsMarket = typeof GetAnalystSettlementsMarket[keyof typeof GetAnalystSettlementsMarket];
+
+
+export const GetAnalystSettlementsMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type CreateAnalystPostmortem400 = {
+  error: string;
+};
+
+export type GetAnalystPostmortemsParams = {
+/**
+ * @minimum 1
+ */
+playerId?: number;
+market?: GetAnalystPostmortemsMarket;
+};
+
+export type GetAnalystPostmortemsMarket = typeof GetAnalystPostmortemsMarket[keyof typeof GetAnalystPostmortemsMarket];
+
+
+export const GetAnalystPostmortemsMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
 
 export type GetAnalystBullpenRoomParams = {
 date?: string;

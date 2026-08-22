@@ -822,8 +822,10 @@ export const CorrectFeatureStoreSnapshotResponse = zod.object({
 
 /**
  * Writes one append-only outcome row to historical_outcomes. No UPDATE or DELETE
- * is ever issued — each call creates a new row with a distinct outcomeId.
- * sourceId must reference an existing source_registry entry (e.g. MLB_OFFICIAL).
+ * is ever issued — each call creates a new row with a distinct outcomeId. This endpoint
+ * creates a PENDING official-stat observation only; it cannot create a settled result.
+ * SETTLED rows are created exclusively by the MLB Stats API settlement workflow.
+ * sourceId must be MLB_OFFICIAL.
  * Do NOT supply odds, EV, CLV, or sportsbook data.
  * @summary Append an official historical outcome for a player-game-market
  */
@@ -863,6 +865,275 @@ export const WriteFeatureStoreOutcomeResponse = zod.object({
   "outcomeId": zod.string(),
   "outcomeValue": zod.number(),
   "outcomeHit": zod.boolean()
+})
+
+
+/**
+ * Reads final MLB game feeds and appends official TB, XBH, walk, and home-run
+ * outcomes. FantasyPros and other projection sources are never accepted for settlement.
+ * @summary Settle completed games from the official MLB Stats API
+ */
+export const RefreshOfficialSettlementQueryParams = zod.object({
+  "date": zod.date()
+})
+
+export const refreshOfficialSettlementResponseGamesFoundMin = 0;
+
+export const refreshOfficialSettlementResponseGamesSettledMin = 0;
+
+export const refreshOfficialSettlementResponseOutcomesWrittenMin = 0;
+
+export const refreshOfficialSettlementResponseCorrectionsMin = 0;
+
+
+export const refreshOfficialSettlementResponseGamesItemLinesMin = 0;
+
+export const refreshOfficialSettlementResponseGamesItemOutcomesWrittenMin = 0;
+
+export const refreshOfficialSettlementResponseGamesItemCorrectionsMin = 0;
+
+
+
+export const RefreshOfficialSettlementResponse = zod.object({
+  "source": zod.enum(['MLB Official']),
+  "slateDate": zod.coerce.date(),
+  "gamesFound": zod.number().int().min(refreshOfficialSettlementResponseGamesFoundMin),
+  "gamesSettled": zod.number().int().min(refreshOfficialSettlementResponseGamesSettledMin),
+  "outcomesWritten": zod.number().int().min(refreshOfficialSettlementResponseOutcomesWrittenMin),
+  "corrections": zod.number().int().min(refreshOfficialSettlementResponseCorrectionsMin),
+  "games": zod.array(zod.object({
+  "gamePk": zod.number().int().min(1),
+  "slateDate": zod.coerce.date(),
+  "ingestRunId": zod.string(),
+  "state": zod.enum(['PENDING', 'SETTLED', 'POSTPONED', 'NO_ACTION', 'DISPUTED']),
+  "lines": zod.number().int().min(refreshOfficialSettlementResponseGamesItemLinesMin),
+  "outcomesWritten": zod.number().int().min(refreshOfficialSettlementResponseGamesItemOutcomesWrittenMin),
+  "corrections": zod.number().int().min(refreshOfficialSettlementResponseGamesItemCorrectionsMin)
+}))
+})
+
+
+/**
+ * @summary Ingest official MLB settlements for a date
+ */
+export const IngestOfficialSettlementsQueryParams = zod.object({
+  "date": zod.date()
+})
+
+export const ingestOfficialSettlementsResponseGamesFoundMin = 0;
+
+export const ingestOfficialSettlementsResponseGamesSettledMin = 0;
+
+export const ingestOfficialSettlementsResponseOutcomesWrittenMin = 0;
+
+export const ingestOfficialSettlementsResponseCorrectionsMin = 0;
+
+
+export const ingestOfficialSettlementsResponseGamesItemLinesMin = 0;
+
+export const ingestOfficialSettlementsResponseGamesItemOutcomesWrittenMin = 0;
+
+export const ingestOfficialSettlementsResponseGamesItemCorrectionsMin = 0;
+
+
+
+export const IngestOfficialSettlementsResponse = zod.object({
+  "source": zod.enum(['MLB Official']),
+  "slateDate": zod.coerce.date(),
+  "gamesFound": zod.number().int().min(ingestOfficialSettlementsResponseGamesFoundMin),
+  "gamesSettled": zod.number().int().min(ingestOfficialSettlementsResponseGamesSettledMin),
+  "outcomesWritten": zod.number().int().min(ingestOfficialSettlementsResponseOutcomesWrittenMin),
+  "corrections": zod.number().int().min(ingestOfficialSettlementsResponseCorrectionsMin),
+  "games": zod.array(zod.object({
+  "gamePk": zod.number().int().min(1),
+  "slateDate": zod.coerce.date(),
+  "ingestRunId": zod.string(),
+  "state": zod.enum(['PENDING', 'SETTLED', 'POSTPONED', 'NO_ACTION', 'DISPUTED']),
+  "lines": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemLinesMin),
+  "outcomesWritten": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemOutcomesWrittenMin),
+  "corrections": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemCorrectionsMin)
+}))
+})
+
+
+/**
+ * @summary Settle one completed game from MLB Stats API
+ */
+
+
+
+export const SettleOfficialGameParams = zod.object({
+  "gamePk": zod.coerce.number().int().min(1)
+})
+
+
+export const settleOfficialGameResponseLinesMin = 0;
+
+export const settleOfficialGameResponseOutcomesWrittenMin = 0;
+
+export const settleOfficialGameResponseCorrectionsMin = 0;
+
+
+
+export const SettleOfficialGameResponse = zod.object({
+  "gamePk": zod.number().int().min(1),
+  "slateDate": zod.coerce.date(),
+  "ingestRunId": zod.string(),
+  "state": zod.enum(['PENDING', 'SETTLED', 'POSTPONED', 'NO_ACTION', 'DISPUTED']),
+  "lines": zod.number().int().min(settleOfficialGameResponseLinesMin),
+  "outcomesWritten": zod.number().int().min(settleOfficialGameResponseOutcomesWrittenMin),
+  "corrections": zod.number().int().min(settleOfficialGameResponseCorrectionsMin)
+})
+
+
+/**
+ * @summary List immutable official settlement outcomes
+ */
+
+
+
+
+export const GetAnalystSettlementsQueryParams = zod.object({
+  "gamePk": zod.coerce.number().int().min(1).optional(),
+  "playerId": zod.coerce.number().int().min(1).optional(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional(),
+  "dateFrom": zod.date().optional(),
+  "dateTo": zod.date().optional()
+})
+
+
+
+export const getAnalystSettlementsResponseSettlementsItemOutcomeValueMin = 0;
+
+export const getAnalystSettlementsResponseSettlementsItemComponentsSinglesMin = 0;
+
+export const getAnalystSettlementsResponseSettlementsItemComponentsDoublesMin = 0;
+
+export const getAnalystSettlementsResponseSettlementsItemComponentsTriplesMin = 0;
+
+export const getAnalystSettlementsResponseSettlementsItemComponentsHomeRunsMin = 0;
+
+export const getAnalystSettlementsResponseSettlementsItemComponentsWalksMin = 0;
+
+export const getAnalystSettlementsResponseSettlementsItemComponentsPlateAppearancesMin = 0;
+
+export const getAnalystSettlementsResponseSettlementsItemComponentsAtBatsMin = 0;
+
+export const getAnalystSettlementsResponseTotalMin = 0;
+
+
+
+export const GetAnalystSettlementsResponse = zod.object({
+  "source": zod.enum(['MLB Official']),
+  "settlements": zod.array(zod.object({
+  "outcomeId": zod.string(),
+  "playerId": zod.number().int().min(1),
+  "playerName": zod.string(),
+  "gamePk": zod.number().int().min(1),
+  "slateDate": zod.coerce.date(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "outcomeValue": zod.number().min(getAnalystSettlementsResponseSettlementsItemOutcomeValueMin),
+  "outcomeHit": zod.boolean(),
+  "components": zod.object({
+  "singles": zod.number().int().min(getAnalystSettlementsResponseSettlementsItemComponentsSinglesMin).nullish(),
+  "doubles": zod.number().int().min(getAnalystSettlementsResponseSettlementsItemComponentsDoublesMin).nullish(),
+  "triples": zod.number().int().min(getAnalystSettlementsResponseSettlementsItemComponentsTriplesMin).nullish(),
+  "homeRuns": zod.number().int().min(getAnalystSettlementsResponseSettlementsItemComponentsHomeRunsMin).nullish(),
+  "walks": zod.number().int().min(getAnalystSettlementsResponseSettlementsItemComponentsWalksMin).nullish(),
+  "plateAppearances": zod.number().int().min(getAnalystSettlementsResponseSettlementsItemComponentsPlateAppearancesMin).nullish(),
+  "atBats": zod.number().int().min(getAnalystSettlementsResponseSettlementsItemComponentsAtBatsMin).nullish()
+}),
+  "settlementState": zod.enum(['PENDING', 'SETTLED', 'POSTPONED', 'NO_ACTION', 'DISPUTED']),
+  "settledAt": zod.coerce.date().nullable(),
+  "sourceId": zod.enum(['MLB_OFFICIAL']),
+  "ingestRunId": zod.string().nullable(),
+  "officialSourceMetadata": zod.object({
+
+}),
+  "correctionOf": zod.string().nullable(),
+  "processErrorTaxonomy": zod.string().nullable(),
+  "correctionNote": zod.string().nullable()
+})),
+  "total": zod.number().int().min(getAnalystSettlementsResponseTotalMin),
+  "systemNote": zod.string()
+})
+
+
+/**
+ * Links one frozen pregame feature snapshot to its matching SETTLED official
+ * outcome. The request has no odds, price, probability, EV, CLV, sportsbook,
+ * or arbitrary metadata fields.
+ * @summary Create an immutable postmortem for a settled market outcome
+ */
+export const CreateAnalystPostmortemBody = zod.object({
+  "snapshotId": zod.string(),
+  "outcomeId": zod.string(),
+  "notes": zod.string().nullish()
+}).strict()
+
+
+
+export const createAnalystPostmortemResponseOutcomeValueMin = 0;
+
+
+
+export const CreateAnalystPostmortemResponse = zod.object({
+  "postmortemId": zod.string(),
+  "snapshotId": zod.string(),
+  "outcomeId": zod.string(),
+  "playerId": zod.number().int().min(1),
+  "playerName": zod.string(),
+  "gamePk": zod.number().int().min(1),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "snapshotFeatureHash": zod.string(),
+  "outcomeValue": zod.number().min(createAnalystPostmortemResponseOutcomeValueMin),
+  "outcomeHit": zod.boolean(),
+  "researchRank": zod.number().int().nullable(),
+  "researchState": zod.string().nullable(),
+  "primaryMechanism": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary List immutable market postmortems
+ */
+
+
+
+export const GetAnalystPostmortemsQueryParams = zod.object({
+  "playerId": zod.coerce.number().int().min(1).optional(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional()
+})
+
+
+
+export const getAnalystPostmortemsResponsePostmortemsItemOutcomeValueMin = 0;
+
+export const getAnalystPostmortemsResponseTotalMin = 0;
+
+
+
+export const GetAnalystPostmortemsResponse = zod.object({
+  "postmortems": zod.array(zod.object({
+  "postmortemId": zod.string(),
+  "snapshotId": zod.string(),
+  "outcomeId": zod.string(),
+  "playerId": zod.number().int().min(1),
+  "playerName": zod.string(),
+  "gamePk": zod.number().int().min(1),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "snapshotFeatureHash": zod.string(),
+  "outcomeValue": zod.number().min(getAnalystPostmortemsResponsePostmortemsItemOutcomeValueMin),
+  "outcomeHit": zod.boolean(),
+  "researchRank": zod.number().int().nullable(),
+  "researchState": zod.string().nullable(),
+  "primaryMechanism": zod.string().nullable(),
+  "notes": zod.string().nullable(),
+  "createdAt": zod.coerce.date()
+})),
+  "total": zod.number().int().min(getAnalystPostmortemsResponseTotalMin)
 })
 
 

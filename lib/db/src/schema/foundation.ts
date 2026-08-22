@@ -73,6 +73,14 @@ export const marketTypeEnum = pgEnum("market_type", [
   "HOME_RUN",
 ]);
 
+export const settlementStateEnum = pgEnum("settlement_state", [
+  "PENDING",
+  "SETTLED",
+  "POSTPONED",
+  "NO_ACTION",
+  "DISPUTED",
+]);
+
 export const researchWindowEnum = pgEnum("research_window", [
   "SEASON",
   "CAREER",
@@ -1059,12 +1067,50 @@ export const historicalOutcomes = pgTable("historical_outcomes", {
   triples: integer("triples"),
   homeRuns: integer("home_runs"),
   walks: integer("walks"),
+  settlementState: settlementStateEnum("settlement_state").notNull().default("PENDING"),
   settledAt: timestamp("settled_at", { withTimezone: true }).notNull().defaultNow(),
   sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
   ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+  /** Official MLB response identity and calculation evidence; never betting data. */
+  officialSourceMetadata: jsonb("official_source_metadata").notNull().default({}),
+  /** Self-reference for a corrected settled outcome. The original is never updated. */
+  correctionOf: uuid("correction_of").references((): AnyPgColumn => historicalOutcomes.outcomeId),
+  /** Reuses the Phase 4A approved process-error taxonomy for settlement corrections. */
+  processErrorTaxonomy: snapshotCorrectionReasonEnum("process_error_taxonomy"),
+  correctionNote: text("correction_note"),
   raw: jsonb("raw").notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  settledOriginalUniqueIdx: uniqueIndex("historical_outcomes_settled_original_idx")
+    .on(table.playerId, table.gamePk, table.market)
+    .where(sql`settlement_state IN ('SETTLED', 'POSTPONED', 'NO_ACTION', 'DISPUTED') AND correction_of IS NULL`),
+}));
+
+/**
+ * Immutable, operator-readable comparison of frozen pregame research against
+ * one official settled result. This table intentionally has no pricing,
+ * odds, probability, EV, or sportsbook fields.
+ */
+export const marketPostmortems = pgTable("market_postmortems", {
+  postmortemId: uuid("postmortem_id").primaryKey().defaultRandom(),
+  snapshotId: uuid("snapshot_id").notNull().references(() => pregameFeatureSnapshots.snapshotId),
+  outcomeId: uuid("outcome_id").notNull().references(() => historicalOutcomes.outcomeId),
+  playerId: integer("player_id").notNull().references(() => players.playerId),
+  gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
+  market: marketTypeEnum("market").notNull(),
+  snapshotFeatureHash: text("snapshot_feature_hash").notNull(),
+  outcomeValue: numeric("outcome_value").notNull(),
+  outcomeHit: boolean("outcome_hit").notNull(),
+  researchRank: integer("research_rank"),
+  researchState: text("research_state"),
+  primaryMechanism: text("primary_mechanism"),
+  notes: text("notes"),
+  metadata: jsonb("metadata").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  snapshotOutcomeUniqueIdx: uniqueIndex("market_postmortems_snapshot_outcome_idx")
+    .on(table.snapshotId, table.outcomeId),
+}));
 
 // ─── End Phase 4A ─────────────────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type RequestHandler } from "express";
 import {
   GetAnalystBullpenRoomResponse,
   GetAnalystDataHealthResponse,
@@ -34,6 +34,14 @@ import {
   queryFeatureStore,
   writeHistoricalOutcome,
 } from "../services/feature-store";
+import {
+  createMarketPostmortem,
+  queryMarketPostmortems,
+  querySettlements,
+  settleOfficialDate,
+  settleOfficialGame,
+  SettlementValidationError,
+} from "../services/settlement";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -980,6 +988,129 @@ router.post("/analyst/feature-store/outcome", async (req, res, next) => {
     res.status(201).json({ outcomeId, outcomeValue, outcomeHit });
   } catch (error) {
     if (error instanceof FeatureStoreValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+function queryPositiveInteger(value: unknown, name: string) {
+  if (value === undefined || value === "") return null;
+  const result = Number(value);
+  if (!Number.isSafeInteger(result) || result <= 0) throw new SettlementValidationError(`${name} must be a positive integer`);
+  return result;
+}
+
+function requestedSettlementDate(value: unknown) {
+  try {
+    const valueDate = requestedDate(value);
+    const parsed = new Date(`${valueDate}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== valueDate) {
+      throw new Error("date must be a real calendar date using YYYY-MM-DD");
+    }
+    return valueDate;
+  } catch (error) {
+    throw new SettlementValidationError(error instanceof Error ? error.message : "date must use YYYY-MM-DD");
+  }
+}
+
+function strictPostmortemBody(body: unknown) {
+  const value = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+  const keys = Object.keys(value);
+  if (keys.some((key) => !["snapshotId", "outcomeId", "notes"].includes(key))) {
+    throw new SettlementValidationError("Postmortem payload contains unsupported fields");
+  }
+  if (typeof value.snapshotId !== "string" || typeof value.outcomeId !== "string") {
+    throw new SettlementValidationError("snapshotId and outcomeId are required");
+  }
+  if (value.notes != null && typeof value.notes !== "string") {
+    throw new SettlementValidationError("notes must be a string or null");
+  }
+  return { snapshotId: value.snapshotId, outcomeId: value.outcomeId, notes: value.notes as string | null | undefined };
+}
+
+const refreshOfficialSettlement: RequestHandler = async (req, res, next) => {
+  try {
+    res.status(201).json(await settleOfficialDate(requestedSettlementDate(req.query.date)));
+  } catch (error) {
+    if (error instanceof SettlementValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+};
+
+router.post("/analyst/settlement/refresh", refreshOfficialSettlement);
+router.post("/analyst/settlements/ingest", refreshOfficialSettlement);
+
+router.post("/analyst/settlements/:gamePk", async (req, res, next) => {
+  try {
+    res.status(201).json(await settleOfficialGame(req.params.gamePk));
+  } catch (error) {
+    if (error instanceof SettlementValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.get("/analyst/settlements", async (req, res, next) => {
+  try {
+    const market = typeof req.query.market === "string" ? req.query.market.toUpperCase() : null;
+    if (market && !["TB", "XBH", "WALK", "HR"].includes(market)) {
+      throw new SettlementValidationError("market must be TB, XBH, WALK, or HR");
+    }
+    const results = await querySettlements({
+      gamePk: queryPositiveInteger(req.query.gamePk, "gamePk"),
+      playerId: queryPositiveInteger(req.query.playerId, "playerId"),
+      market,
+      dateFrom: req.query.dateFrom ? requestedDate(req.query.dateFrom) : null,
+      dateTo: req.query.dateTo ? requestedDate(req.query.dateTo) : null,
+    });
+    res.json({
+      source: "MLB Official",
+      settlements: results,
+      total: results.length,
+      systemNote: "Settlement rows are MLB-official only, append-only, and contain no betting data.",
+    });
+  } catch (error) {
+    if (error instanceof SettlementValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.post("/analyst/postmortems", async (req, res, next) => {
+  try {
+    const result = await createMarketPostmortem(strictPostmortemBody(req.body));
+    res.status(201).json(result);
+  } catch (error) {
+    if (error instanceof SettlementValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.get("/analyst/postmortems", async (req, res, next) => {
+  try {
+    const market = typeof req.query.market === "string" ? req.query.market.toUpperCase() : null;
+    if (market && !["TB", "XBH", "WALK", "HR"].includes(market)) {
+      throw new SettlementValidationError("market must be TB, XBH, WALK, or HR");
+    }
+    const results = await queryMarketPostmortems({
+      playerId: queryPositiveInteger(req.query.playerId, "playerId"),
+      market,
+    });
+    res.json({ postmortems: results, total: results.length });
+  } catch (error) {
+    if (error instanceof SettlementValidationError) {
       res.status(400).json({ error: error.message });
       return;
     }

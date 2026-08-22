@@ -27,6 +27,8 @@ import type {
   CaptureFeatureStoreSlateParams,
   CorrectFeatureStoreSnapshot400,
   CorrectFeatureStoreSnapshot404,
+  CreateAnalystPostmortem400,
+  CreateMarketPostmortemInput,
   DataHealth,
   FeatureSnapshotCorrectionInput,
   FeatureStoreBackfillResult,
@@ -40,12 +42,20 @@ import type {
   GetAnalystMarketResearchParams,
   GetAnalystPitcherLabParams,
   GetAnalystPlayerLabParams,
+  GetAnalystPostmortemsParams,
   GetAnalystProjectionsParams,
+  GetAnalystSettlementsParams,
   HREngineResult,
   HealthStatus,
   HistoricalOutcomeInput,
+  IngestOfficialSettlements400,
+  IngestOfficialSettlementsParams,
   IngestResult,
+  MarketPostmortem,
   MarketResearch,
+  OfficialGameSettlementResult,
+  OfficialSettlementRefreshResult,
+  PostmortemList,
   ProjectionCenter,
   RefreshAnalystResearchParams,
   RefreshBullpenParams,
@@ -56,9 +66,13 @@ import type {
   RefreshMarketResearchWALKParams,
   RefreshMarketResearchXBHParams,
   RefreshMlbOfficialParams,
+  RefreshOfficialSettlement400,
+  RefreshOfficialSettlementParams,
   ResearchIngestResult,
   ResearchIngestSource,
   ResearchLab,
+  SettleOfficialGame400,
+  SettlementList,
   TBEngineResult,
   TodayDashboard,
   WALKEngineResult,
@@ -1827,8 +1841,10 @@ export const getWriteFeatureStoreOutcomeUrl = () => {
 
 /**
  * Writes one append-only outcome row to historical_outcomes. No UPDATE or DELETE
- * is ever issued — each call creates a new row with a distinct outcomeId.
- * sourceId must reference an existing source_registry entry (e.g. MLB_OFFICIAL).
+ * is ever issued — each call creates a new row with a distinct outcomeId. This endpoint
+ * creates a PENDING official-stat observation only; it cannot create a settled result.
+ * SETTLED rows are created exclusively by the MLB Stats API settlement workflow.
+ * sourceId must be MLB_OFFICIAL.
  * Do NOT supply odds, EV, CLV, or sportsbook data.
  * @summary Append an official historical outcome for a player-game-market
  */
@@ -1891,6 +1907,477 @@ export const useWriteFeatureStoreOutcome = <TError = ErrorType<WriteFeatureStore
       > => {
       return useMutation(getWriteFeatureStoreOutcomeMutationOptions(options));
     }
+
+export const getRefreshOfficialSettlementUrl = (params: RefreshOfficialSettlementParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/settlement/refresh?${stringifiedParams}` : `/api/analyst/settlement/refresh`
+}
+
+/**
+ * Reads final MLB game feeds and appends official TB, XBH, walk, and home-run
+ * outcomes. FantasyPros and other projection sources are never accepted for settlement.
+ * @summary Settle completed games from the official MLB Stats API
+ */
+export const refreshOfficialSettlement = async (params: RefreshOfficialSettlementParams, options?: Parameters<typeof customFetch>[1]): Promise<OfficialSettlementRefreshResult> => {
+
+  return customFetch<OfficialSettlementRefreshResult>(getRefreshOfficialSettlementUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshOfficialSettlementMutationOptions = <TError = ErrorType<RefreshOfficialSettlement400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshOfficialSettlement>>, TError,{params: RefreshOfficialSettlementParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshOfficialSettlement>>, TError,{params: RefreshOfficialSettlementParams}, TContext> => {
+
+const mutationKey = ['refreshOfficialSettlement'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshOfficialSettlement>>, {params: RefreshOfficialSettlementParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshOfficialSettlement(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshOfficialSettlementMutationResult = NonNullable<Awaited<ReturnType<typeof refreshOfficialSettlement>>>
+
+    export type RefreshOfficialSettlementMutationError = ErrorType<RefreshOfficialSettlement400>
+
+    /**
+ * @summary Settle completed games from the official MLB Stats API
+ */
+export const useRefreshOfficialSettlement = <TError = ErrorType<RefreshOfficialSettlement400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshOfficialSettlement>>, TError,{params: RefreshOfficialSettlementParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshOfficialSettlement>>,
+        TError,
+        {params: RefreshOfficialSettlementParams},
+        TContext
+      > => {
+      return useMutation(getRefreshOfficialSettlementMutationOptions(options));
+    }
+
+export const getIngestOfficialSettlementsUrl = (params: IngestOfficialSettlementsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/settlements/ingest?${stringifiedParams}` : `/api/analyst/settlements/ingest`
+}
+
+/**
+ * @summary Ingest official MLB settlements for a date
+ */
+export const ingestOfficialSettlements = async (params: IngestOfficialSettlementsParams, options?: Parameters<typeof customFetch>[1]): Promise<OfficialSettlementRefreshResult> => {
+
+  return customFetch<OfficialSettlementRefreshResult>(getIngestOfficialSettlementsUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getIngestOfficialSettlementsMutationOptions = <TError = ErrorType<IngestOfficialSettlements400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestOfficialSettlements>>, TError,{params: IngestOfficialSettlementsParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof ingestOfficialSettlements>>, TError,{params: IngestOfficialSettlementsParams}, TContext> => {
+
+const mutationKey = ['ingestOfficialSettlements'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof ingestOfficialSettlements>>, {params: IngestOfficialSettlementsParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  ingestOfficialSettlements(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type IngestOfficialSettlementsMutationResult = NonNullable<Awaited<ReturnType<typeof ingestOfficialSettlements>>>
+
+    export type IngestOfficialSettlementsMutationError = ErrorType<IngestOfficialSettlements400>
+
+    /**
+ * @summary Ingest official MLB settlements for a date
+ */
+export const useIngestOfficialSettlements = <TError = ErrorType<IngestOfficialSettlements400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestOfficialSettlements>>, TError,{params: IngestOfficialSettlementsParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof ingestOfficialSettlements>>,
+        TError,
+        {params: IngestOfficialSettlementsParams},
+        TContext
+      > => {
+      return useMutation(getIngestOfficialSettlementsMutationOptions(options));
+    }
+
+export const getSettleOfficialGameUrl = (gamePk: number,) => {
+
+
+
+
+  return `/api/analyst/settlements/${gamePk}`
+}
+
+/**
+ * @summary Settle one completed game from MLB Stats API
+ */
+export const settleOfficialGame = async (gamePk: number, options?: Parameters<typeof customFetch>[1]): Promise<OfficialGameSettlementResult> => {
+
+  return customFetch<OfficialGameSettlementResult>(getSettleOfficialGameUrl(gamePk),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getSettleOfficialGameMutationOptions = <TError = ErrorType<SettleOfficialGame400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof settleOfficialGame>>, TError,{gamePk: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof settleOfficialGame>>, TError,{gamePk: number}, TContext> => {
+
+const mutationKey = ['settleOfficialGame'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof settleOfficialGame>>, {gamePk: number}> = (props) => {
+          const {gamePk} = props ?? {};
+
+          return  settleOfficialGame(gamePk,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SettleOfficialGameMutationResult = NonNullable<Awaited<ReturnType<typeof settleOfficialGame>>>
+
+    export type SettleOfficialGameMutationError = ErrorType<SettleOfficialGame400>
+
+    /**
+ * @summary Settle one completed game from MLB Stats API
+ */
+export const useSettleOfficialGame = <TError = ErrorType<SettleOfficialGame400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof settleOfficialGame>>, TError,{gamePk: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof settleOfficialGame>>,
+        TError,
+        {gamePk: number},
+        TContext
+      > => {
+      return useMutation(getSettleOfficialGameMutationOptions(options));
+    }
+
+export const getGetAnalystSettlementsUrl = (params?: GetAnalystSettlementsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/settlements?${stringifiedParams}` : `/api/analyst/settlements`
+}
+
+/**
+ * @summary List immutable official settlement outcomes
+ */
+export const getAnalystSettlements = async (params?: GetAnalystSettlementsParams, options?: Parameters<typeof customFetch>[1]): Promise<SettlementList> => {
+
+  return customFetch<SettlementList>(getGetAnalystSettlementsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystSettlementsQueryKey = (params?: GetAnalystSettlementsParams,) => {
+    return [
+    `/api/analyst/settlements`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystSettlementsQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystSettlements>>, TError = ErrorType<unknown>>(params?: GetAnalystSettlementsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystSettlements>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystSettlementsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystSettlements>>> = ({ signal }) => getAnalystSettlements(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystSettlements>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystSettlementsQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystSettlements>>>
+export type GetAnalystSettlementsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List immutable official settlement outcomes
+ */
+
+export function useGetAnalystSettlements<TData = Awaited<ReturnType<typeof getAnalystSettlements>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystSettlementsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystSettlements>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystSettlementsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateAnalystPostmortemUrl = () => {
+
+
+
+
+  return `/api/analyst/postmortems`
+}
+
+/**
+ * Links one frozen pregame feature snapshot to its matching SETTLED official
+ * outcome. The request has no odds, price, probability, EV, CLV, sportsbook,
+ * or arbitrary metadata fields.
+ * @summary Create an immutable postmortem for a settled market outcome
+ */
+export const createAnalystPostmortem = async (createMarketPostmortemInput: CreateMarketPostmortemInput, options?: Parameters<typeof customFetch>[1]): Promise<MarketPostmortem> => {
+
+  return customFetch<MarketPostmortem>(getCreateAnalystPostmortemUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(createMarketPostmortemInput)
+  }
+);}
+
+
+
+
+
+export const getCreateAnalystPostmortemMutationOptions = <TError = ErrorType<CreateAnalystPostmortem400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAnalystPostmortem>>, TError,{data: BodyType<CreateMarketPostmortemInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAnalystPostmortem>>, TError,{data: BodyType<CreateMarketPostmortemInput>}, TContext> => {
+
+const mutationKey = ['createAnalystPostmortem'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAnalystPostmortem>>, {data: BodyType<CreateMarketPostmortemInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createAnalystPostmortem(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateAnalystPostmortemMutationResult = NonNullable<Awaited<ReturnType<typeof createAnalystPostmortem>>>
+    export type CreateAnalystPostmortemMutationBody = BodyType<CreateMarketPostmortemInput>
+    export type CreateAnalystPostmortemMutationError = ErrorType<CreateAnalystPostmortem400>
+
+    /**
+ * @summary Create an immutable postmortem for a settled market outcome
+ */
+export const useCreateAnalystPostmortem = <TError = ErrorType<CreateAnalystPostmortem400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAnalystPostmortem>>, TError,{data: BodyType<CreateMarketPostmortemInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createAnalystPostmortem>>,
+        TError,
+        {data: BodyType<CreateMarketPostmortemInput>},
+        TContext
+      > => {
+      return useMutation(getCreateAnalystPostmortemMutationOptions(options));
+    }
+
+export const getGetAnalystPostmortemsUrl = (params?: GetAnalystPostmortemsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/postmortems?${stringifiedParams}` : `/api/analyst/postmortems`
+}
+
+/**
+ * @summary List immutable market postmortems
+ */
+export const getAnalystPostmortems = async (params?: GetAnalystPostmortemsParams, options?: Parameters<typeof customFetch>[1]): Promise<PostmortemList> => {
+
+  return customFetch<PostmortemList>(getGetAnalystPostmortemsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystPostmortemsQueryKey = (params?: GetAnalystPostmortemsParams,) => {
+    return [
+    `/api/analyst/postmortems`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystPostmortemsQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystPostmortems>>, TError = ErrorType<unknown>>(params?: GetAnalystPostmortemsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPostmortems>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystPostmortemsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystPostmortems>>> = ({ signal }) => getAnalystPostmortems(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystPostmortems>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystPostmortemsQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystPostmortems>>>
+export type GetAnalystPostmortemsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List immutable market postmortems
+ */
+
+export function useGetAnalystPostmortems<TData = Awaited<ReturnType<typeof getAnalystPostmortems>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystPostmortemsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPostmortems>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystPostmortemsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetAnalystBullpenRoomUrl = (params?: GetAnalystBullpenRoomParams,) => {
   const normalizedParams = new URLSearchParams();

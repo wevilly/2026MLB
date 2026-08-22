@@ -996,6 +996,11 @@ export type WriteOutcomeInput = {
 };
 
 function assertOfficialOutcomeInput(input: WriteOutcomeInput): void {
+  if (input.sourceId !== "MLB_OFFICIAL") {
+    throw new FeatureStoreValidationError(
+      "Only MLB_OFFICIAL may stage an outcome observation. Official settlement is performed by the MLB feed workflow.",
+    );
+  }
   for (const [key, value] of Object.entries(input)) {
     if (key === "ingestRunId") continue;
     const prohibited = prohibitedBettingTerm(key);
@@ -1039,9 +1044,10 @@ function computeOutcome(market: WriteOutcomeInput["market"], input: WriteOutcome
 }
 
 /**
- * Writes an append-only historical outcome row.
+ * Writes an append-only pending official-stat observation.
  * This service NEVER updates existing outcome rows.
- * The settlement engine (Phase 4B) will call this for each settled game.
+ * It cannot create a SETTLED result; only the MLB Stats API settlement engine
+ * may write a verified settlement with official-run provenance.
  */
 export async function writeHistoricalOutcome(input: WriteOutcomeInput): Promise<string> {
   await ensureFeatureStoreSource();
@@ -1052,8 +1058,8 @@ export async function writeHistoricalOutcome(input: WriteOutcomeInput): Promise<
     `INSERT INTO historical_outcomes
        (player_id, game_pk, slate_date, market, outcome_value, outcome_hit,
         plate_appearances, at_bats, singles, doubles, triples, home_runs, walks,
-        source_id, ingest_run_id, raw)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        settlement_state, source_id, ingest_run_id, raw)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'PENDING', $14, $15, $16)
      RETURNING outcome_id`,
     [
       input.playerId, input.gamePk, input.slateDate, marketToDb(input.market),

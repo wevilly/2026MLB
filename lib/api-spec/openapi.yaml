@@ -506,8 +506,10 @@ paths:
       summary: Append an official historical outcome for a player-game-market
       description: |
         Writes one append-only outcome row to historical_outcomes. No UPDATE or DELETE
-        is ever issued — each call creates a new row with a distinct outcomeId.
-        sourceId must reference an existing source_registry entry (e.g. MLB_OFFICIAL).
+        is ever issued — each call creates a new row with a distinct outcomeId. This endpoint
+        creates a PENDING official-stat observation only; it cannot create a settled result.
+        SETTLED rows are created exclusively by the MLB Stats API settlement workflow.
+        sourceId must be MLB_OFFICIAL.
         Do NOT supply odds, EV, CLV, or sportsbook data.
       requestBody:
         required: true
@@ -531,6 +533,164 @@ paths:
                 properties:
                   error: { type: string }
                 required: [error]
+  /analyst/settlement/refresh:
+    post:
+      operationId: refreshOfficialSettlement
+      tags: [analyst]
+      summary: Settle completed games from the official MLB Stats API
+      description: |
+        Reads final MLB game feeds and appends official TB, XBH, walk, and home-run
+        outcomes. FantasyPros and other projection sources are never accepted for settlement.
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Official settlement refresh result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfficialSettlementRefreshResult"
+        "400":
+          description: Invalid settlement date
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
+  /analyst/settlements/ingest:
+    post:
+      operationId: ingestOfficialSettlements
+      tags: [analyst]
+      summary: Ingest official MLB settlements for a date
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Official settlement refresh result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfficialSettlementRefreshResult"
+        "400":
+          description: Invalid settlement date
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
+  /analyst/settlements/{gamePk}:
+    post:
+      operationId: settleOfficialGame
+      tags: [analyst]
+      summary: Settle one completed game from MLB Stats API
+      parameters:
+        - name: gamePk
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "201":
+          description: Official game settlement result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OfficialGameSettlementResult"
+        "400":
+          description: Invalid game or non-official settlement request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
+  /analyst/settlements:
+    get:
+      operationId: getAnalystSettlements
+      tags: [analyst]
+      summary: List immutable official settlement outcomes
+      parameters:
+        - name: gamePk
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: playerId
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: market
+          in: query
+          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Official settlement rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettlementList"
+  /analyst/postmortems:
+    post:
+      operationId: createAnalystPostmortem
+      tags: [analyst]
+      summary: Create an immutable postmortem for a settled market outcome
+      description: |
+        Links one frozen pregame feature snapshot to its matching SETTLED official
+        outcome. The request has no odds, price, probability, EV, CLV, sportsbook,
+        or arbitrary metadata fields.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMarketPostmortemInput"
+      responses:
+        "201":
+          description: Immutable postmortem created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketPostmortem"
+        "400":
+          description: Invalid linkage or unsettled outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
+    get:
+      operationId: getAnalystPostmortems
+      tags: [analyst]
+      summary: List immutable market postmortems
+      parameters:
+        - name: playerId
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: market
+          in: query
+          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+      responses:
+        "200":
+          description: Market postmortem rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostmortemList"
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -1230,6 +1390,107 @@ components:
         outcomeValue: { type: number }
         outcomeHit: { type: boolean }
       required: [outcomeId, outcomeValue, outcomeHit]
+    OfficialGameSettlementResult:
+      type: object
+      properties:
+        gamePk: { type: integer, minimum: 1 }
+        slateDate: { type: string, format: date }
+        ingestRunId: { type: string }
+        state: { type: string, enum: [PENDING, SETTLED, POSTPONED, NO_ACTION, DISPUTED] }
+        lines: { type: integer, minimum: 0 }
+        outcomesWritten: { type: integer, minimum: 0 }
+        corrections: { type: integer, minimum: 0 }
+      required: [gamePk, slateDate, ingestRunId, state, lines, outcomesWritten, corrections]
+    OfficialSettlementRefreshResult:
+      type: object
+      properties:
+        source: { type: string, enum: [MLB Official] }
+        slateDate: { type: string, format: date }
+        gamesFound: { type: integer, minimum: 0 }
+        gamesSettled: { type: integer, minimum: 0 }
+        outcomesWritten: { type: integer, minimum: 0 }
+        corrections: { type: integer, minimum: 0 }
+        games:
+          type: array
+          items: { $ref: "#/components/schemas/OfficialGameSettlementResult" }
+      required: [source, slateDate, gamesFound, gamesSettled, outcomesWritten, corrections, games]
+    SettlementComponents:
+      type: object
+      additionalProperties: false
+      properties:
+        singles: { type: ["integer", "null"], minimum: 0 }
+        doubles: { type: ["integer", "null"], minimum: 0 }
+        triples: { type: ["integer", "null"], minimum: 0 }
+        homeRuns: { type: ["integer", "null"], minimum: 0 }
+        walks: { type: ["integer", "null"], minimum: 0 }
+        plateAppearances: { type: ["integer", "null"], minimum: 0 }
+        atBats: { type: ["integer", "null"], minimum: 0 }
+    SettlementOutcome:
+      type: object
+      properties:
+        outcomeId: { type: string }
+        playerId: { type: integer, minimum: 1 }
+        playerName: { type: string }
+        gamePk: { type: integer, minimum: 1 }
+        slateDate: { type: string, format: date }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        outcomeValue: { type: number, minimum: 0 }
+        outcomeHit: { type: boolean }
+        components: { $ref: "#/components/schemas/SettlementComponents" }
+        settlementState: { type: string, enum: [PENDING, SETTLED, POSTPONED, NO_ACTION, DISPUTED] }
+        settledAt: { type: ["string", "null"], format: date-time }
+        sourceId: { type: string, enum: [MLB_OFFICIAL] }
+        ingestRunId: { type: ["string", "null"] }
+        officialSourceMetadata: { type: object, additionalProperties: false }
+        correctionOf: { type: ["string", "null"] }
+        processErrorTaxonomy: { type: ["string", "null"] }
+        correctionNote: { type: ["string", "null"] }
+      required: [outcomeId, playerId, playerName, gamePk, slateDate, market, outcomeValue, outcomeHit, components, settlementState, settledAt, sourceId, ingestRunId, officialSourceMetadata, correctionOf, processErrorTaxonomy, correctionNote]
+    SettlementList:
+      type: object
+      properties:
+        source: { type: string, enum: [MLB Official] }
+        settlements:
+          type: array
+          items: { $ref: "#/components/schemas/SettlementOutcome" }
+        total: { type: integer, minimum: 0 }
+        systemNote: { type: string }
+      required: [source, settlements, total, systemNote]
+    CreateMarketPostmortemInput:
+      type: object
+      additionalProperties: false
+      properties:
+        snapshotId: { type: string }
+        outcomeId: { type: string }
+        notes: { type: ["string", "null"] }
+      required: [snapshotId, outcomeId]
+    MarketPostmortem:
+      type: object
+      properties:
+        postmortemId: { type: string }
+        snapshotId: { type: string }
+        outcomeId: { type: string }
+        playerId: { type: integer, minimum: 1 }
+        playerName: { type: string }
+        gamePk: { type: integer, minimum: 1 }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        snapshotFeatureHash: { type: string }
+        outcomeValue: { type: number, minimum: 0 }
+        outcomeHit: { type: boolean }
+        researchRank: { type: ["integer", "null"] }
+        researchState: { type: ["string", "null"] }
+        primaryMechanism: { type: ["string", "null"] }
+        notes: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+      required: [postmortemId, snapshotId, outcomeId, playerId, playerName, gamePk, market, snapshotFeatureHash, outcomeValue, outcomeHit, researchRank, researchState, primaryMechanism, notes, createdAt]
+    PostmortemList:
+      type: object
+      properties:
+        postmortems:
+          type: array
+          items: { $ref: "#/components/schemas/MarketPostmortem" }
+        total: { type: integer, minimum: 0 }
+      required: [postmortems, total]
     FeatureStoreCorrectionResult:
       type: object
       properties:
