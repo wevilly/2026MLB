@@ -357,10 +357,13 @@ export async function detectLateScratches(slateDate: string) {
 export async function automateSettlementDate(rawDate: unknown) {
   const slateDate = dateOnly(rawDate);
   const settlement = await settleOfficialDate(slateDate);
-  const links = await pool.query<{ snapshot_id: string; outcome_id: string }>(
-    `SELECT pfs.snapshot_id, ho.outcome_id
+  const links = await pool.query<{ snapshot_id: string; outcome_id: string; process_error_taxonomy: string | null }>(
+    `SELECT pfs.snapshot_id, ho.outcome_id,
+            COALESCE(pfs.correction_reason::text, correction.correction_reason::text) AS process_error_taxonomy
      FROM pregame_feature_snapshots pfs
      JOIN historical_outcomes ho ON ho.player_id = pfs.player_id AND ho.game_pk = pfs.game_pk AND ho.market = pfs.market
+      LEFT JOIN pregame_feature_snapshots correction
+        ON correction.correction_of = pfs.snapshot_id AND correction.correction_reason = 'LATE_SCRATCH'
      WHERE pfs.slate_date = $1 AND ho.settlement_state = 'SETTLED'
        AND NOT EXISTS (SELECT 1 FROM historical_outcomes newer WHERE newer.correction_of = ho.outcome_id)
        AND NOT EXISTS (SELECT 1 FROM market_postmortems mp WHERE mp.snapshot_id = pfs.snapshot_id AND mp.outcome_id = ho.outcome_id)`,
@@ -371,7 +374,10 @@ export async function automateSettlementDate(rawDate: unknown) {
     await createMarketPostmortem({
       snapshotId: link.snapshot_id,
       outcomeId: link.outcome_id,
-      notes: "Automated from official MLB settlement.",
+      notes: link.process_error_taxonomy
+        ? `Automated from official MLB settlement. Process error taxonomy: ${link.process_error_taxonomy}.`
+        : "Automated from official MLB settlement.",
+      processErrorTaxonomy: link.process_error_taxonomy,
     });
     postmortemsCreated += 1;
   }
@@ -382,6 +388,152 @@ export async function automateSettlementDate(rawDate: unknown) {
     metadata: { outcomesWritten: settlement.outcomesWritten, postmortemsCreated },
   });
   return { ...settlement, postmortemsCreated, officialRecord: "MLB Analyst Platform" };
+}
+
+type SettlementAutomationRun = {
+  status: "PENDING" | "RUNNING" | "SUCCESS" | "FAILED";
+  attempted: boolean;
+  slateDate: string;
+  nextAttemptAt: string | null;
+};
+type SettlementDependencies = {
+  ingestOfficial: (slateDate: string) => Promise<unknown>;
+  automate: (slateDate: string) => Promise<{
+    gamesFound: number;
+    gamesSettled: number;
+    outcomesWritten: number;
+  }>;
+};
+
+const TERMINAL_GAME_STATES = ["Final", "Game Over", "Completed Early", "Postponed", "Suspended", "Cancelled", "Canceled", "No Decision"];
+
+async function settlementIsComplete(slateDate: string, result: { gamesFound: number; gamesSettled: number }) {
+  const games = await pool.query<{ scheduled_games: number; terminal_games: number }>(
+    `SELECT count(*)::int AS scheduled_games,
+            count(*) FILTER (WHERE game_status = ANY($2::text[]))::int AS terminal_games
+     FROM games WHERE game_date = $1`,
+    [slateDate, TERMINAL_GAME_STATES],
+  );
+  const scheduledGames = games.rows[0]?.scheduled_games ?? 0;
+  const terminalGames = games.rows[0]?.terminal_games ?? 0;
+  return {
+    complete: scheduledGames === terminalGames && result.gamesFound === result.gamesSettled,
+    scheduledGames,
+    terminalGames,
+  };
+}
+
+/**
+ * Claims a durable settlement job, refreshes the prior slate from MLB, then
+ * settles it. Failed jobs receive a bounded retry window; completed dates are
+ * permanently skipped. Keeping the advisory lock for the attempt prevents
+ * replicas from ingesting the same date concurrently.
+ */
+export async function runNightlySettlement(
+  rawDate: unknown,
+  dependencies: SettlementDependencies = {
+    ingestOfficial: ingestMlbOfficial,
+    automate: automateSettlementDate,
+  },
+): Promise<SettlementAutomationRun> {
+  const slateDate = dateOnly(rawDate);
+  const client = await pool.connect();
+  try {
+    const lock = await client.query<{ locked: boolean }>(
+      `SELECT pg_try_advisory_lock(hashtext($1)) AS locked`,
+      [`settlement-automation:${slateDate}`],
+    );
+    if (!lock.rows[0]?.locked) return { slateDate, status: "RUNNING", attempted: false, nextAttemptAt: null };
+    await client.query(
+      `INSERT INTO settlement_automation_runs (slate_date, status, next_attempt_at)
+       VALUES ($1, 'PENDING', now())
+       ON CONFLICT (slate_date) DO NOTHING`,
+      [slateDate],
+    );
+    const existing = await client.query<{ status: SettlementAutomationRun["status"]; next_attempt_at: string | null }>(
+      `SELECT status, next_attempt_at::text FROM settlement_automation_runs WHERE slate_date = $1`,
+      [slateDate],
+    );
+    const prior = existing.rows[0];
+    if (prior?.status === "SUCCESS") return { slateDate, status: "SUCCESS", attempted: false, nextAttemptAt: null };
+    if (prior?.status === "FAILED" && prior.next_attempt_at && Date.parse(prior.next_attempt_at) > Date.now()) {
+      return { slateDate, status: "FAILED", attempted: false, nextAttemptAt: prior.next_attempt_at };
+    }
+    await client.query(
+      `UPDATE settlement_automation_runs
+       SET status = 'RUNNING', attempts = attempts + 1, started_at = now(), finished_at = NULL,
+           next_attempt_at = NULL, error_message = NULL, updated_at = now()
+       WHERE slate_date = $1`,
+      [slateDate],
+    );
+    try {
+      await dependencies.ingestOfficial(slateDate);
+      const result = await dependencies.automate(slateDate);
+      const completeness = await settlementIsComplete(slateDate, result);
+      if (!completeness.complete) {
+        throw new Error(
+          `Official settlement remains incomplete: ${completeness.terminalGames}/${completeness.scheduledGames} games terminal; `
+          + `${result.gamesSettled}/${result.gamesFound} terminal games settled.`,
+        );
+      }
+      await client.query(
+        `UPDATE settlement_automation_runs
+         SET status = 'SUCCESS', finished_at = now(), result = $2::jsonb, updated_at = now()
+         WHERE slate_date = $1`,
+        [slateDate, JSON.stringify(result)],
+      );
+      await recordAuditEvent({
+        actor: "SCHEDULER",
+        action: "settlement.nightly_completed",
+        resourceType: "slate",
+        resourceId: slateDate,
+        metadata: { gamesFound: result.gamesFound, gamesSettled: result.gamesSettled, outcomesWritten: result.outcomesWritten },
+      });
+      return { slateDate, status: "SUCCESS", attempted: true, nextAttemptAt: null };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const failed = await client.query<{ next_attempt_at: string }>(
+        `UPDATE settlement_automation_runs
+         SET status = 'FAILED', finished_at = now(), error_message = $2,
+             next_attempt_at = now() + interval '15 minutes', updated_at = now()
+         WHERE slate_date = $1
+         RETURNING next_attempt_at::text`,
+        [slateDate, message],
+      );
+      await recordAuditEvent({
+        actor: "SCHEDULER",
+        action: "settlement.nightly_failed",
+        resourceType: "slate",
+        resourceId: slateDate,
+        metadata: { retryAt: failed.rows[0]?.next_attempt_at ?? null, error: message },
+      });
+      throw error;
+    }
+  } finally {
+    await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [`settlement-automation:${slateDate}`]).catch(() => undefined);
+    client.release();
+  }
+}
+
+/** Process every overdue durable settlement record, including jobs stranded across midnight or a restart. */
+export async function processDueSettlementRuns() {
+  const due = await pool.query<{ slate_date: string }>(
+    `SELECT slate_date::text
+     FROM settlement_automation_runs
+     WHERE status IN ('PENDING', 'RUNNING')
+        OR (status = 'FAILED' AND (next_attempt_at IS NULL OR next_attempt_at <= now()))
+     ORDER BY slate_date ASC
+     LIMIT 10`,
+  );
+  const results = [];
+  for (const row of due.rows) {
+    try {
+      results.push(await runNightlySettlement(row.slate_date));
+    } catch (error) {
+      logger.warn({ err: error, slateDate: row.slate_date }, "nightly settlement retry remains pending");
+    }
+  }
+  return results;
 }
 
 export function startOrchestrationScheduler() {
@@ -396,6 +548,16 @@ export function startOrchestrationScheduler() {
       lastScheduledDate = localDate;
       await launchOrchestrationRun(localDate, "SCHEDULED");
     }
+    if (localTime >= "02:30") {
+      const [year, month, day] = localDate.split("-").map(Number);
+      const priorSlateDate = new Date(Date.UTC(year, month - 1, day - 1)).toISOString().slice(0, 10);
+      try {
+        await runNightlySettlement(priorSlateDate);
+      } catch (error) {
+        logger.warn({ err: error, slateDate: priorSlateDate }, "nightly settlement attempt remains retryable");
+      }
+    }
+    await processDueSettlementRuns();
     const due = await pool.query<{ run_id: string }>(
       `SELECT run_id FROM orchestration_runs
        WHERE overall_status = 'RUNNING' AND (schedule->>'calculatedFreezeUtc')::timestamptz <= now()

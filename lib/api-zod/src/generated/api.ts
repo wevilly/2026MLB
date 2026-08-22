@@ -291,6 +291,8 @@ export const ExportAnalystSlateJsonResponse = zod.object({
   "exportedAt": zod.coerce.date(),
   "slateDate": zod.coerce.date(),
   "games": zod.array(zod.record(zod.string(), zod.unknown())),
+  "confirmedLineups": zod.array(zod.record(zod.string(), zod.unknown())),
+  "starters": zod.array(zod.record(zod.string(), zod.unknown())),
   "marketBoard": zod.array(zod.record(zod.string(), zod.unknown())),
   "researchStates": zod.array(zod.record(zod.string(), zod.unknown()))
 })

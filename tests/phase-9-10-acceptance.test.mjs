@@ -32,6 +32,8 @@ test("Phase 9B exports derived platform records without claiming they replace th
   assert.equal(slate.body.officialRecord, "MLB Analyst Platform");
   assert.equal(slate.body.slateDate, date);
   assert.ok(Array.isArray(slate.body.games));
+  assert.ok(Array.isArray(slate.body.confirmedLineups));
+  assert.ok(Array.isArray(slate.body.starters));
   assert.ok(Array.isArray(slate.body.marketBoard));
 
   const workbook = await fetch(`${API}/analyst/export/workbook?date=${date}`);
@@ -40,6 +42,61 @@ test("Phase 9B exports derived platform records without claiming they replace th
   assert.match(workbook.headers.get("content-type") ?? "", /application\/vnd\.ms-excel/i);
   assert.match(workbookText, /Worksheet ss:Name="XBH"/);
   assert.match(workbookText, /Official record/);
+  assert.match(workbookText, /<Version>1\.1<\/Version>/);
+  assert.equal((workbookText.match(/<Worksheet ss:Name=/g) ?? []).length, 7, "compatibility workbook must retain seven sheets");
+});
+
+test("Phase 9B settles from the official engine and schedules a prior-slate nightly run", async () => {
+  const [settlement, orchestration] = await Promise.all([
+    import("node:fs/promises").then((fs) => fs.readFile("artifacts/api-server/src/services/settlement.ts", "utf8")),
+    import("node:fs/promises").then((fs) => fs.readFile("artifacts/api-server/src/services/orchestration.ts", "utf8")),
+  ]);
+  assert.match(settlement, /market === "TB"[\s\S]*value >= 2/);
+  assert.match(settlement, /market === "XBH"[\s\S]*line\.doubles \+ line\.triples \+ line\.homeRuns/);
+  assert.match(settlement, /market === "WALK" \? line\.walks : line\.homeRuns/);
+  assert.match(orchestration, /runNightlySettlement/);
+  assert.match(orchestration, /processDueSettlementRuns/);
+  assert.match(orchestration, /ORDER BY slate_date ASC/);
+  assert.match(orchestration, /localTime >= "02:30"/);
+  assert.match(orchestration, /await dependencies\.ingestOfficial\(slateDate\)/);
+  assert.match(orchestration, /scheduledGames === terminalGames/);
+});
+
+test("Phase 9B retains failed nightly settlement work for durable retry and restart catch-up", async () => {
+  const retryDate = "2099-12-29";
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+  try {
+    const table = await pool.query(`SELECT to_regclass('public.settlement_automation_runs') AS table_name`);
+    assert.equal(table.rows[0].table_name, "settlement_automation_runs");
+    await pool.query(`DELETE FROM settlement_automation_runs WHERE slate_date = $1`, [retryDate]);
+    await pool.query(
+      `INSERT INTO settlement_automation_runs (slate_date, status, attempts, next_attempt_at, error_message)
+       VALUES ($1, 'FAILED', 1, now() + interval '15 minutes', 'simulated MLB outage')`,
+      [retryDate],
+    );
+    const retryable = await pool.query(
+      `SELECT status, attempts, next_attempt_at < now() AS due_for_retry, error_message
+       FROM settlement_automation_runs WHERE slate_date = $1`,
+      [retryDate],
+    );
+    assert.equal(retryable.rows[0].status, "FAILED");
+    assert.equal(retryable.rows[0].attempts, 1);
+    assert.equal(retryable.rows[0].due_for_retry, false, "failed work must respect its bounded retry window");
+    assert.match(retryable.rows[0].error_message, /simulated MLB outage/);
+    await pool.query(`UPDATE settlement_automation_runs SET next_attempt_at = now() - interval '1 minute' WHERE slate_date = $1`, [retryDate]);
+    const due = await pool.query(`SELECT next_attempt_at < now() AS due_for_retry FROM settlement_automation_runs WHERE slate_date = $1`, [retryDate]);
+    assert.equal(due.rows[0].due_for_retry, true);
+    const orchestration = await import("node:fs/promises")
+      .then((fs) => fs.readFile("artifacts/api-server/src/services/orchestration.ts", "utf8"));
+    assert.match(orchestration, /prior\?\.status === "SUCCESS"/, "only successful settlement runs are terminal");
+    assert.match(orchestration, /next_attempt_at = now\(\) \+ interval '15 minutes'/, "failures must receive a bounded retry window");
+    assert.match(orchestration, /status IN \('PENDING', 'RUNNING'\)/, "restart recovery must include abandoned in-flight jobs");
+    assert.match(orchestration, /status = 'FAILED' AND \(next_attempt_at IS NULL OR next_attempt_at <= now\(\)\)/, "overdue historical failures must be retried");
+    assert.ok(!orchestration.includes("lastSettlementDate"), "scheduler restarts must not rely on in-memory settlement completion");
+  } finally {
+    await pool.query(`DELETE FROM settlement_automation_runs WHERE slate_date = $1`, [retryDate]).catch(() => undefined);
+    await pool.end();
+  }
 });
 
 test("Phase 10 health and audit responses are safe operational read models", async () => {

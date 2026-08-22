@@ -302,6 +302,29 @@ export const orchestrationRuns = pgTable("orchestration_runs", {
   activeRunIdx: index("orchestration_runs_active_idx").on(table.overallStatus, table.createdAt),
 }));
 
+/**
+ * Durable scheduler state for the post-game official settlement job. A failed
+ * run deliberately remains retryable so a process restart cannot silently
+ * leave a prior slate unsettled.
+ */
+export const settlementAutomationRuns = pgTable("settlement_automation_runs", {
+  slateDate: date("slate_date").primaryKey(),
+  status: text("status").notNull().default("PENDING"),
+  attempts: integer("attempts").notNull().default(0),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+  errorMessage: text("error_message"),
+  result: jsonb("result").notNull().default({}),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  statusCheck: check(
+    "settlement_automation_runs_status_check",
+    sql`${table.status} IN ('PENDING', 'RUNNING', 'SUCCESS', 'FAILED')`,
+  ),
+  retryIdx: index("settlement_automation_runs_retry_idx").on(table.status, table.nextAttemptAt),
+}));
+
 /** Append-only, user-facing audit events for operational actions. */
 export const auditEvents = pgTable("audit_events", {
   auditEventId: uuid("audit_event_id").primaryKey().defaultRandom(),

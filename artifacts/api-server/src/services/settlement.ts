@@ -396,6 +396,7 @@ export async function createMarketPostmortem(input: {
   snapshotId: string;
   outcomeId: string;
   notes?: string | null;
+  processErrorTaxonomy?: string | null;
 }) {
   if (!input.snapshotId || !input.outcomeId) throw new SettlementValidationError("snapshotId and outcomeId are required");
   assertNoBettingData(input);
@@ -432,13 +433,14 @@ export async function createMarketPostmortem(input: {
     `INSERT INTO market_postmortems
        (snapshot_id, outcome_id, player_id, game_pk, market, snapshot_feature_hash,
         outcome_value, outcome_hit, research_rank, research_state, primary_mechanism,
-        notes, metadata)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, '{}')
+         notes, metadata)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      RETURNING postmortem_id, created_at`,
     [
       row.snapshot_id, row.outcome_id, row.player_id, row.game_pk, row.market,
       row.feature_hash, row.outcome_value, row.outcome_hit, row.research_rank,
-      row.research_state, row.primary_mechanism, input.notes ?? null,
+        row.research_state, row.primary_mechanism, input.notes ?? null,
+        input.processErrorTaxonomy ? { processErrorTaxonomy: input.processErrorTaxonomy } : {},
     ],
   );
   return {

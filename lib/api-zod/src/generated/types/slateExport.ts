@@ -5,9 +5,11 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { SlateExportConfirmedLineupsItem } from './slateExportConfirmedLineupsItem';
 import type { SlateExportGamesItem } from './slateExportGamesItem';
 import type { SlateExportMarketBoardItem } from './slateExportMarketBoardItem';
 import type { SlateExportResearchStatesItem } from './slateExportResearchStatesItem';
+import type { SlateExportStartersItem } from './slateExportStartersItem';
 
 export interface SlateExport {
   formatVersion: string;
@@ -15,6 +17,8 @@ export interface SlateExport {
   exportedAt: Date;
   slateDate: Date;
   games: SlateExportGamesItem[];
+  confirmedLineups: SlateExportConfirmedLineupsItem[];
+  starters: SlateExportStartersItem[];
   marketBoard: SlateExportMarketBoardItem[];
   researchStates: SlateExportResearchStatesItem[];
   [key: string]: unknown;

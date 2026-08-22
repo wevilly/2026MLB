@@ -2115,6 +2115,10 @@ export interface LateScratchDetection {
 
 export type SlateExportGamesItem = { [key: string]: unknown };
 
+export type SlateExportConfirmedLineupsItem = { [key: string]: unknown };
+
+export type SlateExportStartersItem = { [key: string]: unknown };
+
 export type SlateExportMarketBoardItem = { [key: string]: unknown };
 
 export type SlateExportResearchStatesItem = { [key: string]: unknown };
@@ -2125,6 +2129,8 @@ export interface SlateExport {
   exportedAt: string;
   slateDate: string;
   games: SlateExportGamesItem[];
+  confirmedLineups: SlateExportConfirmedLineupsItem[];
+  starters: SlateExportStartersItem[];
   marketBoard: SlateExportMarketBoardItem[];
   researchStates: SlateExportResearchStatesItem[];
   [key: string]: unknown;

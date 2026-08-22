@@ -2941,9 +2941,11 @@ components:
         exportedAt: { type: string, format: date-time }
         slateDate: { type: string, format: date }
         games: { type: array, items: { type: object, additionalProperties: true } }
+        confirmedLineups: { type: array, items: { type: object, additionalProperties: true } }
+        starters: { type: array, items: { type: object, additionalProperties: true } }
         marketBoard: { type: array, items: { type: object, additionalProperties: true } }
         researchStates: { type: array, items: { type: object, additionalProperties: true } }
-      required: [formatVersion, officialRecord, exportedAt, slateDate, games, marketBoard, researchStates]
+      required: [formatVersion, officialRecord, exportedAt, slateDate, games, confirmedLineups, starters, marketBoard, researchStates]
     AuditEvent:
       type: object
       additionalProperties: true
