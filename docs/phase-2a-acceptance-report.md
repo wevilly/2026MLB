@@ -1,6 +1,6 @@
 # Phase 2A Acceptance Report
 
-Generated: 2026-08-22T04:54:31.877Z
+Generated: 2026-08-22T10:24:37.259Z
 Effective date: 2026-08-21 (max MLB_OFFICIAL eligibility date)
 Season: 2026
 

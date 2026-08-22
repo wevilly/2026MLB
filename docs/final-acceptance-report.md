@@ -1,18 +1,18 @@
 # Final acceptance report
 
-Generated: 2026-08-22T04:54:31.305Z  
+Generated: 2026-08-22T10:24:33.546Z  
 API target: http://127.0.0.1:8080/api  
-Overall automated gate: **CONDITIONAL PASS — RESTORE DRILL PENDING**
+Overall automated gate: **FAIL**
 
 ## Operational checks
 
 | Check | Result | Duration |
 |---|---:|---:|
 | Live API health | PASS | 0.0s |
-| Phase 2A live report | PASS | 0.5s |
-| All phase behavioral gates | PASS | 77.4s |
-| Warm read-performance SLA | PASS | 2.5s |
-| Isolated restore lineage drill | PENDING | 0.0s |
+| Phase 2A live report | PASS | 3.6s |
+| All phase behavioral gates | PASS | 48.6s |
+| Warm read-performance SLA | PASS | 2.2s |
+| Isolated restore lineage drill | FAIL | 0.5s |
 
 Security scan status: **PASS**. Security scanning is run through the workspace security scanner and is recorded alongside this report rather than by this script.
 
@@ -34,3 +34,7 @@ Security scan status: **PASS**. Security scanning is run through the workspace s
 ## Acceptance interpretation
 
 The aggregate behavioral suite is the authoritative phase gate because it runs every existing phase acceptance test against the configured live database and API. A **PENDING** isolated restore drill is not treated as a pass: complete it only against a populated, non-production restored database and retain the output with this report. See the operator runbook for operational procedures and known limitations.
+
+## Failure or pending details
+
+- **Isolated restore lineage drill:** Error: Restore validation failed; required records are empty: pregameFeatureSnapshots, historicalOutcomes, marketPostmortems at validateRestoreSummary (file:///home/runner/workspace/lib/db/scripts/restore-verification.mjs:11:11) at file:///home/runner/workspace/lib/db/scripts/verify-restore-drill.mjs:33:30 at process.processTicksAndRejections (node:internal/process/task_queues:103:5) Node.js v24.13.0 ELIFECYCLE  Command failed with exit code 1.

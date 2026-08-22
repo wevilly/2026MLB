@@ -27,6 +27,18 @@ function statusRow(result) {
   return `| ${result.label} | ${result.status} | ${(result.durationMs / 1000).toFixed(1)}s |`;
 }
 
+function failureDetail(result) {
+  if (result.status === "PASS") return "";
+  const detail = result.output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-6)
+    .join(" ")
+    .replace(/postgres(?:ql)?:\/\/\S+/gi, "[redacted connection string]");
+  return `- **${result.label}:** ${detail || "No diagnostic output was captured."}`;
+}
+
 const checks = [];
 try {
   const response = await fetch(`${apiBaseUrl}/healthz`);
@@ -94,6 +106,10 @@ Security scan status: **${securityStatus}**. Security scanning is run through th
 ## Acceptance interpretation
 
 The aggregate behavioral suite is the authoritative phase gate because it runs every existing phase acceptance test against the configured live database and API. A **PENDING** isolated restore drill is not treated as a pass: complete it only against a populated, non-production restored database and retain the output with this report. See the operator runbook for operational procedures and known limitations.
+
+## Failure or pending details
+
+${checks.filter((check) => check.status !== "PASS").map(failureDetail).join("\n") || "None."}
 `;
 
 await mkdir(dirname(reportPath), { recursive: true });
