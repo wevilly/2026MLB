@@ -43,6 +43,11 @@ function asNumber(value: unknown): number | null {
   return null;
 }
 
+function asInteger(value: unknown): number | null {
+  const parsed = asNumber(value);
+  return parsed !== null && Number.isInteger(parsed) ? parsed : null;
+}
+
 /** Parse MLB innings-pitched string/number: 1.2 = 1⅔ innings (MLB thirds notation). */
 function parseIp(value: unknown): number {
   const n = asNumber(value);
@@ -538,9 +543,11 @@ async function computeTeamAvailability(teamId: number, slateDate: string): Promi
     const d2Row = byDate.get(d2);
     const d3Row = byDate.get(d3);
 
-    const d1Pitches = d1Row?.pitch_count ?? (d1Row ? 1 : null);
-    const d2Pitches = d2Row?.pitch_count ?? (d2Row ? 1 : null);
-    const d3Pitches = d3Row?.pitch_count ?? (d3Row ? 1 : null);
+    // Keep values sent to integer columns finite and integral even if a driver
+    // returns a numeric field as a string or an invalid value.
+    const d1Pitches = asInteger(d1Row?.pitch_count) ?? (d1Row ? 1 : null);
+    const d2Pitches = asInteger(d2Row?.pitch_count) ?? (d2Row ? 1 : null);
+    const d3Pitches = asInteger(d3Row?.pitch_count) ?? (d3Row ? 1 : null);
     const multiInningYesterday = d1Row?.is_multi_inning ?? false;
 
     const usedD1 = (d1Pitches ?? 0) > 0;
@@ -551,16 +558,18 @@ async function computeTeamAvailability(teamId: number, slateDate: string): Promi
     // Days since last use
     let daysSinceLastUse: number | null = null;
     if (!usedD1 && !usedD2 && !usedD3) {
-      const lastApp = await pool.query<{ game_date: string }>(
-        `SELECT game_date FROM relief_appearance_log
+      // Calculate the date difference in PostgreSQL. This avoids relying on
+      // the runtime's parser for the DATE value and guarantees an integer
+      // result for the integer availability column.
+      const lastApp = await pool.query<{ days_since_last_use: number | null }>(
+        `SELECT ($4::date - game_date)::int AS days_since_last_use
+         FROM relief_appearance_log
          WHERE player_id = $1 AND team_id = $2 AND game_date < $3
          ORDER BY game_date DESC LIMIT 1`,
-        [playerId, teamId, d1],
+        [playerId, teamId, d1, slateDate],
       );
       if (lastApp.rows[0]) {
-        const lastDate = new Date(`${lastApp.rows[0].game_date}T12:00:00Z`);
-        const slateD = new Date(`${slateDate}T12:00:00Z`);
-        daysSinceLastUse = Math.round((slateD.getTime() - lastDate.getTime()) / 86400000);
+        daysSinceLastUse = asInteger(lastApp.rows[0].days_since_last_use);
       }
     } else {
       daysSinceLastUse = usedD1 ? 1 : usedD2 ? 2 : 3;
