@@ -748,6 +748,63 @@ paths:
                 properties:
                   error: { type: string }
                 required: [error]
+  /analyst/models/validate:
+    post:
+      operationId: validateAnalystModel
+      tags: [analyst]
+      summary: Run chronological walk-forward validation for a model version
+      description: |
+        Evaluates a model using only frozen snapshots and official settled outcomes
+        dated before each fold's test date. The run compares out-of-sample Brier skill
+        with a market-specific historical base-rate benchmark and performs fold-local
+        Platt calibration. A PASS run is required before ACTIVE.
+      parameters:
+        - name: modelVersionId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "201":
+          description: Walk-forward validation completed or recorded as incomplete
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalkForwardValidationResult"
+        "400":
+          description: Invalid or unavailable model version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
+  /analyst/models/validation:
+    get:
+      operationId: getAnalystModelValidation
+      tags: [analyst]
+      summary: List walk-forward validation history
+      parameters:
+        - name: market
+          in: query
+          required: false
+          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+      responses:
+        "200":
+          description: Walk-forward validation runs by market
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalkForwardValidationList"
+        "400":
+          description: Invalid market
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -1508,7 +1565,10 @@ components:
         artifactGeneration: { type: string }
         artifactContentHash: { type: string }
         walkForwardAcceptanceId: { type: ["string", "null"] }
-      required: [versionId, market, trainedAt, trainingSeasons, featureSetHash, algorithm, hyperparameters, trainingSampleCount, status, artifactKey, artifactGeneration, artifactContentHash, walkForwardAcceptanceId]
+        calibrationMethod: { type: ["string", "null"] }
+        calibrationSlope: { type: ["number", "null"] }
+        calibrationIntercept: { type: ["number", "null"] }
+      required: [versionId, market, trainedAt, trainingSeasons, featureSetHash, algorithm, hyperparameters, trainingSampleCount, status, artifactKey, artifactGeneration, artifactContentHash, walkForwardAcceptanceId, calibrationMethod, calibrationSlope, calibrationIntercept]
     ModelVersionList:
       type: object
       additionalProperties: false
@@ -1518,6 +1578,55 @@ components:
           items: { $ref: "#/components/schemas/ModelVersion" }
         total: { type: integer, minimum: 0 }
       required: [versions, total]
+    WalkForwardCalibrationPoint:
+      type: object
+      additionalProperties: false
+      properties:
+        bucket: { type: integer, minimum: 0 }
+        count: { type: integer, minimum: 0 }
+        predictedProbability: { type: ["number", "null"] }
+        observedRate: { type: ["number", "null"] }
+      required: [bucket, count, predictedProbability, observedRate]
+    WalkForwardValidationResult:
+      type: object
+      additionalProperties: false
+      properties:
+        walkForwardRunId: { type: string }
+        versionId: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        foldCount: { type: integer, minimum: 0 }
+        foldResults: { type: array, items: { type: object } }
+        overallMetric: { type: ["number", "null"] }
+        benchmarkMetric: { type: ["number", "null"] }
+        benchmarkBeat: { type: boolean }
+        benchmarkMethod: { type: string }
+        calibrationMethod: { type: string }
+        calibrationCurve:
+          type: array
+          items: { $ref: "#/components/schemas/WalkForwardCalibrationPoint" }
+        calibrationError: { type: ["number", "null"] }
+        calibrationPassed: { type: boolean }
+        calibrationSlope: { type: ["number", "null"] }
+        calibrationIntercept: { type: ["number", "null"] }
+        status: { type: string, enum: [PASS, FAIL, INCOMPLETE] }
+      required: [walkForwardRunId, versionId, market, foldCount, foldResults, overallMetric, benchmarkMetric, benchmarkBeat, benchmarkMethod, calibrationMethod, calibrationCurve, calibrationError, calibrationPassed, calibrationSlope, calibrationIntercept, status]
+    WalkForwardValidationList:
+      type: object
+      additionalProperties: false
+      properties:
+        runs:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/WalkForwardValidationResult"
+              - type: object
+                properties:
+                  startedAt: { type: string, format: date-time }
+                  finishedAt: { type: ["string", "null"], format: date-time }
+                  errorMessage: { type: ["string", "null"] }
+                required: [startedAt, finishedAt, errorMessage]
+        total: { type: integer, minimum: 0 }
+      required: [runs, total]
     SettlementComponents:
       type: object
       additionalProperties: false

@@ -1194,9 +1194,109 @@ export const GetAnalystModelsResponse = zod.object({
   "artifactKey": zod.string(),
   "artifactGeneration": zod.string(),
   "artifactContentHash": zod.string(),
-  "walkForwardAcceptanceId": zod.string().nullable()
+  "walkForwardAcceptanceId": zod.string().nullable(),
+  "calibrationMethod": zod.string().nullable(),
+  "calibrationSlope": zod.number().nullable(),
+  "calibrationIntercept": zod.number().nullable()
 })),
   "total": zod.number().int().min(getAnalystModelsResponseTotalMin)
+})
+
+
+/**
+ * Evaluates a model using only frozen snapshots and official settled outcomes
+ * dated before each fold's test date. The run compares out-of-sample Brier skill
+ * with a market-specific historical base-rate benchmark and performs fold-local
+ * Platt calibration. A PASS run is required before ACTIVE.
+ * @summary Run chronological walk-forward validation for a model version
+ */
+export const ValidateAnalystModelQueryParams = zod.object({
+  "modelVersionId": zod.coerce.string()
+})
+
+export const validateAnalystModelResponseFoldCountMin = 0;
+
+export const validateAnalystModelResponseCalibrationCurveItemBucketMin = 0;
+
+export const validateAnalystModelResponseCalibrationCurveItemCountMin = 0;
+
+
+
+export const ValidateAnalystModelResponse = zod.object({
+  "walkForwardRunId": zod.string(),
+  "versionId": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "foldCount": zod.number().int().min(validateAnalystModelResponseFoldCountMin),
+  "foldResults": zod.array(zod.object({
+
+}).passthrough()),
+  "overallMetric": zod.number().nullable(),
+  "benchmarkMetric": zod.number().nullable(),
+  "benchmarkBeat": zod.boolean(),
+  "benchmarkMethod": zod.string(),
+  "calibrationMethod": zod.string(),
+  "calibrationCurve": zod.array(zod.object({
+  "bucket": zod.number().int().min(validateAnalystModelResponseCalibrationCurveItemBucketMin),
+  "count": zod.number().int().min(validateAnalystModelResponseCalibrationCurveItemCountMin),
+  "predictedProbability": zod.number().nullable(),
+  "observedRate": zod.number().nullable()
+})),
+  "calibrationError": zod.number().nullable(),
+  "calibrationPassed": zod.boolean(),
+  "calibrationSlope": zod.number().nullable(),
+  "calibrationIntercept": zod.number().nullable(),
+  "status": zod.enum(['PASS', 'FAIL', 'INCOMPLETE'])
+})
+
+
+/**
+ * @summary List walk-forward validation history
+ */
+export const GetAnalystModelValidationQueryParams = zod.object({
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional()
+})
+
+export const getAnalystModelValidationResponseRunsItemOneFoldCountMin = 0;
+
+export const getAnalystModelValidationResponseRunsItemOneCalibrationCurveItemBucketMin = 0;
+
+export const getAnalystModelValidationResponseRunsItemOneCalibrationCurveItemCountMin = 0;
+
+export const getAnalystModelValidationResponseTotalMin = 0;
+
+
+
+export const GetAnalystModelValidationResponse = zod.object({
+  "runs": zod.array(zod.object({
+  "walkForwardRunId": zod.string(),
+  "versionId": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "foldCount": zod.number().int().min(getAnalystModelValidationResponseRunsItemOneFoldCountMin),
+  "foldResults": zod.array(zod.object({
+
+}).passthrough()),
+  "overallMetric": zod.number().nullable(),
+  "benchmarkMetric": zod.number().nullable(),
+  "benchmarkBeat": zod.boolean(),
+  "benchmarkMethod": zod.string(),
+  "calibrationMethod": zod.string(),
+  "calibrationCurve": zod.array(zod.object({
+  "bucket": zod.number().int().min(getAnalystModelValidationResponseRunsItemOneCalibrationCurveItemBucketMin),
+  "count": zod.number().int().min(getAnalystModelValidationResponseRunsItemOneCalibrationCurveItemCountMin),
+  "predictedProbability": zod.number().nullable(),
+  "observedRate": zod.number().nullable()
+})),
+  "calibrationError": zod.number().nullable(),
+  "calibrationPassed": zod.boolean(),
+  "calibrationSlope": zod.number().nullable(),
+  "calibrationIntercept": zod.number().nullable(),
+  "status": zod.enum(['PASS', 'FAIL', 'INCOMPLETE'])
+}).and(zod.object({
+  "startedAt": zod.coerce.date(),
+  "finishedAt": zod.coerce.date().nullable(),
+  "errorMessage": zod.string().nullable()
+}))),
+  "total": zod.number().int().min(getAnalystModelValidationResponseTotalMin)
 })
 
 

@@ -19,6 +19,8 @@ import {
   WriteFeatureStoreOutcomeBody,
   TrainAnalystModelResponse,
   GetAnalystModelsResponse,
+  ValidateAnalystModelResponse,
+  GetAnalystModelValidationResponse,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
@@ -51,6 +53,11 @@ import {
   trainMarketModel,
   type ModelMarket,
 } from "../services/model-training";
+import {
+  queryWalkForwardRuns,
+  validateModelVersion,
+  WalkForwardValidationError,
+} from "../services/walk-forward-validation";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -1155,6 +1162,37 @@ router.get("/analyst/models", async (req, res, next) => {
     res.json(GetAnalystModelsResponse.parse({ versions, total: versions.length }));
   } catch (error) {
     if (error instanceof ModelTrainingValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.post("/analyst/models/validate", async (req, res, next) => {
+  try {
+    const modelVersionId = typeof req.query.modelVersionId === "string"
+      ? req.query.modelVersionId.trim()
+      : "";
+    if (!modelVersionId) throw new WalkForwardValidationError("modelVersionId is required");
+    const result = await validateModelVersion(modelVersionId);
+    res.status(201).json(ValidateAnalystModelResponse.parse(result));
+  } catch (error) {
+    if (error instanceof WalkForwardValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.get("/analyst/models/validation", async (req, res, next) => {
+  try {
+    const market = req.query.market == null ? null : requestedModelMarket(req.query.market);
+    const runs = await queryWalkForwardRuns(market);
+    res.json(GetAnalystModelValidationResponse.parse({ runs, total: runs.length }));
+  } catch (error) {
+    if (error instanceof WalkForwardValidationError) {
       res.status(400).json({ error: error.message });
       return;
     }

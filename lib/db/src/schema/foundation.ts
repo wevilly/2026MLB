@@ -96,6 +96,12 @@ export const modelTrainingStatusEnum = pgEnum("model_training_status", [
   "FAILED",
 ]);
 
+export const walkForwardStatusEnum = pgEnum("walk_forward_status", [
+  "PASS",
+  "FAIL",
+  "INCOMPLETE",
+]);
+
 export const researchWindowEnum = pgEnum("research_window", [
   "SEASON",
   "CAREER",
@@ -1144,10 +1150,40 @@ export const modelVersions = pgTable("model_versions", {
   artifactKey: text("artifact_key").notNull(),
   artifactGeneration: text("artifact_generation").notNull(),
   artifactContentHash: text("artifact_content_hash").notNull(),
+  // Phase 5B stores the passing walk_forward_runs.run_id here.
   walkForwardAcceptanceId: uuid("walk_forward_acceptance_id"),
+  /** Accepted deployment calibration derived from fold-local validation fits. */
+  calibrationMethod: text("calibration_method"),
+  calibrationSlope: numeric("calibration_slope"),
+  calibrationIntercept: numeric("calibration_intercept"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   marketStatusIdx: index("model_versions_market_status_idx").on(table.market, table.status),
+}));
+
+export const walkForwardRuns = pgTable("walk_forward_runs", {
+  walkForwardRunId: uuid("walk_forward_run_id").primaryKey().defaultRandom(),
+  modelVersionId: text("model_version_id").notNull().references(() => modelVersions.versionId),
+  market: marketTypeEnum("market").notNull(),
+  foldCount: integer("fold_count").notNull().default(0),
+  foldResults: jsonb("fold_results").notNull().default([]),
+  overallMetric: numeric("overall_metric"),
+  benchmarkMetric: numeric("benchmark_metric"),
+  benchmarkBeat: boolean("benchmark_beat").notNull().default(false),
+  benchmarkMethod: text("benchmark_method").notNull(),
+  calibrationMethod: text("calibration_method").notNull(),
+  calibrationCurve: jsonb("calibration_curve").notNull().default([]),
+  calibrationError: numeric("calibration_error"),
+  calibrationPassed: boolean("calibration_passed").notNull().default(false),
+  /** Weighted fold-local calibration parameters for downstream inference. */
+  calibrationSlope: numeric("calibration_slope"),
+  calibrationIntercept: numeric("calibration_intercept"),
+  status: walkForwardStatusEnum("status").notNull(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  errorMessage: text("error_message"),
+}, (table) => ({
+  modelVersionIdx: index("walk_forward_runs_model_version_idx").on(table.modelVersionId, table.startedAt),
 }));
 
 /**

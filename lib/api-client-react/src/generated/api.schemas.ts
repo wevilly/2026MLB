@@ -905,10 +905,87 @@ export interface ModelVersion {
   artifactContentHash: string;
   /** @nullable */
   walkForwardAcceptanceId: string | null;
+  /** @nullable */
+  calibrationMethod: string | null;
+  /** @nullable */
+  calibrationSlope: number | null;
+  /** @nullable */
+  calibrationIntercept: number | null;
 }
 
 export interface ModelVersionList {
   versions: ModelVersion[];
+  /** @minimum 0 */
+  total: number;
+}
+
+export interface WalkForwardCalibrationPoint {
+  /** @minimum 0 */
+  bucket: number;
+  /** @minimum 0 */
+  count: number;
+  /** @nullable */
+  predictedProbability: number | null;
+  /** @nullable */
+  observedRate: number | null;
+}
+
+export type WalkForwardValidationResultMarket = typeof WalkForwardValidationResultMarket[keyof typeof WalkForwardValidationResultMarket];
+
+
+export const WalkForwardValidationResultMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type WalkForwardValidationResultFoldResultsItem = { [key: string]: unknown };
+
+export type WalkForwardValidationResultStatus = typeof WalkForwardValidationResultStatus[keyof typeof WalkForwardValidationResultStatus];
+
+
+export const WalkForwardValidationResultStatus = {
+  PASS: 'PASS',
+  FAIL: 'FAIL',
+  INCOMPLETE: 'INCOMPLETE',
+} as const;
+
+export interface WalkForwardValidationResult {
+  walkForwardRunId: string;
+  versionId: string;
+  market: WalkForwardValidationResultMarket;
+  /** @minimum 0 */
+  foldCount: number;
+  foldResults: WalkForwardValidationResultFoldResultsItem[];
+  /** @nullable */
+  overallMetric: number | null;
+  /** @nullable */
+  benchmarkMetric: number | null;
+  benchmarkBeat: boolean;
+  benchmarkMethod: string;
+  calibrationMethod: string;
+  calibrationCurve: WalkForwardCalibrationPoint[];
+  /** @nullable */
+  calibrationError: number | null;
+  calibrationPassed: boolean;
+  /** @nullable */
+  calibrationSlope: number | null;
+  /** @nullable */
+  calibrationIntercept: number | null;
+  status: WalkForwardValidationResultStatus;
+}
+
+export type WalkForwardValidationListRunsItem = WalkForwardValidationResult & ({
+  startedAt: string;
+  /** @nullable */
+  finishedAt: string | null;
+  /** @nullable */
+  errorMessage: string | null;
+});
+
+export interface WalkForwardValidationList {
+  runs: WalkForwardValidationListRunsItem[];
   /** @minimum 0 */
   total: number;
 }
@@ -1416,6 +1493,32 @@ export const GetAnalystModelsMarket = {
 } as const;
 
 export type GetAnalystModels400 = {
+  error: string;
+};
+
+export type ValidateAnalystModelParams = {
+modelVersionId: string;
+};
+
+export type ValidateAnalystModel400 = {
+  error: string;
+};
+
+export type GetAnalystModelValidationParams = {
+market?: GetAnalystModelValidationMarket;
+};
+
+export type GetAnalystModelValidationMarket = typeof GetAnalystModelValidationMarket[keyof typeof GetAnalystModelValidationMarket];
+
+
+export const GetAnalystModelValidationMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type GetAnalystModelValidation400 = {
   error: string;
 };
 

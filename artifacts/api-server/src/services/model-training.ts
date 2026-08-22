@@ -191,10 +191,14 @@ export async function queryModelVersions(market: ModelMarket | null) {
     artifact_generation: string;
     artifact_content_hash: string;
     walk_forward_acceptance_id: string | null;
+    calibration_method: string | null;
+    calibration_slope: string | null;
+    calibration_intercept: string | null;
   }>(
     `SELECT version_id, market, trained_at, training_seasons, feature_set_hash,
             algorithm, hyperparameters, training_sample_count, status, artifact_key, artifact_generation,
-            artifact_content_hash, walk_forward_acceptance_id
+            artifact_content_hash, walk_forward_acceptance_id,
+            calibration_method, calibration_slope, calibration_intercept
        FROM model_versions
       ${market ? "WHERE market = $1" : ""}
       ORDER BY trained_at DESC`,
@@ -214,5 +218,8 @@ export async function queryModelVersions(market: ModelMarket | null) {
     artifactGeneration: row.artifact_generation,
     artifactContentHash: row.artifact_content_hash,
     walkForwardAcceptanceId: row.walk_forward_acceptance_id,
+    calibrationMethod: row.calibration_method,
+    calibrationSlope: row.calibration_slope == null ? null : Number(row.calibration_slope),
+    calibrationIntercept: row.calibration_intercept == null ? null : Number(row.calibration_intercept),
   }));
 }

@@ -132,7 +132,7 @@ describe("Phase 5A – Model Training and Versioning Framework", () => {
       versionIds.push(body.versionId);
       assert.equal(body.market, market);
       assert.equal(body.status, "CANDIDATE");
-      assert.equal(body.trainingSampleCount, 1);
+      assert.ok(body.trainingSampleCount >= 1, "training may include concurrently seeded official rows");
       assert.match(body.artifactKey, /^gs:\/\/[^/]+\/.+\/model-artifacts\//);
       assert.match(body.artifactGeneration, /^\d+$/);
       assert.match(body.artifactContentHash, /^[a-f0-9]{64}$/);
@@ -163,31 +163,33 @@ describe("Phase 5A – Model Training and Versioning Framework", () => {
     }
   });
 
-  test("M3: no model can become ACTIVE before Phase 5B, even with a spoofed caller context", async () => {
+  test("M3: no model can become ACTIVE with a spoofed Phase 5B record", async () => {
     const acceptance = await pool.query(
       `INSERT INTO model_walk_forward_acceptances (model_version_id, validation_run_id, metrics)
        VALUES ($1, 'spoofed-phase-5b-run', '{"accepted":true}')
        RETURNING acceptance_id`,
       [versionIds[0]],
     );
-    await pool.query(
-      "UPDATE model_versions SET walk_forward_acceptance_id = $1 WHERE version_id = $2",
-      [acceptance.rows[0].acceptance_id, versionIds[0]],
+    await assert.rejects(
+      pool.query(
+        "UPDATE model_versions SET walk_forward_acceptance_id = $1 WHERE version_id = $2",
+        [acceptance.rows[0].acceptance_id, versionIds[0]],
+      ),
+      /controlled validation writer/i,
     );
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query("SET LOCAL app.writer_context = 'WALK_FORWARD'");
       await assert.rejects(
         client.query("UPDATE model_versions SET status = 'ACTIVE' WHERE version_id = $1", [versionIds[0]]),
-        /Phase 5A candidates cannot be activated/i,
+        /controlled validation writer|require.*linked PASS walk-forward run/i,
       );
-      await client.query("ROLLBACK");
     } finally {
+      await client.query("ROLLBACK").catch(() => undefined);
       client.release();
     }
     const blocked = await pool.query("SELECT status, walk_forward_acceptance_id FROM model_versions WHERE version_id = $1", [versionIds[0]]);
     assert.equal(blocked.rows[0].status, "CANDIDATE");
-    assert.equal(blocked.rows[0].walk_forward_acceptance_id, acceptance.rows[0].acceptance_id);
+    assert.equal(blocked.rows[0].walk_forward_acceptance_id, null);
   });
 });

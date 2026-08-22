@@ -25,4 +25,10 @@ export interface ModelVersion {
   artifactContentHash: string;
   /** @nullable */
   walkForwardAcceptanceId: string | null;
+  /** @nullable */
+  calibrationMethod: string | null;
+  /** @nullable */
+  calibrationSlope: number | null;
+  /** @nullable */
+  calibrationIntercept: number | null;
 }

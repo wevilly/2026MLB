@@ -40,6 +40,8 @@ import type {
   GetAnalystFeatureStoreParams,
   GetAnalystGameLabParams,
   GetAnalystMarketResearchParams,
+  GetAnalystModelValidation400,
+  GetAnalystModelValidationParams,
   GetAnalystModels400,
   GetAnalystModelsParams,
   GetAnalystPitcherLabParams,
@@ -81,7 +83,11 @@ import type {
   TodayDashboard,
   TrainAnalystModel400,
   TrainAnalystModelParams,
+  ValidateAnalystModel400,
+  ValidateAnalystModelParams,
   WALKEngineResult,
+  WalkForwardValidationList,
+  WalkForwardValidationResult,
   WriteFeatureStoreOutcome400,
   WriteHistoricalOutcomeResult,
   XBHEngineResult
@@ -2539,6 +2545,172 @@ export function useGetAnalystModels<TData = Awaited<ReturnType<typeof getAnalyst
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAnalystModelsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getValidateAnalystModelUrl = (params: ValidateAnalystModelParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/models/validate?${stringifiedParams}` : `/api/analyst/models/validate`
+}
+
+/**
+ * Evaluates a model using only frozen snapshots and official settled outcomes
+ * dated before each fold's test date. The run compares out-of-sample Brier skill
+ * with a market-specific historical base-rate benchmark and performs fold-local
+ * Platt calibration. A PASS run is required before ACTIVE.
+ * @summary Run chronological walk-forward validation for a model version
+ */
+export const validateAnalystModel = async (params: ValidateAnalystModelParams, options?: Parameters<typeof customFetch>[1]): Promise<WalkForwardValidationResult> => {
+
+  return customFetch<WalkForwardValidationResult>(getValidateAnalystModelUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getValidateAnalystModelMutationOptions = <TError = ErrorType<ValidateAnalystModel400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof validateAnalystModel>>, TError,{params: ValidateAnalystModelParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof validateAnalystModel>>, TError,{params: ValidateAnalystModelParams}, TContext> => {
+
+const mutationKey = ['validateAnalystModel'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof validateAnalystModel>>, {params: ValidateAnalystModelParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  validateAnalystModel(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ValidateAnalystModelMutationResult = NonNullable<Awaited<ReturnType<typeof validateAnalystModel>>>
+
+    export type ValidateAnalystModelMutationError = ErrorType<ValidateAnalystModel400>
+
+    /**
+ * @summary Run chronological walk-forward validation for a model version
+ */
+export const useValidateAnalystModel = <TError = ErrorType<ValidateAnalystModel400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof validateAnalystModel>>, TError,{params: ValidateAnalystModelParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof validateAnalystModel>>,
+        TError,
+        {params: ValidateAnalystModelParams},
+        TContext
+      > => {
+      return useMutation(getValidateAnalystModelMutationOptions(options));
+    }
+
+export const getGetAnalystModelValidationUrl = (params?: GetAnalystModelValidationParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/models/validation?${stringifiedParams}` : `/api/analyst/models/validation`
+}
+
+/**
+ * @summary List walk-forward validation history
+ */
+export const getAnalystModelValidation = async (params?: GetAnalystModelValidationParams, options?: Parameters<typeof customFetch>[1]): Promise<WalkForwardValidationList> => {
+
+  return customFetch<WalkForwardValidationList>(getGetAnalystModelValidationUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystModelValidationQueryKey = (params?: GetAnalystModelValidationParams,) => {
+    return [
+    `/api/analyst/models/validation`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystModelValidationQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystModelValidation>>, TError = ErrorType<GetAnalystModelValidation400>>(params?: GetAnalystModelValidationParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystModelValidation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystModelValidationQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystModelValidation>>> = ({ signal }) => getAnalystModelValidation(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystModelValidation>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystModelValidationQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystModelValidation>>>
+export type GetAnalystModelValidationQueryError = ErrorType<GetAnalystModelValidation400>
+
+
+/**
+ * @summary List walk-forward validation history
+ */
+
+export function useGetAnalystModelValidation<TData = Awaited<ReturnType<typeof getAnalystModelValidation>>, TError = ErrorType<GetAnalystModelValidation400>>(
+ params?: GetAnalystModelValidationParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystModelValidation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystModelValidationQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 
