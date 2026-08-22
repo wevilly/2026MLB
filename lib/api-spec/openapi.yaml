@@ -1121,6 +1121,191 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AiToolCallResult" }
+  /analyst/ai/chat:
+    post:
+      operationId: chatWithAnalystAi
+      tags: [analyst]
+      summary: Ask the AI Analyst a tool-grounded research question
+      description: The AI can only summarize the audited read-only tool result returned for this request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AiAnalystChatInput" }
+      responses:
+        "200":
+          description: Tool-grounded AI response
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiAnalystChatResult" }
+        "400":
+          description: Invalid chat request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: AI or permitted research provider failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /analyst/ai/drafts:
+    get:
+      operationId: getAnalystAiDrafts
+      tags: [analyst]
+      summary: List AI research drafts awaiting or receiving review
+      parameters:
+        - name: sessionId
+          in: query
+          required: false
+          schema: { type: string, maxLength: 160 }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, enum: [DRAFT, APPROVED, REJECTED, WITHDRAWN] }
+      responses:
+        "200":
+          description: AI research draft queue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiResearchDraftList" }
+    post:
+      operationId: createAnalystAiDraft
+      tags: [analyst]
+      summary: Create an unapproved AI research draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AiResearchDraftInput" }
+      responses:
+        "201":
+          description: Unapproved draft created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiResearchDraft" }
+        "400":
+          description: Invalid draft input
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /analyst/ai/drafts/{draftId}/approve:
+    post:
+      operationId: approveAnalystAiDraft
+      tags: [analyst]
+      summary: Human-review and approve an AI research draft
+      parameters:
+        - name: draftId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AiResearchDraftReviewInput" }
+      responses:
+        "200":
+          description: Draft approved and copied to separate approved-note record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiResearchDraftReviewResult" }
+        "400":
+          description: Invalid or prohibited review action
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /analyst/ai/drafts/{draftId}/reject:
+    post:
+      operationId: rejectAnalystAiDraft
+      tags: [analyst]
+      summary: Human-review and reject an AI research draft
+      parameters:
+        - name: draftId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AiResearchDraftReviewInput" }
+      responses:
+        "200":
+          description: Draft rejected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiResearchDraftReviewResult" }
+        "400":
+          description: Invalid or prohibited review action
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /analyst/ai/sourcing-register:
+    get:
+      operationId: getAnalystAiSourcingRegister
+      tags: [analyst]
+      summary: List sourced AI claims and their operator decisions
+      parameters:
+        - name: sessionId
+          in: query
+          required: false
+          schema: { type: string, maxLength: 160 }
+        - name: accepted
+          in: query
+          required: false
+          schema: { type: string, enum: ["true", "false", pending] }
+      responses:
+        "200":
+          description: Sourcing register claims
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiSourcingRegister" }
+  /analyst/ai/sourcing-register/{claimId}:
+    patch:
+      operationId: decideAnalystAiSourcingClaim
+      tags: [analyst]
+      summary: Record a human decision for a sourced AI claim
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AiSourcingDecisionInput" }
+      responses:
+        "200":
+          description: Updated sourced claim
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AiSourcingClaim" }
+        "400":
+          description: Invalid claim decision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /analyst/ai/research-notes:
+    get:
+      operationId: getAnalystAiResearchNotes
+      tags: [analyst]
+      summary: List human-approved AI-sourced research notes
+      parameters:
+        - name: sessionId
+          in: query
+          required: false
+          schema: { type: string, maxLength: 160 }
+        - name: playerId
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Approved AI-sourced notes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResearchNoteList" }
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -2428,4 +2613,153 @@ components:
           additionalProperties: true
         error: { type: ["string", "null"] }
       required: [callId, toolName, status, result, error]
+    AiChatHistoryMessage:
+      type: object
+      additionalProperties: false
+      properties:
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string, minLength: 1, maxLength: 4000 }
+      required: [role, content]
+    AiAnalystChatInput:
+      type: object
+      additionalProperties: false
+      properties:
+        sessionId: { type: string, minLength: 1, maxLength: 160 }
+        message: { type: string, minLength: 1, maxLength: 4000 }
+        history:
+          type: array
+          maxItems: 8
+          items: { $ref: "#/components/schemas/AiChatHistoryMessage" }
+      required: [sessionId, message]
+    AiAnalystChatResult:
+      type: object
+      additionalProperties: false
+      properties:
+        sessionId: { type: string }
+        message: { type: string }
+        response: { type: string }
+        toolName: { type: string }
+        toolCallId: { type: string, format: uuid }
+        toolStatus: { type: string, enum: [SUCCESS, REJECTED, ERROR] }
+        sourcingClaimIds:
+          type: array
+          items: { type: string, format: uuid }
+        canCreateDraft: { type: boolean }
+      required: [sessionId, message, response, toolName, toolCallId, toolStatus, sourcingClaimIds, canCreateDraft]
+    AiResearchDraft:
+      type: object
+      additionalProperties: false
+      properties:
+        draftId: { type: string, format: uuid }
+        sessionId: { type: string }
+        playerId: { type: ["integer", "null"] }
+        market: { type: ["string", "null"], enum: [TOTAL_BASES_2_PLUS, EXTRA_BASE_HIT, BATTER_WALK, HOME_RUN, null] }
+        draftContent: { type: string }
+        status: { type: string, enum: [DRAFT, APPROVED, REJECTED, WITHDRAWN] }
+        sourceClaimIds:
+          type: array
+          items: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        reviewedBy: { type: ["string", "null"] }
+        reviewedAt: { type: ["string", "null"], format: date-time }
+        rejectionReason: { type: ["string", "null"] }
+      required: [draftId, sessionId, playerId, market, draftContent, status, sourceClaimIds, createdAt, reviewedBy, reviewedAt, rejectionReason]
+    AiResearchDraftList:
+      type: object
+      additionalProperties: false
+      properties:
+        drafts:
+          type: array
+          items: { $ref: "#/components/schemas/AiResearchDraft" }
+        total: { type: integer, minimum: 0 }
+      required: [drafts, total]
+    AiResearchDraftInput:
+      type: object
+      additionalProperties: false
+      properties:
+        sessionId: { type: string, minLength: 1, maxLength: 160 }
+        playerId: { type: integer, minimum: 1 }
+        market: { type: string, enum: [TOTAL_BASES_2_PLUS, EXTRA_BASE_HIT, BATTER_WALK, HOME_RUN] }
+        draftContent: { type: string, minLength: 1, maxLength: 12000 }
+        sourceClaimIds:
+          type: array
+          maxItems: 50
+          items: { type: string, format: uuid }
+      required: [sessionId, draftContent]
+    AiResearchDraftReviewInput:
+      type: object
+      additionalProperties: false
+      properties:
+        reviewedBy: { type: string, minLength: 1, maxLength: 160 }
+        rejectionReason: { type: string, minLength: 1, maxLength: 2000 }
+      required: [reviewedBy]
+    AiResearchDraftReviewResult:
+      type: object
+      additionalProperties: false
+      properties:
+        draft: { $ref: "#/components/schemas/AiResearchDraft" }
+        noteId: { type: ["string", "null"], format: uuid }
+      required: [draft, noteId]
+    AiSourcingClaim:
+      type: object
+      additionalProperties: false
+      properties:
+        claimId: { type: string, format: uuid }
+        sessionId: { type: string }
+        toolCallId: { type: ["string", "null"], format: uuid }
+        claimText: { type: string }
+        sourceUrlOrDescription: { type: string }
+        sourceType: { type: string, enum: [WEB, INTERNAL_RESEARCH, BETTOR_PICK] }
+        accepted: { type: ["boolean", "null"] }
+        rejectionReason: { type: ["string", "null"] }
+        operatorNote: { type: ["string", "null"] }
+        reviewedBy: { type: ["string", "null"] }
+        reviewedAt: { type: ["string", "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+      required: [claimId, sessionId, toolCallId, claimText, sourceUrlOrDescription, sourceType, accepted, rejectionReason, operatorNote, reviewedBy, reviewedAt, createdAt]
+    AiSourcingRegister:
+      type: object
+      additionalProperties: false
+      properties:
+        claims:
+          type: array
+          items: { $ref: "#/components/schemas/AiSourcingClaim" }
+        total: { type: integer, minimum: 0 }
+      required: [claims, total]
+    AiSourcingDecisionInput:
+      type: object
+      additionalProperties: false
+      properties:
+        accepted: { type: boolean }
+        reviewedBy: { type: string, minLength: 1, maxLength: 160 }
+        rejectionReason: { type: string, minLength: 1, maxLength: 2000 }
+        operatorNote: { type: string, minLength: 1, maxLength: 2000 }
+      required: [accepted, reviewedBy]
+    ResearchNote:
+      type: object
+      additionalProperties: false
+      properties:
+        noteId: { type: string, format: uuid }
+        draftId: { type: string, format: uuid }
+        sessionId: { type: string }
+        playerId: { type: ["integer", "null"] }
+        market: { type: ["string", "null"], enum: [TOTAL_BASES_2_PLUS, EXTRA_BASE_HIT, BATTER_WALK, HOME_RUN, null] }
+        noteContent: { type: string }
+        sourceType: { type: string }
+        sourceClaimIds:
+          type: array
+          items: { type: string, format: uuid }
+        approvedBy: { type: string }
+        approvedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+      required: [noteId, draftId, sessionId, playerId, market, noteContent, sourceType, sourceClaimIds, approvedBy, approvedAt, createdAt]
+    ResearchNoteList:
+      type: object
+      additionalProperties: false
+      properties:
+        notes:
+          type: array
+          items: { $ref: "#/components/schemas/ResearchNote" }
+        total: { type: integer, minimum: 0 }
+      required: [notes, total]
 

@@ -1800,6 +1800,243 @@ export interface AiToolCallResult {
   error: string | null;
 }
 
+export type AiChatHistoryMessageRole = typeof AiChatHistoryMessageRole[keyof typeof AiChatHistoryMessageRole];
+
+
+export const AiChatHistoryMessageRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface AiChatHistoryMessage {
+  role: AiChatHistoryMessageRole;
+  /**
+     * @minLength 1
+     * @maxLength 4000
+     */
+  content: string;
+}
+
+export interface AiAnalystChatInput {
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  sessionId: string;
+  /**
+     * @minLength 1
+     * @maxLength 4000
+     */
+  message: string;
+  /** @maxItems 8 */
+  history?: AiChatHistoryMessage[];
+}
+
+export type AiAnalystChatResultToolStatus = typeof AiAnalystChatResultToolStatus[keyof typeof AiAnalystChatResultToolStatus];
+
+
+export const AiAnalystChatResultToolStatus = {
+  SUCCESS: 'SUCCESS',
+  REJECTED: 'REJECTED',
+  ERROR: 'ERROR',
+} as const;
+
+export interface AiAnalystChatResult {
+  sessionId: string;
+  message: string;
+  response: string;
+  toolName: string;
+  toolCallId: string;
+  toolStatus: AiAnalystChatResultToolStatus;
+  sourcingClaimIds: string[];
+  canCreateDraft: boolean;
+}
+
+/**
+ * @nullable
+ */
+export type AiResearchDraftMarket = typeof AiResearchDraftMarket[keyof typeof AiResearchDraftMarket] | null;
+
+
+export const AiResearchDraftMarket = {
+  TOTAL_BASES_2_PLUS: 'TOTAL_BASES_2_PLUS',
+  EXTRA_BASE_HIT: 'EXTRA_BASE_HIT',
+  BATTER_WALK: 'BATTER_WALK',
+  HOME_RUN: 'HOME_RUN',
+} as const;
+
+export type AiResearchDraftStatus = typeof AiResearchDraftStatus[keyof typeof AiResearchDraftStatus];
+
+
+export const AiResearchDraftStatus = {
+  DRAFT: 'DRAFT',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+  WITHDRAWN: 'WITHDRAWN',
+} as const;
+
+export interface AiResearchDraft {
+  draftId: string;
+  sessionId: string;
+  /** @nullable */
+  playerId: number | null;
+  /** @nullable */
+  market: AiResearchDraftMarket;
+  draftContent: string;
+  status: AiResearchDraftStatus;
+  sourceClaimIds: string[];
+  createdAt: string;
+  /** @nullable */
+  reviewedBy: string | null;
+  /** @nullable */
+  reviewedAt: string | null;
+  /** @nullable */
+  rejectionReason: string | null;
+}
+
+export interface AiResearchDraftList {
+  drafts: AiResearchDraft[];
+  /** @minimum 0 */
+  total: number;
+}
+
+export type AiResearchDraftInputMarket = typeof AiResearchDraftInputMarket[keyof typeof AiResearchDraftInputMarket];
+
+
+export const AiResearchDraftInputMarket = {
+  TOTAL_BASES_2_PLUS: 'TOTAL_BASES_2_PLUS',
+  EXTRA_BASE_HIT: 'EXTRA_BASE_HIT',
+  BATTER_WALK: 'BATTER_WALK',
+  HOME_RUN: 'HOME_RUN',
+} as const;
+
+export interface AiResearchDraftInput {
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  sessionId: string;
+  /** @minimum 1 */
+  playerId?: number;
+  market?: AiResearchDraftInputMarket;
+  /**
+     * @minLength 1
+     * @maxLength 12000
+     */
+  draftContent: string;
+  /** @maxItems 50 */
+  sourceClaimIds?: string[];
+}
+
+export interface AiResearchDraftReviewInput {
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  reviewedBy: string;
+  /**
+     * @minLength 1
+     * @maxLength 2000
+     */
+  rejectionReason?: string;
+}
+
+export interface AiResearchDraftReviewResult {
+  draft: AiResearchDraft;
+  /** @nullable */
+  noteId: string | null;
+}
+
+export type AiSourcingClaimSourceType = typeof AiSourcingClaimSourceType[keyof typeof AiSourcingClaimSourceType];
+
+
+export const AiSourcingClaimSourceType = {
+  WEB: 'WEB',
+  INTERNAL_RESEARCH: 'INTERNAL_RESEARCH',
+  BETTOR_PICK: 'BETTOR_PICK',
+} as const;
+
+export interface AiSourcingClaim {
+  claimId: string;
+  sessionId: string;
+  /** @nullable */
+  toolCallId: string | null;
+  claimText: string;
+  sourceUrlOrDescription: string;
+  sourceType: AiSourcingClaimSourceType;
+  /** @nullable */
+  accepted: boolean | null;
+  /** @nullable */
+  rejectionReason: string | null;
+  /** @nullable */
+  operatorNote: string | null;
+  /** @nullable */
+  reviewedBy: string | null;
+  /** @nullable */
+  reviewedAt: string | null;
+  createdAt: string;
+}
+
+export interface AiSourcingRegister {
+  claims: AiSourcingClaim[];
+  /** @minimum 0 */
+  total: number;
+}
+
+export interface AiSourcingDecisionInput {
+  accepted: boolean;
+  /**
+     * @minLength 1
+     * @maxLength 160
+     */
+  reviewedBy: string;
+  /**
+     * @minLength 1
+     * @maxLength 2000
+     */
+  rejectionReason?: string;
+  /**
+     * @minLength 1
+     * @maxLength 2000
+     */
+  operatorNote?: string;
+}
+
+/**
+ * @nullable
+ */
+export type ResearchNoteMarket = typeof ResearchNoteMarket[keyof typeof ResearchNoteMarket] | null;
+
+
+export const ResearchNoteMarket = {
+  TOTAL_BASES_2_PLUS: 'TOTAL_BASES_2_PLUS',
+  EXTRA_BASE_HIT: 'EXTRA_BASE_HIT',
+  BATTER_WALK: 'BATTER_WALK',
+  HOME_RUN: 'HOME_RUN',
+} as const;
+
+export interface ResearchNote {
+  noteId: string;
+  draftId: string;
+  sessionId: string;
+  /** @nullable */
+  playerId: number | null;
+  /** @nullable */
+  market: ResearchNoteMarket;
+  noteContent: string;
+  sourceType: string;
+  sourceClaimIds: string[];
+  approvedBy: string;
+  approvedAt: string;
+  createdAt: string;
+}
+
+export interface ResearchNoteList {
+  notes: ResearchNote[];
+  /** @minimum 0 */
+  total: number;
+}
+
 export type GetAnalystProjectionsParams = {
 date?: string;
 };
@@ -2151,6 +2388,49 @@ export const GetAnalystBettorEvaluationMarket = {
   WALK: 'WALK',
   HR: 'HR',
 } as const;
+
+export type GetAnalystAiDraftsParams = {
+/**
+ * @maxLength 160
+ */
+sessionId?: string;
+status?: GetAnalystAiDraftsStatus;
+};
+
+export type GetAnalystAiDraftsStatus = typeof GetAnalystAiDraftsStatus[keyof typeof GetAnalystAiDraftsStatus];
+
+
+export const GetAnalystAiDraftsStatus = {
+  DRAFT: 'DRAFT',
+  APPROVED: 'APPROVED',
+  REJECTED: 'REJECTED',
+  WITHDRAWN: 'WITHDRAWN',
+} as const;
+
+export type GetAnalystAiSourcingRegisterParams = {
+/**
+ * @maxLength 160
+ */
+sessionId?: string;
+accepted?: GetAnalystAiSourcingRegisterAccepted;
+};
+
+export type GetAnalystAiSourcingRegisterAccepted = typeof GetAnalystAiSourcingRegisterAccepted[keyof typeof GetAnalystAiSourcingRegisterAccepted];
+
+
+export const GetAnalystAiSourcingRegisterAccepted = {
+  true: 'true',
+  false: 'false',
+  pending: 'pending',
+} as const;
+
+export type GetAnalystAiResearchNotesParams = {
+/**
+ * @maxLength 160
+ */
+sessionId?: string;
+playerId?: number;
+};
 
 export type GetAnalystBullpenRoomParams = {
 date?: string;

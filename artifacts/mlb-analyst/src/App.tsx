@@ -1,9 +1,9 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore, useGetAnalystDailyMarketBoard, useGetAnalystDailyBoardGameSummary, useRefreshAnalystDailyMarketBoard, useGetAnalystBettorEvaluation } from '@workspace/api-client-react';
+import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore, useGetAnalystDailyMarketBoard, useGetAnalystDailyBoardGameSummary, useRefreshAnalystDailyMarketBoard, useGetAnalystBettorEvaluation, useChatWithAnalystAi, useGetAnalystAiDrafts, useCreateAnalystAiDraft, useApproveAnalystAiDraft, useRejectAnalystAiDraft, useGetAnalystAiSourcingRegister, useDecideAnalystAiSourcingClaim, useGetAnalystAiResearchNotes } from '@workspace/api-client-react';
 import type { AnalystSettings, BackfillFeatureStoreParams, BullpenArm, BullpenRoom, BullpenTeam, CaptureFeatureStoreSlateParams, DataHealth, FeatureStoreCaptureResult, FeatureStoreResult, HealthIssue, HREngineResult, MarketResearchCandidate, PregameFeatureSnapshot, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile, DailyMarketBoard, DailyBoardGameSummary, BettorEvaluation, BettorEvaluationPickMarket } from '@workspace/api-client-react';
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight, Send, FilePlus, ThumbsDown, ThumbsUp, ExternalLink } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useSearch, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -12,7 +12,7 @@ import NotFound from '@/pages/not-found';
 
 const queryClient = new QueryClient();
 
-type Tone = 'good' | 'warn' | 'bad' | 'neutral' | 'accent';
+export type Tone = 'good' | 'warn' | 'bad' | 'neutral' | 'accent';
 type MarketShortCode = MarketResearchCandidate['market'];
 
 const navGroups: { label: string; items: Array<{ href: string; label: string; icon: typeof Home; future?: boolean }> }[] = [
@@ -34,13 +34,13 @@ const navGroups: { label: string; items: Array<{ href: string; label: string; ic
       { href: '/market-board', label: 'Market board', icon: BarChart3 },
       { href: '/bettor-intelligence', label: 'Bettor intelligence', icon: Gauge },
       { href: '/model-lab', label: 'Model lab', icon: GitBranch, future: true },
-      { href: '/ai-analyst', label: 'AI analyst', icon: Sparkles, future: true },
+      { href: '/ai-analyst', label: 'AI analyst', icon: Sparkles },
       { href: '/results', label: 'Results', icon: Table2, future: true },
     ],
   },
 ];
 
-function toneFor(value: string | null | undefined): Tone {
+export function toneFor(value: string | null | undefined): Tone {
   const normalized = String(value ?? '').toLowerCase();
   if (normalized.includes('good') || normalized.includes('ready') || normalized.includes('fresh') || normalized.includes('healthy') || normalized.includes('complete') || normalized.includes('configured') || normalized.includes('active')) return 'good';
   if (normalized.includes('warn') || normalized.includes('stale') || normalized.includes('partial') || normalized.includes('pending') || normalized.includes('degraded')) return 'warn';
@@ -48,23 +48,23 @@ function toneFor(value: string | null | undefined): Tone {
   return 'neutral';
 }
 
-function StatusDot({ tone = 'neutral', pulse = false }: { tone?: Tone; pulse?: boolean }) {
+export function StatusDot({ tone = 'neutral', pulse = false }: { tone?: Tone; pulse?: boolean }) {
   return <span className={`status-dot status-${tone} ${pulse ? 'status-pulse' : ''}`} aria-hidden="true" />;
 }
 
-function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: Tone }) {
+export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: Tone }) {
   return <span className={`badge badge-${tone}`} data-testid="status-badge">{children}</span>;
 }
 
-function Panel({ children, className = '', ...props }: { children: ReactNode; className?: string; [key: string]: unknown }) {
+export function Panel({ children, className = '', ...props }: { children: ReactNode; className?: string; [key: string]: unknown }) {
   return <section className={`panel ${className}`} {...props}>{children}</section>;
 }
 
-function Kicker({ children }: { children: ReactNode }) {
+export function Kicker({ children }: { children: ReactNode }) {
   return <div className="kicker">{children}</div>;
 }
 
-function SectionHeading({ eyebrow, title, detail, action }: { eyebrow: string; title: string; detail?: string; action?: ReactNode }) {
+export function SectionHeading({ eyebrow, title, detail, action }: { eyebrow: string; title: string; detail?: string; action?: ReactNode }) {
   return (
     <div className="section-heading">
       <div>
@@ -77,7 +77,7 @@ function SectionHeading({ eyebrow, title, detail, action }: { eyebrow: string; t
   );
 }
 
-function LoadingPanel({ rows = 4 }: { rows?: number }) {
+export function LoadingPanel({ rows = 4 }: { rows?: number }) {
   return (
     <div className="space-y-3" data-testid="loading-state">
       {Array.from({ length: rows }).map((_, index) => (
@@ -87,7 +87,7 @@ function LoadingPanel({ rows = 4 }: { rows?: number }) {
   );
 }
 
-function QueryMessage({ kind, onRetry }: { kind: 'error' | 'empty'; onRetry?: () => void }) {
+export function QueryMessage({ kind, onRetry }: { kind: 'error' | 'empty'; onRetry?: () => void }) {
   if (kind === 'error') {
     return (
       <div className="query-message query-error" data-testid="error-state">
@@ -2302,6 +2302,200 @@ function BettorIntelligencePage() {
   );
 }
 
+function AiAnalystPage() {
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem('mlb-ai-analyst-session') || `operator-${crypto.randomUUID()}`);
+  const [operatorName, setOperatorName] = useState(() => localStorage.getItem('mlb-ai-analyst-operator') || '');
+  const [question, setQuestion] = useState('');
+  const [claimNote, setClaimNote] = useState('');
+  const [history, setHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [approvalKey, setApprovalKey] = useState('');
+  const [latestResponse, setLatestResponse] = useState<{ response: string; sourcingClaimIds: string[]; toolName: string } | null>(null);
+
+  const chat = useChatWithAnalystAi();
+  const drafts = useGetAnalystAiDrafts({ sessionId });
+  const claims = useGetAnalystAiSourcingRegister({ sessionId });
+  const notes = useGetAnalystAiResearchNotes({ sessionId });
+  const createDraft = useCreateAnalystAiDraft();
+  const approveDraft = useApproveAnalystAiDraft();
+  const rejectDraft = useRejectAnalystAiDraft();
+  const decideClaim = useDecideAnalystAiSourcingClaim();
+
+  const refreshReviewData = () => {
+    drafts.refetch();
+    claims.refetch();
+    notes.refetch();
+  };
+
+  const submitQuestion = () => {
+    const message = question.trim();
+    if (!message || chat.isPending) return;
+    chat.mutate(
+      { data: { sessionId, message } },
+      {
+        onSuccess: (result) => {
+          const nextEntries: Array<{ role: 'user' | 'assistant'; content: string }> = [
+            { role: 'user', content: message },
+            { role: 'assistant', content: result.response },
+          ];
+          setHistory((current) => [...current, ...nextEntries].slice(-8));
+          setLatestResponse({ response: result.response, sourcingClaimIds: result.sourcingClaimIds, toolName: result.toolName });
+          setQuestion('');
+          claims.refetch();
+        },
+      },
+    );
+  };
+
+  const saveDraft = () => {
+    if (!latestResponse || createDraft.isPending) return;
+    createDraft.mutate(
+      { data: { sessionId, draftContent: latestResponse.response, sourceClaimIds: latestResponse.sourcingClaimIds } },
+      { onSuccess: () => drafts.refetch() },
+    );
+  };
+
+  const reviewDraft = (draftId: string, approved: boolean) => {
+    if (!operatorName.trim()) return;
+    const mutation = approved ? approveDraft : rejectDraft;
+    mutation.mutate(
+      {
+        draftId,
+        data: approved
+          ? { reviewedBy: operatorName.trim() }
+          : { reviewedBy: operatorName.trim(), rejectionReason: 'Operator rejected this AI-sourced research draft.' },
+      },
+      { onSuccess: refreshReviewData },
+    );
+  };
+
+  const reviewClaim = (claimId: string, accepted: boolean) => {
+    if (!operatorName.trim()) return;
+    decideClaim.mutate(
+      {
+        claimId,
+        data: {
+          accepted,
+          reviewedBy: operatorName.trim(),
+          ...(accepted ? {} : { rejectionReason: claimNote.trim() || 'Operator rejected this sourced claim.' }),
+          ...(claimNote.trim() ? { operatorNote: claimNote.trim() } : {}),
+        },
+      },
+      { onSuccess: () => { claims.refetch(); setClaimNote(''); } },
+    );
+  };
+
+  const pendingDrafts = drafts.data?.drafts.filter((draft) => draft.status === 'DRAFT') ?? [];
+  const pendingClaims = claims.data?.claims.filter((claim) => claim.accepted === null) ?? [];
+
+  return (
+    <div className="page-content rise-in" data-testid="page-ai-analyst">
+      <div className="page-intro">
+        <div>
+          <Kicker>Tool-grounded workflow</Kicker>
+          <h1>AI <span className="slash">//</span> analyst</h1>
+          <p>Answers are limited to audited read tools. Drafts and cited claims remain unapproved until an operator records a decision.</p>
+        </div>
+        <button className="button button-quiet" onClick={refreshReviewData} data-testid="button-refresh-ai-workflow">
+          <RefreshCw size={15} /> Refresh review data
+        </button>
+      </div>
+
+      <div className="ai-workspace">
+        <Panel className="ai-chat-panel">
+          <SectionHeading eyebrow="Conversation" title="Ask the evidence layer" detail="The assistant selects a bounded read tool and explains only its returned evidence." />
+          <div className="ai-session-row">
+            <label>Session
+              <input value={sessionId} onChange={(event) => { setSessionId(event.target.value); localStorage.setItem('mlb-ai-analyst-session', event.target.value); }} data-testid="input-ai-session" />
+            </label>
+            <label>Operator
+              <input value={operatorName} onChange={(event) => { setOperatorName(event.target.value); localStorage.setItem('mlb-ai-analyst-operator', event.target.value); }} placeholder="Required for review" data-testid="input-ai-operator" />
+            </label>
+            <label>Approval key
+              <input type="password" value={approvalKey} onChange={(event) => { setApprovalKey(event.target.value); sessionStorage.setItem('mlb-ai-analyst-approval-key', event.target.value); }} placeholder="Required for review" data-testid="input-ai-approval-key" />
+            </label>
+          </div>
+          <div className="ai-transcript" data-testid="ai-transcript">
+            {history.length === 0 && <div className="ai-empty"><Sparkles size={18} /><p>Ask about today’s market board, a bullpen, settlements, snapshots, bettor picks, or recent web research.</p></div>}
+            {history.map((entry, index) => (
+              <article key={`${entry.role}-${index}`} className={`ai-message ai-message-${entry.role}`} data-testid={`ai-message-${entry.role}-${index}`}>
+                <span>{entry.role === 'user' ? 'Operator' : 'AI analyst'}</span>
+                <p>{entry.content}</p>
+              </article>
+            ))}
+            {chat.isPending && <article className="ai-message ai-message-assistant" data-testid="ai-thinking"><span>AI analyst</span><p>Running a permitted read tool…</p></article>}
+          </div>
+          {chat.isError && <div className="query-message query-error" data-testid="ai-chat-error"><AlertTriangle size={18} /><div><strong>AI response unavailable</strong><p>Check the research source or try a narrower prompt.</p></div></div>}
+          <div className="ai-composer">
+            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitQuestion(); } }} placeholder="Ask a tool-grounded research question…" data-testid="input-ai-question" />
+            <button className="button button-dark" onClick={submitQuestion} disabled={!question.trim() || chat.isPending} data-testid="button-send-ai-question"><Send size={15} /> Ask</button>
+          </div>
+          {latestResponse && (
+            <div className="ai-evidence-bar" data-testid="ai-latest-evidence">
+              <div><Badge tone="accent">{latestResponse.toolName}</Badge><span>{latestResponse.sourcingClaimIds.length} cited web claim{latestResponse.sourcingClaimIds.length === 1 ? '' : 's'} awaiting review</span></div>
+              <button className="button button-quiet" onClick={saveDraft} disabled={createDraft.isPending} data-testid="button-save-ai-draft"><FilePlus size={15} /> Save as draft</button>
+            </div>
+          )}
+        </Panel>
+
+        <aside className="ai-review-sidebar">
+          <Panel>
+            <SectionHeading eyebrow="Human gate" title="Draft review queue" detail={`${pendingDrafts.length} awaiting a human decision`} />
+            <div className="ai-queue">
+              {drafts.isLoading ? <LoadingPanel rows={2} /> : pendingDrafts.length === 0 ? <p className="ai-muted">No unapproved drafts in this session.</p> : pendingDrafts.map((draft) => (
+                <article className="ai-queue-card" key={draft.draftId} data-testid={`ai-draft-${draft.draftId}`}>
+                  <Badge tone="warn">DRAFT</Badge>
+                  <p>{draft.draftContent}</p>
+                  <div className="ai-queue-actions">
+                    <button className="button button-dark" onClick={() => reviewDraft(draft.draftId, true)} disabled={!operatorName.trim() || approveDraft.isPending} data-testid={`button-approve-draft-${draft.draftId}`}><Check size={14} /> Approve</button>
+                    <button className="button button-quiet" onClick={() => reviewDraft(draft.draftId, false)} disabled={!operatorName.trim() || rejectDraft.isPending} data-testid={`button-reject-draft-${draft.draftId}`}><X size={14} /> Reject</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </Panel>
+
+          <Panel>
+            <SectionHeading eyebrow="Approved stream" title="Research notes" detail={`${notes.data?.total ?? 0} human-approved AI notes`} />
+            <div className="ai-queue">
+              {notes.isLoading ? <LoadingPanel rows={2} /> : notes.data?.notes.length ? notes.data.notes.slice(0, 4).map((note) => (
+                <article className="ai-queue-card ai-note" key={note.noteId} data-testid={`ai-note-${note.noteId}`}>
+                  <Badge tone="good">APPROVED</Badge><p>{note.noteContent}</p><small>Approved by {note.approvedBy}</small>
+                </article>
+              )) : <p className="ai-muted">Approved AI notes will appear here without changing frozen research.</p>}
+            </div>
+          </Panel>
+        </aside>
+      </div>
+
+      <Panel className="mt-6">
+        <SectionHeading eyebrow="Sourcing register" title="Claims needing an operator decision" detail="Web claims are discoverable, not accepted evidence, until a human records a disposition." />
+        <div className="ai-claim-toolbar">
+          <input value={claimNote} onChange={(event) => setClaimNote(event.target.value)} placeholder="Decision note or rejection reason" data-testid="input-claim-decision-note" />
+          <span>{pendingClaims.length} pending</span>
+        </div>
+        {claims.isLoading ? <LoadingPanel rows={3} /> : claims.isError ? <QueryMessage kind="error" onRetry={() => claims.refetch()} /> : claims.data?.claims.length ? (
+          <div className="ai-claims-list">
+            {claims.data.claims.map((claim) => (
+              <article className="ai-claim" key={claim.claimId} data-testid={`ai-claim-${claim.claimId}`}>
+                <div className="ai-claim-copy">
+                  <div><Badge tone={claim.accepted === null ? 'warn' : claim.accepted ? 'good' : 'bad'}>{claim.accepted === null ? 'PENDING' : claim.accepted ? 'ACCEPTED' : 'REJECTED'}</Badge> <Badge tone="neutral">{claim.sourceType}</Badge></div>
+                  <p>{claim.claimText}</p>
+                  <a href={claim.sourceUrlOrDescription} target="_blank" rel="noreferrer" data-testid={`link-claim-source-${claim.claimId}`}><ExternalLink size={13} /> View cited source</a>
+                  {claim.operatorNote && <small>Operator note: {claim.operatorNote}</small>}
+                </div>
+                {claim.accepted === null && <div className="ai-claim-actions">
+                  <button className="button button-dark" onClick={() => reviewClaim(claim.claimId, true)} disabled={!operatorName.trim() || decideClaim.isPending} data-testid={`button-accept-claim-${claim.claimId}`}><ThumbsUp size={14} /> Accept</button>
+                  <button className="button button-quiet" onClick={() => reviewClaim(claim.claimId, false)} disabled={!operatorName.trim() || decideClaim.isPending} data-testid={`button-reject-claim-${claim.claimId}`}><ThumbsDown size={14} /> Reject</button>
+                </div>}
+              </article>
+            ))}
+          </div>
+        ) : <QueryMessage kind="empty" />}
+      </Panel>
+    </div>
+  );
+}
+
 function Router() {
   return (
     <AppShell>
@@ -2319,7 +2513,7 @@ function Router() {
           <Route path="/feature-store" component={FeatureStorePage} />
           <Route path="/bettor-intelligence" component={BettorIntelligencePage} />
           <Route path="/model-lab">{() => <FuturePage label="Model lab" />}</Route>
-          <Route path="/ai-analyst">{() => <FuturePage label="AI analyst" />}</Route>
+          <Route path="/ai-analyst" component={AiAnalystPage} />
           <Route path="/results">{() => <FuturePage label="Results" />}</Route>
           <Route component={NotFound} />
         </Switch>

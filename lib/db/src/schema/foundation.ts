@@ -120,6 +120,19 @@ export const aiToolCallStatusEnum = pgEnum("ai_tool_call_status", [
   "ERROR",
 ]);
 
+export const aiResearchDraftStatusEnum = pgEnum("ai_research_draft_status", [
+  "DRAFT",
+  "APPROVED",
+  "REJECTED",
+  "WITHDRAWN",
+]);
+
+export const aiSourcingSourceTypeEnum = pgEnum("ai_sourcing_source_type", [
+  "WEB",
+  "INTERNAL_RESEARCH",
+  "BETTOR_PICK",
+]);
+
 export const settlementStateEnum = pgEnum("settlement_state", [
   "PENDING",
   "SETTLED",
@@ -1216,6 +1229,111 @@ export const aiToolCallLog = pgTable(
     sessionLengthCheck: check(
       "ai_tool_call_log_session_length_check",
       sql`char_length(btrim(${table.sessionId})) BETWEEN 1 AND 160`,
+    ),
+  }),
+);
+
+/**
+ * AI-authored notes remain outside the official research tables until a human
+ * reviewer explicitly approves them. The draft itself is append-only in spirit
+ * except for its controlled review transition.
+ */
+export const aiResearchDrafts = pgTable(
+  "ai_research_drafts",
+  {
+    draftId: uuid("draft_id").primaryKey().defaultRandom(),
+    sessionId: text("session_id").notNull(),
+    playerId: integer("player_id").references(() => players.playerId),
+    market: marketTypeEnum("market"),
+    draftContent: text("draft_content").notNull(),
+    status: aiResearchDraftStatusEnum("status").notNull().default("DRAFT"),
+    sourceClaimIds: jsonb("source_claim_ids").notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    rejectionReason: text("rejection_reason"),
+  },
+  (table) => ({
+    sessionCreatedIdx: index("ai_research_drafts_session_created_idx").on(table.sessionId, table.createdAt),
+    statusCreatedIdx: index("ai_research_drafts_status_created_idx").on(table.status, table.createdAt),
+    sessionLengthCheck: check(
+      "ai_research_drafts_session_length_check",
+      sql`char_length(btrim(${table.sessionId})) BETWEEN 1 AND 160`,
+    ),
+    contentLengthCheck: check(
+      "ai_research_drafts_content_length_check",
+      sql`char_length(btrim(${table.draftContent})) BETWEEN 1 AND 12000`,
+    ),
+    reviewConsistencyCheck: check(
+      "ai_research_drafts_review_consistency_check",
+      sql`(${table.status} = 'DRAFT' AND ${table.reviewedBy} IS NULL AND ${table.reviewedAt} IS NULL)
+        OR (${table.status} = 'APPROVED' AND ${table.reviewedBy} IS NOT NULL AND ${table.reviewedAt} IS NOT NULL)
+        OR (${table.status} IN ('REJECTED', 'WITHDRAWN') AND ${table.reviewedBy} IS NOT NULL AND ${table.reviewedAt} IS NOT NULL)`,
+    ),
+  }),
+);
+
+/**
+ * Approved AI notes are a distinct, additive research stream. They never
+ * overwrite or masquerade as frozen source-backed research.
+ */
+export const researchNotes = pgTable(
+  "research_notes",
+  {
+    noteId: uuid("note_id").primaryKey().defaultRandom(),
+    draftId: uuid("draft_id").notNull().references(() => aiResearchDrafts.draftId),
+    sessionId: text("session_id").notNull(),
+    playerId: integer("player_id").references(() => players.playerId),
+    market: marketTypeEnum("market"),
+    noteContent: text("note_content").notNull(),
+    sourceType: text("source_type").notNull().default("AI_APPROVED"),
+    sourceClaimIds: jsonb("source_claim_ids").notNull().default([]),
+    approvedBy: text("approved_by").notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    draftUniqueIdx: uniqueIndex("research_notes_draft_unique_idx").on(table.draftId),
+    playerCreatedIdx: index("research_notes_player_created_idx").on(table.playerId, table.createdAt),
+    contentLengthCheck: check(
+      "research_notes_content_length_check",
+      sql`char_length(btrim(${table.noteContent})) BETWEEN 1 AND 12000`,
+    ),
+  }),
+);
+
+/**
+ * Every web claim surfaced by the AI is reviewable independently from a draft.
+ * accepted=NULL means the operator has not decided yet.
+ */
+export const aiSourcingRegister = pgTable(
+  "ai_sourcing_register",
+  {
+    claimId: uuid("claim_id").primaryKey().defaultRandom(),
+    sessionId: text("session_id").notNull(),
+    toolCallId: uuid("tool_call_id").references(() => aiToolCallLog.callId),
+    claimText: text("claim_text").notNull(),
+    sourceUrlOrDescription: text("source_url_or_description").notNull(),
+    sourceType: aiSourcingSourceTypeEnum("source_type").notNull(),
+    accepted: boolean("accepted"),
+    rejectionReason: text("rejection_reason"),
+    operatorNote: text("operator_note"),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionCreatedIdx: index("ai_sourcing_register_session_created_idx").on(table.sessionId, table.createdAt),
+    sourceTypeIdx: index("ai_sourcing_register_source_type_idx").on(table.sourceType),
+    claimLengthCheck: check(
+      "ai_sourcing_register_claim_length_check",
+      sql`char_length(btrim(${table.claimText})) BETWEEN 1 AND 4000
+        AND char_length(btrim(${table.sourceUrlOrDescription})) BETWEEN 1 AND 2048`,
+    ),
+    decisionConsistencyCheck: check(
+      "ai_sourcing_register_decision_consistency_check",
+      sql`(${table.accepted} IS NULL AND ${table.reviewedBy} IS NULL AND ${table.reviewedAt} IS NULL)
+        OR (${table.accepted} IS NOT NULL AND ${table.reviewedBy} IS NOT NULL AND ${table.reviewedAt} IS NOT NULL)`,
     ),
   }),
 );

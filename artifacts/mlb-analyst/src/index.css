@@ -930,3 +930,44 @@ button:active:not(:disabled), a:active {
   .usage-grid { grid-template-columns: 1fr; }
   .leverage-slot { grid-template-columns: 110px 1fr; }
 }
+
+/* AI Analyst: evidence conversation and human review workflow */
+.ai-workspace { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, .9fr); gap: 20px; align-items: start; }
+.ai-chat-panel { min-height: 640px; display: flex; flex-direction: column; }
+.ai-session-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.ai-session-row label { display: grid; gap: 5px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; color: hsl(var(--muted-foreground)); text-transform: uppercase; }
+.ai-session-row input, .ai-claim-toolbar input { min-width: 0; border: 1px solid hsl(var(--border)); background: hsl(var(--background)); color: hsl(var(--foreground)); padding: 8px 9px; font-family: var(--font-mono); font-size: 11px; outline: none; }
+.ai-session-row input:focus, .ai-claim-toolbar input:focus, .ai-composer textarea:focus { border-color: hsl(var(--accent)); box-shadow: 0 0 0 2px hsl(var(--accent) / .18); }
+.ai-transcript { flex: 1; min-height: 330px; max-height: 510px; overflow-y: auto; padding: 14px; border: 1px solid hsl(var(--border)); background: hsl(var(--background) / .64); display: flex; flex-direction: column; gap: 10px; }
+.ai-empty { margin: auto; max-width: 340px; text-align: center; color: hsl(var(--muted-foreground)); font-size: 12px; line-height: 1.65; }
+.ai-empty svg { margin-bottom: 8px; color: hsl(var(--accent)); }
+.ai-message { max-width: 91%; padding: 11px 13px; border: 1px solid hsl(var(--border)); }
+.ai-message span { display: block; margin-bottom: 5px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .07em; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
+.ai-message p { margin: 0; white-space: pre-wrap; font-size: 12px; line-height: 1.6; }
+.ai-message-user { align-self: flex-end; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); border-color: hsl(var(--primary)); }
+.ai-message-user span { color: hsl(var(--primary-foreground) / .72); }
+.ai-message-assistant { align-self: flex-start; background: hsl(var(--card)); }
+.ai-composer { display: flex; gap: 10px; align-items: flex-end; margin-top: 12px; }
+.ai-composer textarea { flex: 1; min-height: 72px; resize: vertical; padding: 10px; border: 1px solid hsl(var(--border)); background: hsl(var(--background)); color: hsl(var(--foreground)); font: 12px/1.5 var(--font-sans); outline: none; }
+.ai-evidence-bar, .ai-claim-toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid hsl(var(--border) / .65); font-size: 11px; color: hsl(var(--muted-foreground)); }
+.ai-evidence-bar > div { display: flex; align-items: center; gap: 8px; }
+.ai-review-sidebar { display: grid; gap: 20px; }
+.ai-queue, .ai-claims-list { display: grid; gap: 10px; }
+.ai-queue-card { padding: 11px; border-left: 2px solid hsl(var(--border)); background: hsl(var(--background) / .55); }
+.ai-queue-card p { margin: 8px 0; font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
+.ai-queue-card small { color: hsl(var(--muted-foreground)); font-size: 10px; }
+.ai-queue-actions, .ai-claim-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.ai-queue-actions .button, .ai-claim-actions .button { padding: 6px 8px; font-size: 10px; }
+.ai-muted { margin: 0; font-size: 11px; color: hsl(var(--muted-foreground)); line-height: 1.55; }
+.ai-claim-toolbar { margin-top: 0; padding: 0 0 12px; }
+.ai-claim-toolbar input { flex: 1; }
+.ai-claim-toolbar span { font-family: var(--font-mono); font-size: 10px; white-space: nowrap; }
+.ai-claim { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 13px; border: 1px solid hsl(var(--border)); background: hsl(var(--background) / .46); }
+.ai-claim-copy { min-width: 0; }
+.ai-claim-copy p { margin: 8px 0; font-size: 12px; line-height: 1.55; }
+.ai-claim-copy a { display: inline-flex; align-items: center; gap: 5px; color: hsl(214 56% 43%); font-family: var(--font-mono); font-size: 10px; text-decoration: none; }
+.ai-claim-copy a:hover { text-decoration: underline; }
+.ai-claim-copy small { display: block; margin-top: 7px; color: hsl(var(--muted-foreground)); font-size: 10px; }
+.ai-claim-actions { flex-shrink: 0; }
+@media (max-width: 1050px) { .ai-workspace { grid-template-columns: 1fr; } .ai-chat-panel { min-height: 540px; } }
+@media (max-width: 640px) { .ai-session-row { grid-template-columns: 1fr; } .ai-composer, .ai-evidence-bar, .ai-claim, .ai-claim-toolbar { flex-direction: column; align-items: stretch; } .ai-message { max-width: 97%; } .ai-claim-actions { width: 100%; } }

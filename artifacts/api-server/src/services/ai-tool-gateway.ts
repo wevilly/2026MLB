@@ -317,6 +317,29 @@ async function liveWebSearch(parameters: ToolParameters) {
   return { data: { query, provider: "DuckDuckGo HTML", results } };
 }
 
+async function recordWebClaims(callId: string, sessionId: string, result: Record<string, unknown>) {
+  const data = result.data;
+  if (!data || typeof data !== "object" || !Array.isArray((data as { results?: unknown }).results)) return [];
+  const claimIds: string[] = [];
+  for (const item of (data as { results: unknown[] }).results.slice(0, 8)) {
+    if (!item || typeof item !== "object") continue;
+    const entry = item as { title?: unknown; url?: unknown; snippet?: unknown };
+    const title = typeof entry.title === "string" ? entry.title.trim() : "Web result";
+    const snippet = typeof entry.snippet === "string" ? entry.snippet.trim() : "";
+    const source = typeof entry.url === "string" ? entry.url.trim() : "";
+    if (!source || !/^https?:\/\//i.test(source)) continue;
+    const inserted = await pool.query<{ claim_id: string }>(
+      `INSERT INTO ai_sourcing_register
+         (session_id, tool_call_id, claim_text, source_url_or_description, source_type)
+       VALUES ($1, $2, $3, $4, 'WEB')
+       RETURNING claim_id`,
+      [sessionId, callId, `${title}${snippet ? ` — ${snippet}` : ""}`.slice(0, 4000), source.slice(0, 2048)],
+    );
+    claimIds.push(inserted.rows[0].claim_id);
+  }
+  return claimIds;
+}
+
 async function executeReadTool(toolName: string, parameters: ToolParameters): Promise<Record<string, unknown>> {
   switch (toolName) {
     case "READ_MARKET_BOARD": {
@@ -428,7 +451,16 @@ export async function executeAiToolCall(input: AiToolCallInput): Promise<AiToolC
     validateParameterKeys(input.toolName, input.parameters);
     const result = await executeReadTool(input.toolName, input.parameters);
     const callId = await logToolCall(input.toolName, input.parameters, input.sessionId, input.requestId, "SUCCESS", summaryFor(result), null, toolDefinition);
-    return { callId, toolName: input.toolName, status: "SUCCESS", result, error: null };
+    const sourcingClaimIds = input.toolName === "LIVE_WEB_SEARCH"
+      ? await recordWebClaims(callId, input.sessionId, result)
+      : [];
+    return {
+      callId,
+      toolName: input.toolName,
+      status: "SUCCESS",
+      result: { ...result, sourcingClaimIds },
+      error: null,
+    };
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : "Tool execution failed";
     const status: AiToolStatus = caught instanceof AiToolValidationError ? "REJECTED" : "ERROR";

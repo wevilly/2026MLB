@@ -1,4 +1,5 @@
 import { Router, type IRouter, type RequestHandler } from "express";
+import { timingSafeEqual } from "node:crypto";
 import {
   GetAnalystBullpenRoomResponse,
   GetAnalystDataHealthResponse,
@@ -40,6 +41,25 @@ import {
   GetAnalystAiToolRegistryResponse,
   CallAnalystAiToolBody,
   CallAnalystAiToolResponse,
+  ChatWithAnalystAiBody,
+  ChatWithAnalystAiResponse,
+  GetAnalystAiDraftsQueryParams,
+  GetAnalystAiDraftsResponse,
+  CreateAnalystAiDraftBody,
+  CreateAnalystAiDraftResponse,
+  ApproveAnalystAiDraftParams,
+  ApproveAnalystAiDraftBody,
+  ApproveAnalystAiDraftResponse,
+  RejectAnalystAiDraftParams,
+  RejectAnalystAiDraftBody,
+  RejectAnalystAiDraftResponse,
+  GetAnalystAiSourcingRegisterQueryParams,
+  GetAnalystAiSourcingRegisterResponse,
+  DecideAnalystAiSourcingClaimParams,
+  DecideAnalystAiSourcingClaimBody,
+  DecideAnalystAiSourcingClaimResponse,
+  GetAnalystAiResearchNotesQueryParams,
+  GetAnalystAiResearchNotesResponse,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
@@ -98,6 +118,16 @@ import {
   type BettorMarket,
 } from "../services/bettor-intelligence";
 import { executeAiToolCall, queryAiToolRegistry, rejectAiToolCall } from "../services/ai-tool-gateway";
+import {
+  AiWorkflowValidationError,
+  createAiResearchDraft,
+  decideAiSourcingClaim,
+  queryAiResearchDrafts,
+  queryAiSourcingRegister,
+  queryResearchNotes,
+  reviewAiResearchDraft,
+  runAiAnalystChat,
+} from "../services/ai-workflows";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -1513,6 +1543,154 @@ router.post("/analyst/ai/tool-call", async (req, res, next) => {
     const response = CallAnalystAiToolResponse.parse(result);
     res.status(result.status === "SUCCESS" ? 200 : result.status === "REJECTED" ? 400 : 502).json(response);
   } catch (error) {
+    next(error);
+  }
+});
+
+function aiWorkflowErrorResponse(error: unknown, res: Parameters<RequestHandler>[1]) {
+  if (error instanceof AiWorkflowValidationError) {
+    res.status(400).json({ error: error.message });
+    return true;
+  }
+  return false;
+}
+
+function hasOperatorApprovalCapability(req: Parameters<RequestHandler>[0], res: Parameters<RequestHandler>[1]) {
+  const expected = process.env.AI_ANALYST_OPERATOR_APPROVAL_KEY;
+  const received = req.get("x-analyst-approval-key");
+  if (!expected) {
+    res.status(503).json({ error: "Operator approval is unavailable until AI_ANALYST_OPERATOR_APPROVAL_KEY is configured." });
+    return false;
+  }
+  if (!received || Buffer.byteLength(received) !== Buffer.byteLength(expected) || !timingSafeEqual(Buffer.from(received), Buffer.from(expected))) {
+    res.status(403).json({ error: "A valid operator approval capability is required for this action." });
+    return false;
+  }
+  return true;
+}
+
+router.post("/analyst/ai/chat", async (req, res, next) => {
+  try {
+    const parsed = ChatWithAnalystAiBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid AI chat payload: sessionId and message are required." });
+      return;
+    }
+    const chat = await runAiAnalystChat({ sessionId: parsed.data.sessionId, message: parsed.data.message, requestId: String(req.id) });
+    res.json(ChatWithAnalystAiResponse.parse(chat));
+  } catch (error) {
+    if (aiWorkflowErrorResponse(error, res)) return;
+    res.status(502).json({ error: error instanceof Error ? error.message : "AI Analyst chat failed" });
+  }
+});
+
+router.get("/analyst/ai/drafts", async (req, res, next) => {
+  try {
+    const parsed = GetAnalystAiDraftsQueryParams.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid AI draft filters." });
+      return;
+    }
+    const drafts = await queryAiResearchDrafts(parsed.data);
+    res.json(GetAnalystAiDraftsResponse.parse({ drafts, total: drafts.length }));
+  } catch (error) {
+    if (aiWorkflowErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+router.post("/analyst/ai/drafts", async (req, res, next) => {
+  try {
+    const parsed = CreateAnalystAiDraftBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid AI research draft payload." });
+      return;
+    }
+    const draft = await createAiResearchDraft(parsed.data);
+    res.status(201).json(CreateAnalystAiDraftResponse.parse(draft));
+  } catch (error) {
+    if (aiWorkflowErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+router.post("/analyst/ai/drafts/:draftId/approve", async (req, res, next) => {
+  try {
+    if (!hasOperatorApprovalCapability(req, res)) return;
+    const params = ApproveAnalystAiDraftParams.safeParse(req.params);
+    const body = ApproveAnalystAiDraftBody.safeParse(req.body);
+    if (!params.success || !body.success) {
+      res.status(400).json({ error: "Invalid AI draft approval payload." });
+      return;
+    }
+    const result = await reviewAiResearchDraft(params.data.draftId, body.data, "APPROVED");
+    res.json(ApproveAnalystAiDraftResponse.parse(result));
+  } catch (error) {
+    if (aiWorkflowErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+router.post("/analyst/ai/drafts/:draftId/reject", async (req, res, next) => {
+  try {
+    if (!hasOperatorApprovalCapability(req, res)) return;
+    const params = RejectAnalystAiDraftParams.safeParse(req.params);
+    const body = RejectAnalystAiDraftBody.safeParse(req.body);
+    if (!params.success || !body.success) {
+      res.status(400).json({ error: "Invalid AI draft rejection payload." });
+      return;
+    }
+    const result = await reviewAiResearchDraft(params.data.draftId, body.data, "REJECTED");
+    res.json(RejectAnalystAiDraftResponse.parse(result));
+  } catch (error) {
+    if (aiWorkflowErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+router.get("/analyst/ai/sourcing-register", async (req, res, next) => {
+  try {
+    const parsed = GetAnalystAiSourcingRegisterQueryParams.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid sourcing-register filters." });
+      return;
+    }
+    const claims = await queryAiSourcingRegister(parsed.data);
+    res.json(GetAnalystAiSourcingRegisterResponse.parse({ claims, total: claims.length }));
+  } catch (error) {
+    if (aiWorkflowErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+router.patch("/analyst/ai/sourcing-register/:claimId", async (req, res, next) => {
+  try {
+    if (!hasOperatorApprovalCapability(req, res)) return;
+    const params = DecideAnalystAiSourcingClaimParams.safeParse(req.params);
+    const body = DecideAnalystAiSourcingClaimBody.safeParse(req.body);
+    if (!params.success || !body.success) {
+      res.status(400).json({ error: "Invalid sourcing-register decision." });
+      return;
+    }
+    const claim = await decideAiSourcingClaim(params.data.claimId, body.data);
+    res.json(DecideAnalystAiSourcingClaimResponse.parse(claim));
+  } catch (error) {
+    if (aiWorkflowErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+router.get("/analyst/ai/research-notes", async (req, res, next) => {
+  try {
+    const parsed = GetAnalystAiResearchNotesQueryParams.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid approved-note filters." });
+      return;
+    }
+    const notes = await queryResearchNotes(parsed.data);
+    res.json(GetAnalystAiResearchNotesResponse.parse({ notes, total: notes.length }));
+  } catch (error) {
+    if (aiWorkflowErrorResponse(error, res)) return;
     next(error);
   }
 });

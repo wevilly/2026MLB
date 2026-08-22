@@ -20,6 +20,16 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AiAnalystChatInput,
+  AiAnalystChatResult,
+  AiResearchDraft,
+  AiResearchDraftInput,
+  AiResearchDraftList,
+  AiResearchDraftReviewInput,
+  AiResearchDraftReviewResult,
+  AiSourcingClaim,
+  AiSourcingDecisionInput,
+  AiSourcingRegister,
   AiToolCallInput,
   AiToolCallResult,
   AiToolRegistry,
@@ -52,6 +62,9 @@ import type {
   FeatureStoreCorrectionResult,
   FeatureStoreResult,
   GameLab,
+  GetAnalystAiDraftsParams,
+  GetAnalystAiResearchNotesParams,
+  GetAnalystAiSourcingRegisterParams,
   GetAnalystBettorEvaluationParams,
   GetAnalystBettorPicksParams,
   GetAnalystBullpenRoomParams,
@@ -100,6 +113,7 @@ import type {
   ResearchIngestResult,
   ResearchIngestSource,
   ResearchLab,
+  ResearchNoteList,
   SettleOfficialGame400,
   SettlementList,
   TBEngineResult,
@@ -3692,6 +3706,617 @@ export const useCallAnalystAiTool = <TError = ErrorType<AiToolCallResult>,
       > => {
       return useMutation(getCallAnalystAiToolMutationOptions(options));
     }
+
+export const getChatWithAnalystAiUrl = () => {
+
+
+
+
+  return `/api/analyst/ai/chat`
+}
+
+/**
+ * The AI can only summarize the audited read-only tool result returned for this request.
+ * @summary Ask the AI Analyst a tool-grounded research question
+ */
+export const chatWithAnalystAi = async (aiAnalystChatInput: AiAnalystChatInput, options?: Parameters<typeof customFetch>[1]): Promise<AiAnalystChatResult> => {
+
+  return customFetch<AiAnalystChatResult>(getChatWithAnalystAiUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(aiAnalystChatInput)
+  }
+);}
+
+
+
+
+
+export const getChatWithAnalystAiMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof chatWithAnalystAi>>, TError,{data: BodyType<AiAnalystChatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof chatWithAnalystAi>>, TError,{data: BodyType<AiAnalystChatInput>}, TContext> => {
+
+const mutationKey = ['chatWithAnalystAi'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof chatWithAnalystAi>>, {data: BodyType<AiAnalystChatInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  chatWithAnalystAi(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ChatWithAnalystAiMutationResult = NonNullable<Awaited<ReturnType<typeof chatWithAnalystAi>>>
+    export type ChatWithAnalystAiMutationBody = BodyType<AiAnalystChatInput>
+    export type ChatWithAnalystAiMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Ask the AI Analyst a tool-grounded research question
+ */
+export const useChatWithAnalystAi = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof chatWithAnalystAi>>, TError,{data: BodyType<AiAnalystChatInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof chatWithAnalystAi>>,
+        TError,
+        {data: BodyType<AiAnalystChatInput>},
+        TContext
+      > => {
+      return useMutation(getChatWithAnalystAiMutationOptions(options));
+    }
+
+export const getGetAnalystAiDraftsUrl = (params?: GetAnalystAiDraftsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/ai/drafts?${stringifiedParams}` : `/api/analyst/ai/drafts`
+}
+
+/**
+ * @summary List AI research drafts awaiting or receiving review
+ */
+export const getAnalystAiDrafts = async (params?: GetAnalystAiDraftsParams, options?: Parameters<typeof customFetch>[1]): Promise<AiResearchDraftList> => {
+
+  return customFetch<AiResearchDraftList>(getGetAnalystAiDraftsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystAiDraftsQueryKey = (params?: GetAnalystAiDraftsParams,) => {
+    return [
+    `/api/analyst/ai/drafts`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystAiDraftsQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystAiDrafts>>, TError = ErrorType<unknown>>(params?: GetAnalystAiDraftsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiDrafts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystAiDraftsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystAiDrafts>>> = ({ signal }) => getAnalystAiDrafts(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiDrafts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystAiDraftsQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystAiDrafts>>>
+export type GetAnalystAiDraftsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List AI research drafts awaiting or receiving review
+ */
+
+export function useGetAnalystAiDrafts<TData = Awaited<ReturnType<typeof getAnalystAiDrafts>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystAiDraftsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiDrafts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystAiDraftsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateAnalystAiDraftUrl = () => {
+
+
+
+
+  return `/api/analyst/ai/drafts`
+}
+
+/**
+ * @summary Create an unapproved AI research draft
+ */
+export const createAnalystAiDraft = async (aiResearchDraftInput: AiResearchDraftInput, options?: Parameters<typeof customFetch>[1]): Promise<AiResearchDraft> => {
+
+  return customFetch<AiResearchDraft>(getCreateAnalystAiDraftUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(aiResearchDraftInput)
+  }
+);}
+
+
+
+
+
+export const getCreateAnalystAiDraftMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAnalystAiDraft>>, TError,{data: BodyType<AiResearchDraftInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAnalystAiDraft>>, TError,{data: BodyType<AiResearchDraftInput>}, TContext> => {
+
+const mutationKey = ['createAnalystAiDraft'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAnalystAiDraft>>, {data: BodyType<AiResearchDraftInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createAnalystAiDraft(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateAnalystAiDraftMutationResult = NonNullable<Awaited<ReturnType<typeof createAnalystAiDraft>>>
+    export type CreateAnalystAiDraftMutationBody = BodyType<AiResearchDraftInput>
+    export type CreateAnalystAiDraftMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Create an unapproved AI research draft
+ */
+export const useCreateAnalystAiDraft = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAnalystAiDraft>>, TError,{data: BodyType<AiResearchDraftInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createAnalystAiDraft>>,
+        TError,
+        {data: BodyType<AiResearchDraftInput>},
+        TContext
+      > => {
+      return useMutation(getCreateAnalystAiDraftMutationOptions(options));
+    }
+
+export const getApproveAnalystAiDraftUrl = (draftId: string,) => {
+
+
+
+
+  return `/api/analyst/ai/drafts/${draftId}/approve`
+}
+
+/**
+ * @summary Human-review and approve an AI research draft
+ */
+export const approveAnalystAiDraft = async (draftId: string,
+    aiResearchDraftReviewInput: AiResearchDraftReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<AiResearchDraftReviewResult> => {
+
+  return customFetch<AiResearchDraftReviewResult>(getApproveAnalystAiDraftUrl(draftId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(aiResearchDraftReviewInput)
+  }
+);}
+
+
+
+
+
+export const getApproveAnalystAiDraftMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveAnalystAiDraft>>, TError,{draftId: string;data: BodyType<AiResearchDraftReviewInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof approveAnalystAiDraft>>, TError,{draftId: string;data: BodyType<AiResearchDraftReviewInput>}, TContext> => {
+
+const mutationKey = ['approveAnalystAiDraft'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof approveAnalystAiDraft>>, {draftId: string;data: BodyType<AiResearchDraftReviewInput>}> = (props) => {
+          const {draftId,data} = props ?? {};
+
+          return  approveAnalystAiDraft(draftId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApproveAnalystAiDraftMutationResult = NonNullable<Awaited<ReturnType<typeof approveAnalystAiDraft>>>
+    export type ApproveAnalystAiDraftMutationBody = BodyType<AiResearchDraftReviewInput>
+    export type ApproveAnalystAiDraftMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Human-review and approve an AI research draft
+ */
+export const useApproveAnalystAiDraft = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof approveAnalystAiDraft>>, TError,{draftId: string;data: BodyType<AiResearchDraftReviewInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof approveAnalystAiDraft>>,
+        TError,
+        {draftId: string;data: BodyType<AiResearchDraftReviewInput>},
+        TContext
+      > => {
+      return useMutation(getApproveAnalystAiDraftMutationOptions(options));
+    }
+
+export const getRejectAnalystAiDraftUrl = (draftId: string,) => {
+
+
+
+
+  return `/api/analyst/ai/drafts/${draftId}/reject`
+}
+
+/**
+ * @summary Human-review and reject an AI research draft
+ */
+export const rejectAnalystAiDraft = async (draftId: string,
+    aiResearchDraftReviewInput: AiResearchDraftReviewInput, options?: Parameters<typeof customFetch>[1]): Promise<AiResearchDraftReviewResult> => {
+
+  return customFetch<AiResearchDraftReviewResult>(getRejectAnalystAiDraftUrl(draftId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(aiResearchDraftReviewInput)
+  }
+);}
+
+
+
+
+
+export const getRejectAnalystAiDraftMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectAnalystAiDraft>>, TError,{draftId: string;data: BodyType<AiResearchDraftReviewInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof rejectAnalystAiDraft>>, TError,{draftId: string;data: BodyType<AiResearchDraftReviewInput>}, TContext> => {
+
+const mutationKey = ['rejectAnalystAiDraft'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof rejectAnalystAiDraft>>, {draftId: string;data: BodyType<AiResearchDraftReviewInput>}> = (props) => {
+          const {draftId,data} = props ?? {};
+
+          return  rejectAnalystAiDraft(draftId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RejectAnalystAiDraftMutationResult = NonNullable<Awaited<ReturnType<typeof rejectAnalystAiDraft>>>
+    export type RejectAnalystAiDraftMutationBody = BodyType<AiResearchDraftReviewInput>
+    export type RejectAnalystAiDraftMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Human-review and reject an AI research draft
+ */
+export const useRejectAnalystAiDraft = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rejectAnalystAiDraft>>, TError,{draftId: string;data: BodyType<AiResearchDraftReviewInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof rejectAnalystAiDraft>>,
+        TError,
+        {draftId: string;data: BodyType<AiResearchDraftReviewInput>},
+        TContext
+      > => {
+      return useMutation(getRejectAnalystAiDraftMutationOptions(options));
+    }
+
+export const getGetAnalystAiSourcingRegisterUrl = (params?: GetAnalystAiSourcingRegisterParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/ai/sourcing-register?${stringifiedParams}` : `/api/analyst/ai/sourcing-register`
+}
+
+/**
+ * @summary List sourced AI claims and their operator decisions
+ */
+export const getAnalystAiSourcingRegister = async (params?: GetAnalystAiSourcingRegisterParams, options?: Parameters<typeof customFetch>[1]): Promise<AiSourcingRegister> => {
+
+  return customFetch<AiSourcingRegister>(getGetAnalystAiSourcingRegisterUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystAiSourcingRegisterQueryKey = (params?: GetAnalystAiSourcingRegisterParams,) => {
+    return [
+    `/api/analyst/ai/sourcing-register`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystAiSourcingRegisterQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystAiSourcingRegister>>, TError = ErrorType<unknown>>(params?: GetAnalystAiSourcingRegisterParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiSourcingRegister>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystAiSourcingRegisterQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystAiSourcingRegister>>> = ({ signal }) => getAnalystAiSourcingRegister(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiSourcingRegister>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystAiSourcingRegisterQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystAiSourcingRegister>>>
+export type GetAnalystAiSourcingRegisterQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List sourced AI claims and their operator decisions
+ */
+
+export function useGetAnalystAiSourcingRegister<TData = Awaited<ReturnType<typeof getAnalystAiSourcingRegister>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystAiSourcingRegisterParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiSourcingRegister>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystAiSourcingRegisterQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getDecideAnalystAiSourcingClaimUrl = (claimId: string,) => {
+
+
+
+
+  return `/api/analyst/ai/sourcing-register/${claimId}`
+}
+
+/**
+ * @summary Record a human decision for a sourced AI claim
+ */
+export const decideAnalystAiSourcingClaim = async (claimId: string,
+    aiSourcingDecisionInput: AiSourcingDecisionInput, options?: Parameters<typeof customFetch>[1]): Promise<AiSourcingClaim> => {
+
+  return customFetch<AiSourcingClaim>(getDecideAnalystAiSourcingClaimUrl(claimId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(aiSourcingDecisionInput)
+  }
+);}
+
+
+
+
+
+export const getDecideAnalystAiSourcingClaimMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof decideAnalystAiSourcingClaim>>, TError,{claimId: string;data: BodyType<AiSourcingDecisionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof decideAnalystAiSourcingClaim>>, TError,{claimId: string;data: BodyType<AiSourcingDecisionInput>}, TContext> => {
+
+const mutationKey = ['decideAnalystAiSourcingClaim'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof decideAnalystAiSourcingClaim>>, {claimId: string;data: BodyType<AiSourcingDecisionInput>}> = (props) => {
+          const {claimId,data} = props ?? {};
+
+          return  decideAnalystAiSourcingClaim(claimId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DecideAnalystAiSourcingClaimMutationResult = NonNullable<Awaited<ReturnType<typeof decideAnalystAiSourcingClaim>>>
+    export type DecideAnalystAiSourcingClaimMutationBody = BodyType<AiSourcingDecisionInput>
+    export type DecideAnalystAiSourcingClaimMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Record a human decision for a sourced AI claim
+ */
+export const useDecideAnalystAiSourcingClaim = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof decideAnalystAiSourcingClaim>>, TError,{claimId: string;data: BodyType<AiSourcingDecisionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof decideAnalystAiSourcingClaim>>,
+        TError,
+        {claimId: string;data: BodyType<AiSourcingDecisionInput>},
+        TContext
+      > => {
+      return useMutation(getDecideAnalystAiSourcingClaimMutationOptions(options));
+    }
+
+export const getGetAnalystAiResearchNotesUrl = (params?: GetAnalystAiResearchNotesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/ai/research-notes?${stringifiedParams}` : `/api/analyst/ai/research-notes`
+}
+
+/**
+ * @summary List human-approved AI-sourced research notes
+ */
+export const getAnalystAiResearchNotes = async (params?: GetAnalystAiResearchNotesParams, options?: Parameters<typeof customFetch>[1]): Promise<ResearchNoteList> => {
+
+  return customFetch<ResearchNoteList>(getGetAnalystAiResearchNotesUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystAiResearchNotesQueryKey = (params?: GetAnalystAiResearchNotesParams,) => {
+    return [
+    `/api/analyst/ai/research-notes`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystAiResearchNotesQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystAiResearchNotes>>, TError = ErrorType<unknown>>(params?: GetAnalystAiResearchNotesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiResearchNotes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystAiResearchNotesQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystAiResearchNotes>>> = ({ signal }) => getAnalystAiResearchNotes(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiResearchNotes>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystAiResearchNotesQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystAiResearchNotes>>>
+export type GetAnalystAiResearchNotesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List human-approved AI-sourced research notes
+ */
+
+export function useGetAnalystAiResearchNotes<TData = Awaited<ReturnType<typeof getAnalystAiResearchNotes>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystAiResearchNotesParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystAiResearchNotes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystAiResearchNotesQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetAnalystBullpenRoomUrl = (params?: GetAnalystBullpenRoomParams,) => {
   const normalizedParams = new URLSearchParams();

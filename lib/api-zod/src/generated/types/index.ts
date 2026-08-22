@@ -6,6 +6,23 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './aiAnalystChatInput';
+export * from './aiAnalystChatResult';
+export * from './aiAnalystChatResultToolStatus';
+export * from './aiChatHistoryMessage';
+export * from './aiChatHistoryMessageRole';
+export * from './aiResearchDraft';
+export * from './aiResearchDraftInput';
+export * from './aiResearchDraftInputMarket';
+export * from './aiResearchDraftList';
+export * from './aiResearchDraftMarket';
+export * from './aiResearchDraftReviewInput';
+export * from './aiResearchDraftReviewResult';
+export * from './aiResearchDraftStatus';
+export * from './aiSourcingClaim';
+export * from './aiSourcingClaimSourceType';
+export * from './aiSourcingDecisionInput';
+export * from './aiSourcingRegister';
 export * from './aiToolCallInput';
 export * from './aiToolCallInputParameters';
 export * from './aiToolCallResult';
@@ -100,6 +117,11 @@ export * from './featureStoreStats';
 export * from './featureStoreStatsOutcomesByMarket';
 export * from './featureStoreStatsSnapshotsByMarket';
 export * from './gameLab';
+export * from './getAnalystAiDraftsParams';
+export * from './getAnalystAiDraftsStatus';
+export * from './getAnalystAiResearchNotesParams';
+export * from './getAnalystAiSourcingRegisterAccepted';
+export * from './getAnalystAiSourcingRegisterParams';
 export * from './getAnalystBettorEvaluationMarket';
 export * from './getAnalystBettorEvaluationParams';
 export * from './getAnalystBettorPicksMarket';
@@ -194,6 +216,9 @@ export * from './researchLab';
 export * from './researchMetric';
 export * from './researchMetricStatus';
 export * from './researchMetricTransformation';
+export * from './researchNote';
+export * from './researchNoteList';
+export * from './researchNoteMarket';
 export * from './researchPanel';
 export * from './researchProfile';
 export * from './researchSearchResult';

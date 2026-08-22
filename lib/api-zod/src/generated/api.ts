@@ -1800,6 +1800,289 @@ export const CallAnalystAiToolResponse = zod.object({
 
 
 /**
+ * The AI can only summarize the audited read-only tool result returned for this request.
+ * @summary Ask the AI Analyst a tool-grounded research question
+ */
+export const chatWithAnalystAiBodySessionIdMax = 160;
+
+export const chatWithAnalystAiBodyMessageMax = 4000;
+
+export const chatWithAnalystAiBodyHistoryItemContentMax = 4000;
+
+export const chatWithAnalystAiBodyHistoryMax = 8;
+
+
+
+export const ChatWithAnalystAiBody = zod.object({
+  "sessionId": zod.string().min(1).max(chatWithAnalystAiBodySessionIdMax),
+  "message": zod.string().min(1).max(chatWithAnalystAiBodyMessageMax),
+  "history": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string().min(1).max(chatWithAnalystAiBodyHistoryItemContentMax)
+}).strict()).max(chatWithAnalystAiBodyHistoryMax).optional()
+}).strict()
+
+export const ChatWithAnalystAiResponse = zod.object({
+  "sessionId": zod.string(),
+  "message": zod.string(),
+  "response": zod.string(),
+  "toolName": zod.string(),
+  "toolCallId": zod.string().uuid(),
+  "toolStatus": zod.enum(['SUCCESS', 'REJECTED', 'ERROR']),
+  "sourcingClaimIds": zod.array(zod.string().uuid()),
+  "canCreateDraft": zod.boolean()
+})
+
+
+/**
+ * @summary List AI research drafts awaiting or receiving review
+ */
+export const getAnalystAiDraftsQuerySessionIdMax = 160;
+
+
+
+export const GetAnalystAiDraftsQueryParams = zod.object({
+  "sessionId": zod.coerce.string().max(getAnalystAiDraftsQuerySessionIdMax).optional(),
+  "status": zod.enum(['DRAFT', 'APPROVED', 'REJECTED', 'WITHDRAWN']).optional()
+})
+
+export const getAnalystAiDraftsResponseTotalMin = 0;
+
+
+
+export const GetAnalystAiDraftsResponse = zod.object({
+  "drafts": zod.array(zod.object({
+  "draftId": zod.string().uuid(),
+  "sessionId": zod.string(),
+  "playerId": zod.number().int().nullable(),
+  "market": zod.union([zod.literal('TOTAL_BASES_2_PLUS'),zod.literal('EXTRA_BASE_HIT'),zod.literal('BATTER_WALK'),zod.literal('HOME_RUN'),zod.literal(null)]).nullable(),
+  "draftContent": zod.string(),
+  "status": zod.enum(['DRAFT', 'APPROVED', 'REJECTED', 'WITHDRAWN']),
+  "sourceClaimIds": zod.array(zod.string().uuid()),
+  "createdAt": zod.coerce.date(),
+  "reviewedBy": zod.string().nullable(),
+  "reviewedAt": zod.coerce.date().nullable(),
+  "rejectionReason": zod.string().nullable()
+})),
+  "total": zod.number().int().min(getAnalystAiDraftsResponseTotalMin)
+})
+
+
+/**
+ * @summary Create an unapproved AI research draft
+ */
+export const createAnalystAiDraftBodySessionIdMax = 160;
+
+
+export const createAnalystAiDraftBodyDraftContentMax = 12000;
+
+export const createAnalystAiDraftBodySourceClaimIdsMax = 50;
+
+
+
+export const CreateAnalystAiDraftBody = zod.object({
+  "sessionId": zod.string().min(1).max(createAnalystAiDraftBodySessionIdMax),
+  "playerId": zod.number().int().min(1).optional(),
+  "market": zod.enum(['TOTAL_BASES_2_PLUS', 'EXTRA_BASE_HIT', 'BATTER_WALK', 'HOME_RUN']).optional(),
+  "draftContent": zod.string().min(1).max(createAnalystAiDraftBodyDraftContentMax),
+  "sourceClaimIds": zod.array(zod.string().uuid()).max(createAnalystAiDraftBodySourceClaimIdsMax).optional()
+}).strict()
+
+export const CreateAnalystAiDraftResponse = zod.object({
+  "draftId": zod.string().uuid(),
+  "sessionId": zod.string(),
+  "playerId": zod.number().int().nullable(),
+  "market": zod.union([zod.literal('TOTAL_BASES_2_PLUS'),zod.literal('EXTRA_BASE_HIT'),zod.literal('BATTER_WALK'),zod.literal('HOME_RUN'),zod.literal(null)]).nullable(),
+  "draftContent": zod.string(),
+  "status": zod.enum(['DRAFT', 'APPROVED', 'REJECTED', 'WITHDRAWN']),
+  "sourceClaimIds": zod.array(zod.string().uuid()),
+  "createdAt": zod.coerce.date(),
+  "reviewedBy": zod.string().nullable(),
+  "reviewedAt": zod.coerce.date().nullable(),
+  "rejectionReason": zod.string().nullable()
+})
+
+
+/**
+ * @summary Human-review and approve an AI research draft
+ */
+export const ApproveAnalystAiDraftParams = zod.object({
+  "draftId": zod.coerce.string().uuid()
+})
+
+export const approveAnalystAiDraftBodyReviewedByMax = 160;
+
+export const approveAnalystAiDraftBodyRejectionReasonMax = 2000;
+
+
+
+export const ApproveAnalystAiDraftBody = zod.object({
+  "reviewedBy": zod.string().min(1).max(approveAnalystAiDraftBodyReviewedByMax),
+  "rejectionReason": zod.string().min(1).max(approveAnalystAiDraftBodyRejectionReasonMax).optional()
+}).strict()
+
+export const ApproveAnalystAiDraftResponse = zod.object({
+  "draft": zod.object({
+  "draftId": zod.string().uuid(),
+  "sessionId": zod.string(),
+  "playerId": zod.number().int().nullable(),
+  "market": zod.union([zod.literal('TOTAL_BASES_2_PLUS'),zod.literal('EXTRA_BASE_HIT'),zod.literal('BATTER_WALK'),zod.literal('HOME_RUN'),zod.literal(null)]).nullable(),
+  "draftContent": zod.string(),
+  "status": zod.enum(['DRAFT', 'APPROVED', 'REJECTED', 'WITHDRAWN']),
+  "sourceClaimIds": zod.array(zod.string().uuid()),
+  "createdAt": zod.coerce.date(),
+  "reviewedBy": zod.string().nullable(),
+  "reviewedAt": zod.coerce.date().nullable(),
+  "rejectionReason": zod.string().nullable()
+}),
+  "noteId": zod.string().uuid().nullable()
+})
+
+
+/**
+ * @summary Human-review and reject an AI research draft
+ */
+export const RejectAnalystAiDraftParams = zod.object({
+  "draftId": zod.coerce.string().uuid()
+})
+
+export const rejectAnalystAiDraftBodyReviewedByMax = 160;
+
+export const rejectAnalystAiDraftBodyRejectionReasonMax = 2000;
+
+
+
+export const RejectAnalystAiDraftBody = zod.object({
+  "reviewedBy": zod.string().min(1).max(rejectAnalystAiDraftBodyReviewedByMax),
+  "rejectionReason": zod.string().min(1).max(rejectAnalystAiDraftBodyRejectionReasonMax).optional()
+}).strict()
+
+export const RejectAnalystAiDraftResponse = zod.object({
+  "draft": zod.object({
+  "draftId": zod.string().uuid(),
+  "sessionId": zod.string(),
+  "playerId": zod.number().int().nullable(),
+  "market": zod.union([zod.literal('TOTAL_BASES_2_PLUS'),zod.literal('EXTRA_BASE_HIT'),zod.literal('BATTER_WALK'),zod.literal('HOME_RUN'),zod.literal(null)]).nullable(),
+  "draftContent": zod.string(),
+  "status": zod.enum(['DRAFT', 'APPROVED', 'REJECTED', 'WITHDRAWN']),
+  "sourceClaimIds": zod.array(zod.string().uuid()),
+  "createdAt": zod.coerce.date(),
+  "reviewedBy": zod.string().nullable(),
+  "reviewedAt": zod.coerce.date().nullable(),
+  "rejectionReason": zod.string().nullable()
+}),
+  "noteId": zod.string().uuid().nullable()
+})
+
+
+/**
+ * @summary List sourced AI claims and their operator decisions
+ */
+export const getAnalystAiSourcingRegisterQuerySessionIdMax = 160;
+
+
+
+export const GetAnalystAiSourcingRegisterQueryParams = zod.object({
+  "sessionId": zod.coerce.string().max(getAnalystAiSourcingRegisterQuerySessionIdMax).optional(),
+  "accepted": zod.enum(['true', 'false', 'pending']).optional()
+})
+
+export const getAnalystAiSourcingRegisterResponseTotalMin = 0;
+
+
+
+export const GetAnalystAiSourcingRegisterResponse = zod.object({
+  "claims": zod.array(zod.object({
+  "claimId": zod.string().uuid(),
+  "sessionId": zod.string(),
+  "toolCallId": zod.string().uuid().nullable(),
+  "claimText": zod.string(),
+  "sourceUrlOrDescription": zod.string(),
+  "sourceType": zod.enum(['WEB', 'INTERNAL_RESEARCH', 'BETTOR_PICK']),
+  "accepted": zod.boolean().nullable(),
+  "rejectionReason": zod.string().nullable(),
+  "operatorNote": zod.string().nullable(),
+  "reviewedBy": zod.string().nullable(),
+  "reviewedAt": zod.coerce.date().nullable(),
+  "createdAt": zod.coerce.date()
+})),
+  "total": zod.number().int().min(getAnalystAiSourcingRegisterResponseTotalMin)
+})
+
+
+/**
+ * @summary Record a human decision for a sourced AI claim
+ */
+export const DecideAnalystAiSourcingClaimParams = zod.object({
+  "claimId": zod.coerce.string().uuid()
+})
+
+export const decideAnalystAiSourcingClaimBodyReviewedByMax = 160;
+
+export const decideAnalystAiSourcingClaimBodyRejectionReasonMax = 2000;
+
+export const decideAnalystAiSourcingClaimBodyOperatorNoteMax = 2000;
+
+
+
+export const DecideAnalystAiSourcingClaimBody = zod.object({
+  "accepted": zod.boolean(),
+  "reviewedBy": zod.string().min(1).max(decideAnalystAiSourcingClaimBodyReviewedByMax),
+  "rejectionReason": zod.string().min(1).max(decideAnalystAiSourcingClaimBodyRejectionReasonMax).optional(),
+  "operatorNote": zod.string().min(1).max(decideAnalystAiSourcingClaimBodyOperatorNoteMax).optional()
+}).strict()
+
+export const DecideAnalystAiSourcingClaimResponse = zod.object({
+  "claimId": zod.string().uuid(),
+  "sessionId": zod.string(),
+  "toolCallId": zod.string().uuid().nullable(),
+  "claimText": zod.string(),
+  "sourceUrlOrDescription": zod.string(),
+  "sourceType": zod.enum(['WEB', 'INTERNAL_RESEARCH', 'BETTOR_PICK']),
+  "accepted": zod.boolean().nullable(),
+  "rejectionReason": zod.string().nullable(),
+  "operatorNote": zod.string().nullable(),
+  "reviewedBy": zod.string().nullable(),
+  "reviewedAt": zod.coerce.date().nullable(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary List human-approved AI-sourced research notes
+ */
+export const getAnalystAiResearchNotesQuerySessionIdMax = 160;
+
+
+
+export const GetAnalystAiResearchNotesQueryParams = zod.object({
+  "sessionId": zod.coerce.string().max(getAnalystAiResearchNotesQuerySessionIdMax).optional(),
+  "playerId": zod.coerce.number().int().optional()
+})
+
+export const getAnalystAiResearchNotesResponseTotalMin = 0;
+
+
+
+export const GetAnalystAiResearchNotesResponse = zod.object({
+  "notes": zod.array(zod.object({
+  "noteId": zod.string().uuid(),
+  "draftId": zod.string().uuid(),
+  "sessionId": zod.string(),
+  "playerId": zod.number().int().nullable(),
+  "market": zod.union([zod.literal('TOTAL_BASES_2_PLUS'),zod.literal('EXTRA_BASE_HIT'),zod.literal('BATTER_WALK'),zod.literal('HOME_RUN'),zod.literal(null)]).nullable(),
+  "noteContent": zod.string(),
+  "sourceType": zod.string(),
+  "sourceClaimIds": zod.array(zod.string().uuid()),
+  "approvedBy": zod.string(),
+  "approvedAt": zod.coerce.date(),
+  "createdAt": zod.coerce.date()
+})),
+  "total": zod.number().int().min(getAnalystAiResearchNotesResponseTotalMin)
+})
+
+
+/**
  * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage for all 30 teams
  */
 export const GetAnalystBullpenRoomQueryParams = zod.object({
