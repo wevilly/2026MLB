@@ -28,9 +28,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
-// Use the pg module from the pnpm store (transitive dependency of @workspace/db).
-const { Pool } = require("../node_modules/.pnpm/pg@8.22.0/node_modules/pg/lib/index.js");
+const dbRequire = createRequire(new URL("../lib/db/package.json", import.meta.url));
+const { Pool } = dbRequire("pg");
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL must be set — provision a Replit database or export the variable before running.");

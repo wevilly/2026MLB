@@ -18,8 +18,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
-const { Pool } = require("../node_modules/.pnpm/pg@8.22.0/node_modules/pg/lib/index.js");
+const dbRequire = createRequire(new URL("../lib/db/package.json", import.meta.url));
+const { Pool } = dbRequire("pg");
 
 if (!process.env.DATABASE_URL) {
   console.error("DATABASE_URL must be set.");
@@ -193,8 +193,8 @@ async function run() {
   const ts = new Date().toISOString();
   const report = `# Phase 2A Acceptance Report
 
-Generated: ${ts}  
-Effective date: ${date} (max MLB_OFFICIAL eligibility date)  
+Generated: ${ts}
+Effective date: ${date} (max MLB_OFFICIAL eligibility date)
 Season: ${season}
 
 ## Overall verdict: ${overallReady ? "✅ READY" : "❌ BLOCKED"}

@@ -28,7 +28,8 @@
     "test:all": "node --test tests/data-foundation.test.mjs tests/phase-2a-acceptance.test.mjs tests/phase-2b-acceptance.test.mjs tests/phase-3-acceptance.test.mjs tests/phase-3a-acceptance.test.mjs tests/phase-3b-acceptance.test.mjs tests/phase-3c-acceptance.test.mjs tests/phase-3d-acceptance.test.mjs tests/phase-4a-acceptance.test.mjs tests/phase-4b-acceptance.test.mjs tests/phase-5a-acceptance.test.mjs tests/phase-5b-acceptance.test.mjs tests/phase-6-acceptance.test.mjs tests/phase-7a-acceptance.test.mjs tests/phase-7b-acceptance.test.mjs tests/phase-8a-acceptance.test.mjs tests/phase-8b-acceptance.test.mjs tests/phase-9-10-acceptance.test.mjs tests/phase-10-hardening.test.mjs",
     "report:phase-2a": "node scripts/phase-2a-acceptance-report.mjs",
     "test:load": "node scripts/load-test.mjs",
-    "verify:restore-drill": "node lib/db/scripts/verify-restore-drill.mjs"
+    "verify:restore-drill": "node lib/db/scripts/verify-restore-drill.mjs",
+    "accept:live": "node scripts/final-acceptance.mjs"
   },
   "private": true,
   "dependencies": {
