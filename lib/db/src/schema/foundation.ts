@@ -25,6 +25,19 @@ export const ingestStatusEnum = pgEnum("ingest_status", [
   "FAILED",
 ]);
 
+export const orchestrationTriggerEnum = pgEnum("orchestration_trigger", [
+  "SCHEDULED",
+  "OPERATOR",
+]);
+
+export const orchestrationStatusEnum = pgEnum("orchestration_status", [
+  "RUNNING",
+  "COMPLETE",
+  "PARTIAL",
+  "FAILED",
+  "CANCELLED",
+]);
+
 export const sourceTypeEnum = pgEnum("source_type", [
   "OFFICIAL",
   "PROJECTION",
@@ -266,6 +279,43 @@ export const ingestRuns = pgTable("ingest_runs", {
   errorMessage: text("error_message"),
   metadata: jsonb("metadata").notNull().default({}),
 });
+
+/**
+ * The orchestration record is the operational ledger for a daily slate. Steps
+ * are deliberately retained as JSON so a failed or interrupted run keeps its
+ * exact timeline without mutating the individual source-run records.
+ */
+export const orchestrationRuns = pgTable("orchestration_runs", {
+  runId: uuid("run_id").primaryKey().defaultRandom(),
+  runDate: date("run_date").notNull(),
+  triggeredBy: orchestrationTriggerEnum("triggered_by").notNull(),
+  overallStatus: orchestrationStatusEnum("overall_status").notNull().default("RUNNING"),
+  steps: jsonb("steps").notNull().default([]),
+  schedule: jsonb("schedule").notNull().default({}),
+  frozenAt: timestamp("frozen_at", { withTimezone: true }),
+  cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+}, (table) => ({
+  runDateIdx: index("orchestration_runs_run_date_idx").on(table.runDate, table.createdAt),
+  activeRunIdx: index("orchestration_runs_active_idx").on(table.overallStatus, table.createdAt),
+}));
+
+/** Append-only, user-facing audit events for operational actions. */
+export const auditEvents = pgTable("audit_events", {
+  auditEventId: uuid("audit_event_id").primaryKey().defaultRandom(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+  actor: text("actor").notNull(),
+  requestId: text("request_id"),
+  action: text("action").notNull(),
+  resourceType: text("resource_type").notNull(),
+  resourceId: text("resource_id"),
+  metadata: jsonb("metadata").notNull().default({}),
+}, (table) => ({
+  occurredAtIdx: index("audit_events_occurred_at_idx").on(table.occurredAt),
+  resourceIdx: index("audit_events_resource_idx").on(table.resourceType, table.resourceId),
+}));
 
 export const ingestIssues = pgTable("ingest_issues", {
   issueId: uuid("issue_id").primaryKey().defaultRandom(),

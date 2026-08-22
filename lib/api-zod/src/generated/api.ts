@@ -167,6 +167,170 @@ export const GetAnalystDataHealthResponse = zod.object({
 
 
 /**
+ * @summary List daily orchestration runs
+ */
+export const GetAnalystOrchestrationRunsQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
+export const GetAnalystOrchestrationRunsResponse = zod.object({
+  "runs": zod.array(zod.object({
+  "runId": zod.string().uuid(),
+  "runDate": zod.coerce.date(),
+  "triggeredBy": zod.enum(['SCHEDULED', 'OPERATOR']),
+  "overallStatus": zod.enum(['RUNNING', 'COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED']),
+  "steps": zod.array(zod.object({
+  "name": zod.string(),
+  "status": zod.enum(['PENDING', 'RUNNING', 'SUCCESS', 'WARNING', 'FAILED', 'CANCELLED']),
+  "startedAt": zod.coerce.date().nullable(),
+  "finishedAt": zod.coerce.date().nullable(),
+  "detail": zod.string().nullable()
+})),
+  "schedule": zod.record(zod.string(), zod.unknown()),
+  "frozenAt": zod.coerce.date().nullable(),
+  "cancelRequestedAt": zod.coerce.date().nullable(),
+  "errorMessage": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "finishedAt": zod.coerce.date().nullable()
+})),
+  "total": zod.number().int(),
+  "schedulePolicy": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
+ * @summary Start a manual daily orchestration run
+ */
+export const StartAnalystOrchestrationRunQueryParams = zod.object({
+  "date": zod.date()
+})
+
+export const StartAnalystOrchestrationRunResponse = zod.object({
+  "runId": zod.string().uuid(),
+  "runDate": zod.coerce.date(),
+  "triggeredBy": zod.enum(['SCHEDULED', 'OPERATOR']),
+  "overallStatus": zod.enum(['RUNNING', 'COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED']),
+  "steps": zod.array(zod.object({
+  "name": zod.string(),
+  "status": zod.enum(['PENDING', 'RUNNING', 'SUCCESS', 'WARNING', 'FAILED', 'CANCELLED']),
+  "startedAt": zod.coerce.date().nullable(),
+  "finishedAt": zod.coerce.date().nullable(),
+  "detail": zod.string().nullable()
+})),
+  "schedule": zod.record(zod.string(), zod.unknown()),
+  "frozenAt": zod.coerce.date().nullable(),
+  "cancelRequestedAt": zod.coerce.date().nullable(),
+  "errorMessage": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "finishedAt": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Request safe interruption of an active run
+ */
+export const InterruptAnalystOrchestrationRunParams = zod.object({
+  "runId": zod.coerce.string().uuid()
+})
+
+export const InterruptAnalystOrchestrationRunResponse = zod.object({
+  "runId": zod.string().uuid(),
+  "runDate": zod.coerce.date(),
+  "triggeredBy": zod.enum(['SCHEDULED', 'OPERATOR']),
+  "overallStatus": zod.enum(['RUNNING', 'COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED']),
+  "steps": zod.array(zod.object({
+  "name": zod.string(),
+  "status": zod.enum(['PENDING', 'RUNNING', 'SUCCESS', 'WARNING', 'FAILED', 'CANCELLED']),
+  "startedAt": zod.coerce.date().nullable(),
+  "finishedAt": zod.coerce.date().nullable(),
+  "detail": zod.string().nullable()
+})),
+  "schedule": zod.record(zod.string(), zod.unknown()),
+  "frozenAt": zod.coerce.date().nullable(),
+  "cancelRequestedAt": zod.coerce.date().nullable(),
+  "errorMessage": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "finishedAt": zod.coerce.date().nullable()
+})
+
+
+/**
+ * @summary Record post-freeze lineup scratches as immutable corrections
+ */
+export const DetectAnalystLateScratchesQueryParams = zod.object({
+  "date": zod.date()
+})
+
+export const DetectAnalystLateScratchesResponse = zod.object({
+  "slateDate": zod.coerce.date(),
+  "corrections": zod.number().int(),
+  "targetedRerun": zod.boolean()
+})
+
+
+/**
+ * @summary Settle a completed slate and create missing postmortems
+ */
+export const AutomateAnalystSettlementQueryParams = zod.object({
+  "date": zod.date()
+})
+
+export const AutomateAnalystSettlementResponse = zod.record(zod.string(), zod.unknown())
+
+
+/**
+ * @summary Export platform state as slate JSON
+ */
+export const ExportAnalystSlateJsonQueryParams = zod.object({
+  "date": zod.date()
+})
+
+export const ExportAnalystSlateJsonResponse = zod.object({
+  "formatVersion": zod.string(),
+  "officialRecord": zod.string(),
+  "exportedAt": zod.coerce.date(),
+  "slateDate": zod.coerce.date(),
+  "games": zod.array(zod.record(zod.string(), zod.unknown())),
+  "marketBoard": zod.array(zod.record(zod.string(), zod.unknown())),
+  "researchStates": zod.array(zod.record(zod.string(), zod.unknown()))
+})
+
+
+/**
+ * @summary Export the compatibility workbook
+ */
+export const ExportAnalystWorkbookQueryParams = zod.object({
+  "date": zod.date()
+})
+
+export const ExportAnalystWorkbookResponse = zod.unknown()
+
+
+/**
+ * @summary List append-only operational audit events
+ */
+export const getAnalystAuditEventsQueryLimitMax = 500;
+
+
+
+export const GetAnalystAuditEventsQueryParams = zod.object({
+  "limit": zod.coerce.number().int().min(1).max(getAnalystAuditEventsQueryLimitMax).optional()
+})
+
+export const GetAnalystAuditEventsResponse = zod.object({
+  "events": zod.array(zod.object({
+  "auditEventId": zod.string().uuid(),
+  "occurredAt": zod.coerce.date(),
+  "actor": zod.string(),
+  "action": zod.string(),
+  "resourceType": zod.string(),
+  "resourceId": zod.string().nullable()
+})),
+  "total": zod.number().int()
+})
+
+
+/**
  * @summary Get safe connection and preference metadata
  */
 export const GetAnalystSettingsResponse = zod.object({

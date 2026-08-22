@@ -220,6 +220,7 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
        ) pfs ON true
       WHERE mrc.slate_date = $1
         AND ($2::market_type IS NULL OR mrc.market = $2::market_type)
+        AND mrc.research_state <> 'BLOCKED'
       ORDER BY mrc.market, mrc.research_rank ASC NULLS LAST, mrc.player_id`,
     [slateDate, dbMarket],
     );

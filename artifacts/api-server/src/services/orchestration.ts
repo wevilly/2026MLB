@@ -1,0 +1,408 @@
+import { pool } from "@workspace/db";
+import { logger } from "../lib/logger";
+import { ingestFantasyPros, ingestMlbOfficial } from "./data-foundation";
+import { ingestResearch, researchHealth } from "./research-foundation";
+import { refreshBullpen } from "./bullpen-foundation";
+import { runTBEngine } from "./tb-engine";
+import { runXBHEngine } from "./xbh-engine";
+import { runWALKEngine } from "./walk-engine";
+import { runHREngine } from "./hr-engine";
+import { captureSlateSnapshots, correctSnapshot } from "./feature-store";
+import { populateDailyMarketBoard } from "./daily-market-board";
+import { recordAuditEvent } from "./audit";
+import { createMarketPostmortem, settleOfficialDate } from "./settlement";
+import { invalidateCache } from "./cache";
+
+export type OrchestrationTrigger = "SCHEDULED" | "OPERATOR";
+export type RunStepStatus = "PENDING" | "RUNNING" | "SUCCESS" | "WARNING" | "FAILED" | "CANCELLED";
+export type RunStep = {
+  name: string;
+  status: RunStepStatus;
+  startedAt: string | null;
+  finishedAt: string | null;
+  detail: string | null;
+};
+
+const STEP_NAMES = [
+  "mlb_ingest", "fantasypros_ingest", "research_refresh", "bullpen_refresh",
+  "tb_engine", "xbh_engine", "walk_engine", "hr_engine", "market_board",
+  "health_check", "feature_snapshot_freeze",
+] as const;
+
+const activeRuns = new Set<string>();
+let schedulerStarted = false;
+let lastScheduledDate: string | null = null;
+
+function dateOnly(value: unknown) {
+  const text = String(value ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error("date must use YYYY-MM-DD");
+  return text;
+}
+
+function initialSteps(): RunStep[] {
+  return STEP_NAMES.map((name) => ({ name, status: "PENDING", startedAt: null, finishedAt: null, detail: null }));
+}
+
+function markPendingSkipped(steps: RunStep[], detail: string) {
+  const now = new Date().toISOString();
+  for (const step of steps) {
+    if (step.status === "PENDING") {
+      step.status = "CANCELLED";
+      step.finishedAt = now;
+      step.detail = detail;
+    }
+  }
+}
+
+function scheduleFor(slateDate: string, earliestStart: string | null) {
+  const cutoff = earliestStart ? new Date(new Date(earliestStart).getTime() - 90 * 60_000).toISOString() : null;
+  return {
+    timezone: "America/New_York",
+    morningRefreshLocal: "08:00",
+    snapshotFreezePolicy: "90_MINUTES_BEFORE_EARLIEST_FIRST_PITCH",
+    earliestFirstPitchUtc: earliestStart,
+    calculatedFreezeUtc: cutoff,
+    slateDate,
+  };
+}
+
+async function earliestStart(slateDate: string) {
+  const result = await pool.query<{ start_time_utc: string | null }>(
+    `SELECT start_time_utc::text FROM games WHERE game_date = $1
+     ORDER BY start_time_utc NULLS LAST LIMIT 1`,
+    [slateDate],
+  );
+  return result.rows[0]?.start_time_utc ?? null;
+}
+
+async function persistSteps(runId: string, steps: RunStep[]) {
+  await pool.query(`UPDATE orchestration_runs SET steps = $2::jsonb WHERE run_id = $1`, [runId, JSON.stringify(steps)]);
+}
+
+async function cancellationRequested(runId: string) {
+  const result = await pool.query<{ cancel_requested_at: string | null }>(
+    `SELECT cancel_requested_at::text FROM orchestration_runs WHERE run_id = $1`,
+    [runId],
+  );
+  return Boolean(result.rows[0]?.cancel_requested_at);
+}
+
+async function runRequiredStep(runId: string, slateDate: string, steps: RunStep[], name: string, action: () => Promise<unknown>) {
+  const ran = await runStep(runId, steps, name, action);
+  if (!ran) {
+    markPendingSkipped(steps, "Skipped because the run was interrupted");
+    await finaliseRun(runId, slateDate, steps, "CANCELLED");
+    return false;
+  }
+  if (failed(steps)) {
+    markPendingSkipped(steps, "Skipped because a required step failed");
+    await finaliseRun(runId, slateDate, steps, "FAILED");
+    return false;
+  }
+  return true;
+}
+
+function responseDetail(value: unknown) {
+  if (value && typeof value === "object" && "error" in value && (value as { error?: unknown }).error) {
+    throw new Error(String((value as { error: unknown }).error));
+  }
+  return "completed";
+}
+
+async function runStep(runId: string, steps: RunStep[], name: string, action: () => Promise<unknown>, warning = false) {
+  const step = steps.find((candidate) => candidate.name === name)!;
+  if (await cancellationRequested(runId)) {
+    step.status = "CANCELLED";
+    step.finishedAt = new Date().toISOString();
+    step.detail = "Interrupted by operator";
+    await persistSteps(runId, steps);
+    return false;
+  }
+  step.status = "RUNNING";
+  step.startedAt = new Date().toISOString();
+  await persistSteps(runId, steps);
+  try {
+    const result = await action();
+    step.status = warning ? "WARNING" : "SUCCESS";
+    step.detail = warning ? String(result) : responseDetail(result);
+  } catch (error) {
+    step.status = "FAILED";
+    step.detail = error instanceof Error ? error.message : String(error);
+  }
+  step.finishedAt = new Date().toISOString();
+  await persistSteps(runId, steps);
+  return true;
+}
+
+function failed(steps: RunStep[]) {
+  return steps.some((step) => step.status === "FAILED");
+}
+
+async function finaliseRun(runId: string, slateDate: string, steps: RunStep[], status: "PARTIAL" | "FAILED" | "CANCELLED") {
+  await persistSteps(runId, steps);
+  await pool.query(
+    `UPDATE orchestration_runs SET overall_status = $2::orchestration_status, finished_at = now(),
+       error_message = $3 WHERE run_id = $1`,
+    [runId, status, steps.filter((step) => step.status === "FAILED").map((step) => `${step.name}: ${step.detail}`).join("; ") || null],
+  );
+  await recordAuditEvent({ action: `orchestration.${status.toLowerCase()}`, resourceType: "orchestration_run", resourceId: runId, metadata: { slateDate } });
+}
+
+async function executeRun(runId: string, slateDate: string) {
+  activeRuns.add(runId);
+  const steps = initialSteps();
+  try {
+    if (!await runRequiredStep(runId, slateDate, steps, "mlb_ingest", () => ingestMlbOfficial(slateDate))) return;
+    const postIngestStart = await earliestStart(slateDate);
+    await pool.query(`UPDATE orchestration_runs SET schedule = schedule || $2::jsonb WHERE run_id = $1`, [runId, JSON.stringify(scheduleFor(slateDate, postIngestStart))]);
+    if (!await runRequiredStep(runId, slateDate, steps, "fantasypros_ingest", () => ingestFantasyPros(slateDate))) return;
+    if (!await runRequiredStep(runId, slateDate, steps, "research_refresh", () => ingestResearch(slateDate))) return;
+    if (!await runRequiredStep(runId, slateDate, steps, "bullpen_refresh", () => refreshBullpen(slateDate))) return;
+    if (!await runRequiredStep(runId, slateDate, steps, "tb_engine", () => runTBEngine(slateDate))) return;
+    if (!await runRequiredStep(runId, slateDate, steps, "xbh_engine", () => runXBHEngine(slateDate))) return;
+    if (!await runRequiredStep(runId, slateDate, steps, "walk_engine", () => runWALKEngine(slateDate))) return;
+    if (!await runRequiredStep(runId, slateDate, steps, "hr_engine", () => runHREngine(slateDate))) return;
+    if (!await runRequiredStep(runId, slateDate, steps, "market_board", () => populateDailyMarketBoard(slateDate))) return;
+    if (await cancellationRequested(runId)) {
+      markPendingSkipped(steps, "Skipped because the run was interrupted");
+      await finaliseRun(runId, slateDate, steps, "CANCELLED");
+      return;
+    }
+    const healthStep = steps.find((step) => step.name === "health_check")!;
+    healthStep.status = "RUNNING";
+    healthStep.startedAt = new Date().toISOString();
+    await persistSteps(runId, steps);
+    try {
+      const health = await researchHealth();
+      const issues = Number(health.identityQuarantines ?? 0) + Number(health.metricDefinitionConflicts ?? 0)
+        + Number(health.staleWindows ?? 0) + Number(health.identityOrEligibilityGaps ?? 0);
+      healthStep.status = issues ? "WARNING" : "SUCCESS";
+      healthStep.detail = issues ? `${issues} research or identity health warning(s)` : "freshness and identity coverage passed";
+    } catch (error) {
+      healthStep.status = "FAILED";
+      healthStep.detail = error instanceof Error ? error.message : String(error);
+    }
+    healthStep.finishedAt = new Date().toISOString();
+    await persistSteps(runId, steps);
+    if (healthStep.status !== "SUCCESS") { markPendingSkipped(steps, "Freeze blocked by health gate"); await finaliseRun(runId, slateDate, steps, "PARTIAL"); return; }
+    const run = await queryOrchestrationRun(runId);
+    const cutoff = typeof run.schedule.calculatedFreezeUtc === "string" ? Date.parse(run.schedule.calculatedFreezeUtc) : NaN;
+    if (!Number.isFinite(cutoff) || Date.now() < cutoff) {
+      const freeze = steps.find((step) => step.name === "feature_snapshot_freeze")!;
+      freeze.detail = Number.isFinite(cutoff) ? `Queued for ${new Date(cutoff).toISOString()}` : "No first-pitch time available; freeze cannot be scheduled.";
+      if (!Number.isFinite(cutoff)) { freeze.status = "FAILED"; await finaliseRun(runId, slateDate, steps, "PARTIAL"); return; }
+      await persistSteps(runId, steps);
+      await recordAuditEvent({ action: "orchestration.freeze_queued", resourceType: "orchestration_run", resourceId: runId, metadata: { slateDate, cutoff: new Date(cutoff).toISOString() } });
+      return;
+    }
+    await executeDueFreeze(runId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error({ err: error, runId, slateDate }, "daily orchestration failed unexpectedly");
+    await pool.query(
+      `UPDATE orchestration_runs SET overall_status = 'FAILED', finished_at = now(), error_message = $2 WHERE run_id = $1`,
+      [runId, message],
+    );
+  } finally {
+    invalidateCache("");
+    activeRuns.delete(runId);
+  }
+}
+
+async function executeDueFreeze(runId: string) {
+  const client = await pool.connect();
+  try {
+    const locked = await client.query<{ locked: boolean }>(`SELECT pg_try_advisory_lock(hashtext($1)) AS locked`, [`orchestration-freeze:${runId}`]);
+    if (!locked.rows[0]?.locked) return;
+    const run = await queryOrchestrationRun(runId);
+    if (run.cancelRequestedAt) {
+      markPendingSkipped(run.steps, "Skipped because the run was interrupted");
+      await finaliseRun(runId, run.runDate, run.steps, "CANCELLED");
+      return;
+    }
+    const freeze = run.steps.find((step) => step.name === "feature_snapshot_freeze");
+    if (!freeze || freeze.status !== "PENDING" || run.steps.some((step) => ["FAILED", "WARNING", "CANCELLED"].includes(step.status))) return;
+    await runStep(runId, run.steps, "feature_snapshot_freeze", async () => {
+      const capture = await captureSlateSnapshots(run.runDate);
+      if (capture.error || capture.snapshotErrors > 0) {
+        throw new Error(capture.error ?? `${capture.snapshotErrors} snapshot capture error(s) prevented freeze`);
+      }
+      if (capture.candidatesFound > 0 && capture.snapshotsWritten + capture.snapshotsSkipped < capture.candidatesFound) {
+        throw new Error("Feature snapshot capture was incomplete; freeze was not recorded");
+      }
+      return capture;
+    });
+    if (await cancellationRequested(runId)) {
+      markPendingSkipped(run.steps, "Skipped because the run was interrupted");
+      const completedFreeze = run.steps.find((step) => step.name === "feature_snapshot_freeze");
+      if (completedFreeze?.status === "SUCCESS") {
+        completedFreeze.status = "CANCELLED";
+        completedFreeze.detail = "Snapshot capture completed after interruption; freeze was not recorded";
+      }
+      await finaliseRun(runId, run.runDate, run.steps, "CANCELLED");
+      return;
+    }
+    const step = run.steps.find((item) => item.name === "feature_snapshot_freeze")!;
+    const status = step.status === "SUCCESS" ? "COMPLETE" : "PARTIAL";
+    await pool.query(`UPDATE orchestration_runs SET overall_status = $2::orchestration_status, frozen_at = CASE WHEN $2 = 'COMPLETE' THEN now() ELSE NULL END, finished_at = now(), error_message = $3 WHERE run_id = $1`, [runId, status, step.detail]);
+    await recordAuditEvent({ action: `orchestration.${status.toLowerCase()}`, resourceType: "orchestration_run", resourceId: runId, metadata: { slateDate: run.runDate } });
+  } finally {
+    await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [`orchestration-freeze:${runId}`]).catch(() => undefined);
+    client.release();
+  }
+}
+
+export async function launchOrchestrationRun(rawDate: unknown, triggeredBy: OrchestrationTrigger = "OPERATOR") {
+  const runDate = dateOnly(rawDate);
+  const insert = (client: { query: <T>(text: string, values?: unknown[]) => Promise<{ rows: T[] }> }) => client.query<{ run_id: string }>(
+    `INSERT INTO orchestration_runs (run_date, triggered_by, overall_status, steps, schedule)
+     VALUES ($1, $2::orchestration_trigger, 'RUNNING', $3::jsonb, $4::jsonb)
+     RETURNING run_id`,
+    [runDate, triggeredBy, JSON.stringify(initialSteps()), JSON.stringify(scheduleFor(runDate, start))],
+  );
+  const start = await earliestStart(runDate);
+  let result: { rows: { run_id: string }[] };
+  if (triggeredBy === "SCHEDULED") {
+    const client = await pool.connect();
+    try {
+      const lock = await client.query<{ locked: boolean }>(`SELECT pg_try_advisory_lock(hashtext($1)) AS locked`, [`orchestration-scheduled:${runDate}`]);
+      if (!lock.rows[0]?.locked) throw new Error(`Scheduled orchestration launch is already being claimed for ${runDate}`);
+      const existing = await client.query<{ run_id: string }>(
+        `SELECT run_id FROM orchestration_runs WHERE run_date = $1 AND triggered_by = 'SCHEDULED' ORDER BY created_at DESC LIMIT 1`,
+        [runDate],
+      );
+      if (existing.rows[0]) return queryOrchestrationRun(existing.rows[0].run_id);
+      result = await insert(client);
+      await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [`orchestration-scheduled:${runDate}`]);
+    } finally {
+      client.release();
+    }
+  } else {
+    result = await insert(pool);
+  }
+  const runId = result.rows[0].run_id;
+  void executeRun(runId, runDate);
+  await recordAuditEvent({ actor: triggeredBy === "OPERATOR" ? "OPERATOR" : "SCHEDULER", action: "orchestration.launched", resourceType: "orchestration_run", resourceId: runId, metadata: { runDate } });
+  return queryOrchestrationRun(runId);
+}
+
+export async function queryOrchestrationRun(runId: string) {
+  const result = await pool.query<{
+    run_id: string; run_date: string; triggered_by: OrchestrationTrigger; overall_status: string; steps: RunStep[];
+    schedule: Record<string, unknown>; frozen_at: string | null; cancel_requested_at: string | null; error_message: string | null; created_at: string; finished_at: string | null;
+  }>(
+    `SELECT run_id, run_date::text, triggered_by, overall_status, steps, schedule, frozen_at::text,
+            cancel_requested_at::text, error_message, created_at::text, finished_at::text
+     FROM orchestration_runs WHERE run_id = $1`,
+    [runId],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error("Orchestration run not found");
+  return {
+    runId: row.run_id, runDate: row.run_date, triggeredBy: row.triggered_by, overallStatus: row.overall_status,
+    steps: row.steps, schedule: row.schedule, frozenAt: row.frozen_at, cancelRequestedAt: row.cancel_requested_at,
+    errorMessage: row.error_message, createdAt: row.created_at, finishedAt: row.finished_at,
+  };
+}
+
+export async function queryOrchestrationRuns(rawDate?: unknown) {
+  const date = rawDate == null ? null : dateOnly(rawDate);
+  const result = await pool.query<{ run_id: string }>(
+    `SELECT run_id FROM orchestration_runs WHERE ($1::date IS NULL OR run_date = $1::date) ORDER BY created_at DESC LIMIT 100`,
+    [date],
+  );
+  return Promise.all(result.rows.map((row) => queryOrchestrationRun(row.run_id)));
+}
+
+export async function interruptOrchestrationRun(runId: string) {
+  const before = await queryOrchestrationRun(runId);
+  if (before.overallStatus !== "RUNNING") return before;
+  await pool.query(`UPDATE orchestration_runs SET cancel_requested_at = now() WHERE run_id = $1 AND overall_status = 'RUNNING'`, [runId]);
+  const run = await queryOrchestrationRun(runId);
+  if (run.overallStatus !== "RUNNING") return run;
+  if (!run.steps.some((step) => step.status === "RUNNING")) {
+    markPendingSkipped(run.steps, "Skipped because the run was interrupted");
+    await finaliseRun(runId, run.runDate, run.steps, "CANCELLED");
+    return queryOrchestrationRun(runId);
+  }
+  await recordAuditEvent({ actor: "OPERATOR", action: "orchestration.interrupt_requested", resourceType: "orchestration_run", resourceId: runId });
+  return queryOrchestrationRun(runId);
+}
+
+export async function detectLateScratches(slateDate: string) {
+  const result = await pool.query<{ snapshot_id: string; player_id: number; game_pk: number; market: string }>(
+    `SELECT pfs.snapshot_id, pfs.player_id, pfs.game_pk::bigint AS game_pk, pfs.market
+     FROM pregame_feature_snapshots pfs
+     JOIN lineup_snapshots ls ON ls.game_pk = pfs.game_pk AND ls.state = 'SCRATCHED'
+     JOIN lineup_entries le ON le.lineup_snapshot_id = ls.lineup_snapshot_id AND le.player_id = pfs.player_id
+     WHERE pfs.slate_date = $1 AND pfs.correction_of IS NULL
+       AND NOT EXISTS (SELECT 1 FROM pregame_feature_snapshots correction WHERE correction.correction_of = pfs.snapshot_id AND correction.correction_reason = 'LATE_SCRATCH')`,
+    [dateOnly(slateDate)],
+  );
+  let corrections = 0;
+  for (const row of result.rows) {
+    await correctSnapshot(row.snapshot_id, "LATE_SCRATCH", "Automated post-freeze lineup scratch detected.", null);
+    await pool.query(
+      `UPDATE market_research_candidates
+       SET research_state = 'BLOCKED', missing_stale_evidence = COALESCE(missing_stale_evidence || ' · ', '') || 'LATE_SCRATCH correction recorded'
+       WHERE slate_date = $1 AND game_pk = $2 AND player_id = $3 AND market = $4`,
+      [slateDate, row.game_pk, row.player_id, row.market],
+    );
+    corrections += 1;
+  }
+  if (corrections) await populateDailyMarketBoard(slateDate);
+  return { slateDate, corrections, targetedRerun: corrections > 0 };
+}
+
+export async function automateSettlementDate(rawDate: unknown) {
+  const slateDate = dateOnly(rawDate);
+  const settlement = await settleOfficialDate(slateDate);
+  const links = await pool.query<{ snapshot_id: string; outcome_id: string }>(
+    `SELECT pfs.snapshot_id, ho.outcome_id
+     FROM pregame_feature_snapshots pfs
+     JOIN historical_outcomes ho ON ho.player_id = pfs.player_id AND ho.game_pk = pfs.game_pk AND ho.market = pfs.market
+     WHERE pfs.slate_date = $1 AND ho.settlement_state = 'SETTLED'
+       AND NOT EXISTS (SELECT 1 FROM historical_outcomes newer WHERE newer.correction_of = ho.outcome_id)
+       AND NOT EXISTS (SELECT 1 FROM market_postmortems mp WHERE mp.snapshot_id = pfs.snapshot_id AND mp.outcome_id = ho.outcome_id)`,
+    [slateDate],
+  );
+  let postmortemsCreated = 0;
+  for (const link of links.rows) {
+    await createMarketPostmortem({
+      snapshotId: link.snapshot_id,
+      outcomeId: link.outcome_id,
+      notes: "Automated from official MLB settlement.",
+    });
+    postmortemsCreated += 1;
+  }
+  await recordAuditEvent({
+    action: "settlement.automated",
+    resourceType: "slate",
+    resourceId: slateDate,
+    metadata: { outcomesWritten: settlement.outcomesWritten, postmortemsCreated },
+  });
+  return { ...settlement, postmortemsCreated, officialRecord: "MLB Analyst Platform" };
+}
+
+export function startOrchestrationScheduler() {
+  if (process.env.NODE_ENV !== "production" && process.env.ENABLE_ORCHESTRATION_SCHEDULER !== "true") return;
+  if (schedulerStarted) return;
+  schedulerStarted = true;
+  const tick = async () => {
+    const now = new Date();
+    const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(now);
+    const localTime = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
+    if (localTime === "08:00" && lastScheduledDate !== localDate) {
+      lastScheduledDate = localDate;
+      await launchOrchestrationRun(localDate, "SCHEDULED");
+    }
+    const due = await pool.query<{ run_id: string }>(
+      `SELECT run_id FROM orchestration_runs
+       WHERE overall_status = 'RUNNING' AND (schedule->>'calculatedFreezeUtc')::timestamptz <= now()
+       ORDER BY created_at LIMIT 10`,
+    );
+    for (const row of due.rows) await executeDueFreeze(row.run_id);
+  };
+  setInterval(() => void tick().catch((error) => logger.error({ err: error }, "orchestration scheduler tick failed")), 60_000).unref();
+  void tick();
+}

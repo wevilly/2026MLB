@@ -34,6 +34,9 @@ import type {
   AiToolCallResult,
   AiToolRegistry,
   AnalystSettings,
+  AuditEventList,
+  AutomateAnalystSettlement201,
+  AutomateAnalystSettlementParams,
   BackfillFeatureStoreParams,
   BettorEvaluation,
   BettorPickIngestInput,
@@ -55,7 +58,10 @@ import type {
   DailyMarketBoard,
   DailyMarketBoardRefreshResult,
   DataHealth,
+  DetectAnalystLateScratchesParams,
   ErrorResponse,
+  ExportAnalystSlateJsonParams,
+  ExportAnalystWorkbookParams,
   FeatureSnapshotCorrectionInput,
   FeatureStoreBackfillResult,
   FeatureStoreCaptureResult,
@@ -65,6 +71,7 @@ import type {
   GetAnalystAiDraftsParams,
   GetAnalystAiResearchNotesParams,
   GetAnalystAiSourcingRegisterParams,
+  GetAnalystAuditEventsParams,
   GetAnalystBettorEvaluationParams,
   GetAnalystBettorPicksParams,
   GetAnalystBullpenRoomParams,
@@ -78,6 +85,7 @@ import type {
   GetAnalystModelValidationParams,
   GetAnalystModels400,
   GetAnalystModelsParams,
+  GetAnalystOrchestrationRunsParams,
   GetAnalystPitcherLabParams,
   GetAnalystPlayerLabParams,
   GetAnalystPostmortemsParams,
@@ -89,12 +97,15 @@ import type {
   IngestOfficialSettlements400,
   IngestOfficialSettlementsParams,
   IngestResult,
+  LateScratchDetection,
   MarketPostmortem,
   MarketResearch,
   ModelTrainingResult,
   ModelVersionList,
   OfficialGameSettlementResult,
   OfficialSettlementRefreshResult,
+  OrchestrationRun,
+  OrchestrationRunList,
   PostmortemList,
   ProjectionCenter,
   RefreshAnalystDailyMarketBoard400,
@@ -116,6 +127,8 @@ import type {
   ResearchNoteList,
   SettleOfficialGame400,
   SettlementList,
+  SlateExport,
+  StartAnalystOrchestrationRunParams,
   TBEngineResult,
   TodayDashboard,
   TrainAnalystModel400,
@@ -461,6 +474,647 @@ export function useGetAnalystDataHealth<TData = Awaited<ReturnType<typeof getAna
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAnalystDataHealthQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAnalystOrchestrationRunsUrl = (params?: GetAnalystOrchestrationRunsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/orchestration/runs?${stringifiedParams}` : `/api/analyst/orchestration/runs`
+}
+
+/**
+ * @summary List daily orchestration runs
+ */
+export const getAnalystOrchestrationRuns = async (params?: GetAnalystOrchestrationRunsParams, options?: Parameters<typeof customFetch>[1]): Promise<OrchestrationRunList> => {
+
+  return customFetch<OrchestrationRunList>(getGetAnalystOrchestrationRunsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystOrchestrationRunsQueryKey = (params?: GetAnalystOrchestrationRunsParams,) => {
+    return [
+    `/api/analyst/orchestration/runs`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystOrchestrationRunsQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystOrchestrationRuns>>, TError = ErrorType<unknown>>(params?: GetAnalystOrchestrationRunsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystOrchestrationRuns>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystOrchestrationRunsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystOrchestrationRuns>>> = ({ signal }) => getAnalystOrchestrationRuns(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystOrchestrationRuns>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystOrchestrationRunsQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystOrchestrationRuns>>>
+export type GetAnalystOrchestrationRunsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List daily orchestration runs
+ */
+
+export function useGetAnalystOrchestrationRuns<TData = Awaited<ReturnType<typeof getAnalystOrchestrationRuns>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystOrchestrationRunsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystOrchestrationRuns>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystOrchestrationRunsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getStartAnalystOrchestrationRunUrl = (params: StartAnalystOrchestrationRunParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/orchestration/run?${stringifiedParams}` : `/api/analyst/orchestration/run`
+}
+
+/**
+ * @summary Start a manual daily orchestration run
+ */
+export const startAnalystOrchestrationRun = async (params: StartAnalystOrchestrationRunParams, options?: Parameters<typeof customFetch>[1]): Promise<OrchestrationRun> => {
+
+  return customFetch<OrchestrationRun>(getStartAnalystOrchestrationRunUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getStartAnalystOrchestrationRunMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startAnalystOrchestrationRun>>, TError,{params: StartAnalystOrchestrationRunParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startAnalystOrchestrationRun>>, TError,{params: StartAnalystOrchestrationRunParams}, TContext> => {
+
+const mutationKey = ['startAnalystOrchestrationRun'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startAnalystOrchestrationRun>>, {params: StartAnalystOrchestrationRunParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  startAnalystOrchestrationRun(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartAnalystOrchestrationRunMutationResult = NonNullable<Awaited<ReturnType<typeof startAnalystOrchestrationRun>>>
+
+    export type StartAnalystOrchestrationRunMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Start a manual daily orchestration run
+ */
+export const useStartAnalystOrchestrationRun = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startAnalystOrchestrationRun>>, TError,{params: StartAnalystOrchestrationRunParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startAnalystOrchestrationRun>>,
+        TError,
+        {params: StartAnalystOrchestrationRunParams},
+        TContext
+      > => {
+      return useMutation(getStartAnalystOrchestrationRunMutationOptions(options));
+    }
+
+export const getInterruptAnalystOrchestrationRunUrl = (runId: string,) => {
+
+
+
+
+  return `/api/analyst/orchestration/runs/${runId}/interrupt`
+}
+
+/**
+ * @summary Request safe interruption of an active run
+ */
+export const interruptAnalystOrchestrationRun = async (runId: string, options?: Parameters<typeof customFetch>[1]): Promise<OrchestrationRun> => {
+
+  return customFetch<OrchestrationRun>(getInterruptAnalystOrchestrationRunUrl(runId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getInterruptAnalystOrchestrationRunMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof interruptAnalystOrchestrationRun>>, TError,{runId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof interruptAnalystOrchestrationRun>>, TError,{runId: string}, TContext> => {
+
+const mutationKey = ['interruptAnalystOrchestrationRun'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof interruptAnalystOrchestrationRun>>, {runId: string}> = (props) => {
+          const {runId} = props ?? {};
+
+          return  interruptAnalystOrchestrationRun(runId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InterruptAnalystOrchestrationRunMutationResult = NonNullable<Awaited<ReturnType<typeof interruptAnalystOrchestrationRun>>>
+
+    export type InterruptAnalystOrchestrationRunMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Request safe interruption of an active run
+ */
+export const useInterruptAnalystOrchestrationRun = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof interruptAnalystOrchestrationRun>>, TError,{runId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof interruptAnalystOrchestrationRun>>,
+        TError,
+        {runId: string},
+        TContext
+      > => {
+      return useMutation(getInterruptAnalystOrchestrationRunMutationOptions(options));
+    }
+
+export const getDetectAnalystLateScratchesUrl = (params: DetectAnalystLateScratchesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/orchestration/late-scratches?${stringifiedParams}` : `/api/analyst/orchestration/late-scratches`
+}
+
+/**
+ * @summary Record post-freeze lineup scratches as immutable corrections
+ */
+export const detectAnalystLateScratches = async (params: DetectAnalystLateScratchesParams, options?: Parameters<typeof customFetch>[1]): Promise<LateScratchDetection> => {
+
+  return customFetch<LateScratchDetection>(getDetectAnalystLateScratchesUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getDetectAnalystLateScratchesMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof detectAnalystLateScratches>>, TError,{params: DetectAnalystLateScratchesParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof detectAnalystLateScratches>>, TError,{params: DetectAnalystLateScratchesParams}, TContext> => {
+
+const mutationKey = ['detectAnalystLateScratches'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof detectAnalystLateScratches>>, {params: DetectAnalystLateScratchesParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  detectAnalystLateScratches(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DetectAnalystLateScratchesMutationResult = NonNullable<Awaited<ReturnType<typeof detectAnalystLateScratches>>>
+
+    export type DetectAnalystLateScratchesMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Record post-freeze lineup scratches as immutable corrections
+ */
+export const useDetectAnalystLateScratches = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof detectAnalystLateScratches>>, TError,{params: DetectAnalystLateScratchesParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof detectAnalystLateScratches>>,
+        TError,
+        {params: DetectAnalystLateScratchesParams},
+        TContext
+      > => {
+      return useMutation(getDetectAnalystLateScratchesMutationOptions(options));
+    }
+
+export const getAutomateAnalystSettlementUrl = (params: AutomateAnalystSettlementParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/settlements/automate?${stringifiedParams}` : `/api/analyst/settlements/automate`
+}
+
+/**
+ * @summary Settle a completed slate and create missing postmortems
+ */
+export const automateAnalystSettlement = async (params: AutomateAnalystSettlementParams, options?: Parameters<typeof customFetch>[1]): Promise<AutomateAnalystSettlement201> => {
+
+  return customFetch<AutomateAnalystSettlement201>(getAutomateAnalystSettlementUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getAutomateAnalystSettlementMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof automateAnalystSettlement>>, TError,{params: AutomateAnalystSettlementParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof automateAnalystSettlement>>, TError,{params: AutomateAnalystSettlementParams}, TContext> => {
+
+const mutationKey = ['automateAnalystSettlement'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof automateAnalystSettlement>>, {params: AutomateAnalystSettlementParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  automateAnalystSettlement(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AutomateAnalystSettlementMutationResult = NonNullable<Awaited<ReturnType<typeof automateAnalystSettlement>>>
+
+    export type AutomateAnalystSettlementMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Settle a completed slate and create missing postmortems
+ */
+export const useAutomateAnalystSettlement = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof automateAnalystSettlement>>, TError,{params: AutomateAnalystSettlementParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof automateAnalystSettlement>>,
+        TError,
+        {params: AutomateAnalystSettlementParams},
+        TContext
+      > => {
+      return useMutation(getAutomateAnalystSettlementMutationOptions(options));
+    }
+
+export const getExportAnalystSlateJsonUrl = (params: ExportAnalystSlateJsonParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/export/slate-json?${stringifiedParams}` : `/api/analyst/export/slate-json`
+}
+
+/**
+ * @summary Export platform state as slate JSON
+ */
+export const exportAnalystSlateJson = async (params: ExportAnalystSlateJsonParams, options?: Parameters<typeof customFetch>[1]): Promise<SlateExport> => {
+
+  return customFetch<SlateExport>(getExportAnalystSlateJsonUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportAnalystSlateJsonQueryKey = (params?: ExportAnalystSlateJsonParams,) => {
+    return [
+    `/api/analyst/export/slate-json`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportAnalystSlateJsonQueryOptions = <TData = Awaited<ReturnType<typeof exportAnalystSlateJson>>, TError = ErrorType<unknown>>(params: ExportAnalystSlateJsonParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportAnalystSlateJson>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportAnalystSlateJsonQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportAnalystSlateJson>>> = ({ signal }) => exportAnalystSlateJson(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportAnalystSlateJson>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ExportAnalystSlateJsonQueryResult = NonNullable<Awaited<ReturnType<typeof exportAnalystSlateJson>>>
+export type ExportAnalystSlateJsonQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Export platform state as slate JSON
+ */
+
+export function useExportAnalystSlateJson<TData = Awaited<ReturnType<typeof exportAnalystSlateJson>>, TError = ErrorType<unknown>>(
+ params: ExportAnalystSlateJsonParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportAnalystSlateJson>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getExportAnalystSlateJsonQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportAnalystWorkbookUrl = (params: ExportAnalystWorkbookParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/export/workbook?${stringifiedParams}` : `/api/analyst/export/workbook`
+}
+
+/**
+ * @summary Export the compatibility workbook
+ */
+export const exportAnalystWorkbook = async (params: ExportAnalystWorkbookParams, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getExportAnalystWorkbookUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportAnalystWorkbookQueryKey = (params?: ExportAnalystWorkbookParams,) => {
+    return [
+    `/api/analyst/export/workbook`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportAnalystWorkbookQueryOptions = <TData = Awaited<ReturnType<typeof exportAnalystWorkbook>>, TError = ErrorType<unknown>>(params: ExportAnalystWorkbookParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportAnalystWorkbook>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportAnalystWorkbookQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportAnalystWorkbook>>> = ({ signal }) => exportAnalystWorkbook(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportAnalystWorkbook>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ExportAnalystWorkbookQueryResult = NonNullable<Awaited<ReturnType<typeof exportAnalystWorkbook>>>
+export type ExportAnalystWorkbookQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Export the compatibility workbook
+ */
+
+export function useExportAnalystWorkbook<TData = Awaited<ReturnType<typeof exportAnalystWorkbook>>, TError = ErrorType<unknown>>(
+ params: ExportAnalystWorkbookParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportAnalystWorkbook>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getExportAnalystWorkbookQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAnalystAuditEventsUrl = (params?: GetAnalystAuditEventsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/audit-events?${stringifiedParams}` : `/api/analyst/audit-events`
+}
+
+/**
+ * @summary List append-only operational audit events
+ */
+export const getAnalystAuditEvents = async (params?: GetAnalystAuditEventsParams, options?: Parameters<typeof customFetch>[1]): Promise<AuditEventList> => {
+
+  return customFetch<AuditEventList>(getGetAnalystAuditEventsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystAuditEventsQueryKey = (params?: GetAnalystAuditEventsParams,) => {
+    return [
+    `/api/analyst/audit-events`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystAuditEventsQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystAuditEvents>>, TError = ErrorType<unknown>>(params?: GetAnalystAuditEventsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystAuditEvents>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystAuditEventsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystAuditEvents>>> = ({ signal }) => getAnalystAuditEvents(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystAuditEvents>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystAuditEventsQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystAuditEvents>>>
+export type GetAnalystAuditEventsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List append-only operational audit events
+ */
+
+export function useGetAnalystAuditEvents<TData = Awaited<ReturnType<typeof getAnalystAuditEvents>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystAuditEventsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystAuditEvents>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystAuditEventsQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

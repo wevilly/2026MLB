@@ -1,9 +1,9 @@
-import { type ReactNode, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore, useGetAnalystDailyMarketBoard, useGetAnalystDailyBoardGameSummary, useRefreshAnalystDailyMarketBoard, useGetAnalystBettorEvaluation, useChatWithAnalystAi, useGetAnalystAiDrafts, useCreateAnalystAiDraft, useApproveAnalystAiDraft, useRejectAnalystAiDraft, useGetAnalystAiSourcingRegister, useDecideAnalystAiSourcingClaim, useGetAnalystAiResearchNotes } from '@workspace/api-client-react';
 import type { AnalystSettings, BackfillFeatureStoreParams, BullpenArm, BullpenRoom, BullpenTeam, CaptureFeatureStoreSlateParams, DataHealth, FeatureStoreCaptureResult, FeatureStoreResult, HealthIssue, HREngineResult, MarketResearchCandidate, PregameFeatureSnapshot, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile, DailyMarketBoard, DailyBoardGameSummary, BettorEvaluation, BettorEvaluationPickMarket } from '@workspace/api-client-react';
-import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight, Send, FilePlus, ThumbsDown, ThumbsUp, ExternalLink } from 'lucide-react';
+import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight, Send, FilePlus, ThumbsDown, ThumbsUp, ExternalLink, ClipboardList, Download, Play, Square } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useSearch, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
@@ -22,6 +22,8 @@ const navGroups: { label: string; items: Array<{ href: string; label: string; ic
       { href: '/', label: 'Today', icon: Home },
       { href: '/projection-center', label: 'Projection center', icon: LineChart },
       { href: '/data-health', label: 'Data health', icon: Database },
+      { href: '/orchestration', label: 'Orchestration', icon: ClipboardList },
+      { href: '/audit-trail', label: 'Audit trail', icon: BookOpen },
     ],
   },
   {
@@ -362,6 +364,84 @@ function DataHealthPage() {
       )}
     </div>
   );
+}
+
+type OrchestrationRun = {
+  runId: string;
+  runDate: string;
+  triggeredBy: string;
+  overallStatus: string;
+  steps: Array<{ name: string; status: string; startedAt: string | null; finishedAt: string | null; detail: string | null }>;
+  frozenAt: string | null;
+  errorMessage: string | null;
+};
+
+async function operationsRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({ error: response.statusText }))).error ?? response.statusText);
+  return response.json() as Promise<T>;
+}
+
+function OrchestrationPage() {
+  const today = new Date().toISOString().slice(0, 10);
+  const [date, setDate] = useState(today);
+  const [runs, setRuns] = useState<OrchestrationRun[]>([]);
+  const [message, setMessage] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const response = await operationsRequest<{ runs: OrchestrationRun[] }>(`/analyst/orchestration/runs?date=${date}`);
+      setRuns(response.runs);
+      setMessage(null);
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to load orchestration history.'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { void load(); }, [date]);
+  const startRun = async () => {
+    setLoading(true);
+    try {
+      await operationsRequest(`/analyst/orchestration/run?date=${date}`, { method: 'POST' });
+      setMessage('Daily run started. This view refreshes the run ledger.');
+      await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to start run.'); }
+    finally { setLoading(false); }
+  };
+  const interrupt = async (runId: string) => {
+    await operationsRequest(`/analyst/orchestration/runs/${runId}/interrupt`, { method: 'POST' });
+    await load();
+  };
+  const lateScratchScan = async () => {
+    setLoading(true);
+    try {
+      const result = await operationsRequest<{ corrections: number }>(`/analyst/orchestration/late-scratches?date=${date}`, { method: 'POST' });
+      setMessage(result.corrections ? `${result.corrections} late-scratch correction(s) recorded and the board refreshed.` : 'No post-freeze scratches require correction.');
+      await load();
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Late-scratch scan failed.'); }
+    finally { setLoading(false); }
+  };
+  return <div className="page-content rise-in" data-testid="page-orchestration">
+    <div className="page-intro">
+      <div><Kicker>Daily refresh control</Kicker><h1>Slate <span className="slash">//</span> orchestration</h1><p>One auditable sequence for ingest, research, market build, health checks, and the pregame freeze.</p></div>
+      <div className="flex gap-2 flex-wrap"><input className="search-input !w-auto" type="date" value={date} onChange={(event) => setDate(event.target.value)} /><button className="button button-dark" disabled={loading} onClick={startRun} data-testid="button-start-orchestration"><Play size={15} /> Run slate</button></div>
+    </div>
+    <Panel className="mb-6"><div className="flex flex-wrap justify-between gap-3 items-center"><div><Kicker>Schedule policy</Kicker><strong>08:00 ET refresh · freeze 90 minutes before the earliest first pitch</strong><p className="text-xs text-muted-foreground mt-1">Manual runs are recorded separately; feature snapshots remain append-only once frozen.</p></div><div className="flex gap-2 flex-wrap"><button className="button button-quiet" onClick={() => void lateScratchScan()} disabled={loading}>Scan late scratches</button><button className="button button-quiet" onClick={() => void load()}><RefreshCw size={15} /> Refresh</button><a className="button button-quiet" href={`/api/analyst/export/slate-json?date=${date}`} target="_blank" rel="noreferrer"><Download size={15} /> slate.json</a><a className="button button-quiet" href={`/api/analyst/export/workbook?date=${date}`}><Download size={15} /> Workbook</a></div></div></Panel>
+    {message && <div className="query-message query-error mb-4"><AlertTriangle size={16} /><div><strong>Operator note</strong><p>{message}</p></div></div>}
+    {runs.length === 0 && !loading ? <QueryMessage kind="empty" /> : <div className="space-y-4">
+      {runs.map((run) => <Panel key={run.runId} className="p-5" data-testid={`orchestration-run-${run.runId}`}>
+        <div className="flex justify-between gap-3 flex-wrap items-start"><div><Kicker>{run.triggeredBy} · {run.runDate}</Kicker><h2 className="text-lg">Run {run.runId.slice(0, 8)} <Badge tone={toneFor(run.overallStatus)}>{run.overallStatus}</Badge></h2><p className="text-xs text-muted-foreground mt-1">Frozen: {run.frozenAt ?? 'not yet'} {run.errorMessage ? `· ${run.errorMessage}` : ''}</p></div>{run.overallStatus === 'RUNNING' && <button className="button button-quiet" onClick={() => void interrupt(run.runId)}><Square size={14} /> Interrupt</button>}</div>
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3 mt-4">{run.steps.map((step) => <div className="border border-border p-3 text-xs" key={step.name}><div className="flex justify-between gap-2"><strong>{step.name.replaceAll('_', ' ')}</strong><Badge tone={toneFor(step.status)}>{step.status}</Badge></div><p className="text-muted-foreground mt-2">{step.detail ?? 'Awaiting execution'}</p></div>)}</div>
+      </Panel>)}
+    </div>}
+  </div>;
+}
+
+function AuditTrailPage() {
+  const [events, setEvents] = useState<Array<{ auditEventId: string; occurredAt: string; actor: string; action: string; resourceType: string; resourceId: string | null }>>([]);
+  const [error, setError] = useState<string | null>(null);
+  const load = async () => { try { setEvents((await operationsRequest<{ events: typeof events }>('/analyst/audit-events?limit=100')).events); setError(null); } catch (e) { setError(e instanceof Error ? e.message : 'Unable to load audit events.'); } };
+  useEffect(() => { void load(); }, []);
+  return <div className="page-content rise-in" data-testid="page-audit-trail"><div className="page-intro"><div><Kicker>Append-only operator record</Kicker><h1>Audit <span className="slash">//</span> trail</h1><p>Operational runs, settlements, corrections, and review actions retain actor and timestamp context.</p></div><button className="button button-dark" onClick={() => void load()}><RefreshCw size={15} /> Refresh</button></div>{error ? <QueryMessage kind="error" onRetry={() => void load()} /> : <Panel><div className="table-wrap"><table className="data-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th></tr></thead><tbody>{events.map((event) => <tr key={event.auditEventId}><td className="text-xs">{event.occurredAt}</td><td>{event.actor}</td><td><Badge tone="accent">{event.action}</Badge></td><td className="font-mono text-xs">{event.resourceType}{event.resourceId ? ` / ${event.resourceId.slice(0, 12)}` : ''}</td></tr>)}</tbody></table></div></Panel>}</div>;
 }
 
 function HealthSource({ source }: { source: SourceBadge }) {
@@ -2519,6 +2599,8 @@ function Router() {
           <Route path="/" component={DashboardPage} />
           <Route path="/projection-center" component={ProjectionsPage} />
           <Route path="/data-health" component={DataHealthPage} />
+          <Route path="/orchestration" component={OrchestrationPage} />
+          <Route path="/audit-trail" component={AuditTrailPage} />
           <Route path="/settings" component={SettingsPage} />
           <Route path="/game-lab" component={GameLabPage} />
           <Route path="/player-lab" component={PlayerLabPage} />

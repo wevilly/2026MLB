@@ -105,6 +105,16 @@ import {
   queryDailyMarketBoard,
 } from "../services/daily-market-board";
 import {
+  automateSettlementDate,
+  detectLateScratches,
+  interruptOrchestrationRun,
+  launchOrchestrationRun,
+  queryOrchestrationRuns,
+} from "../services/orchestration";
+import { buildSlateExport, buildWorkbookExport } from "../services/exports";
+import { queryAuditEvents } from "../services/audit";
+import { CACHE_POLICY, invalidateCache, readThroughCache } from "../services/cache";
+import {
   BETTOR_MARKETS,
   BettorIntelligenceConflictError,
   BettorIntelligenceValidationError,
@@ -140,6 +150,11 @@ function requestedDate(value: unknown) {
       : new Date().toISOString().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must use YYYY-MM-DD");
   return date;
+}
+
+function requiredDate(value: unknown) {
+  if (value == null || value === "") throw new Error("date is required");
+  return requestedDate(value);
 }
 
 function requestedBoardDate(value: unknown) {
@@ -540,11 +555,14 @@ router.get("/analyst/data-health", async (_req, res, next) => {
 
 router.get("/analyst/player-lab", async (req, res, next) => {
   try {
-    const profile = await getPlayerLab(
-      requestedPlayerId(req.query.playerId),
-      String(req.query.search ?? "").trim(),
-      requestedWindow(req.query.window),
-      requestedDate(req.query.date),
+    const playerId = requestedPlayerId(req.query.playerId);
+    const search = String(req.query.search ?? "").trim();
+    const window = requestedWindow(req.query.window);
+    const date = requestedDate(req.query.date);
+    const profile = await readThroughCache(
+      `player-lab:${playerId ?? "search"}:${search}:${window}:${date}`,
+      CACHE_POLICY.labs,
+      () => getPlayerLab(playerId, search, window, date),
     );
     res.json(GetAnalystPlayerLabResponse.parse(profile));
   } catch (error) {
@@ -554,11 +572,14 @@ router.get("/analyst/player-lab", async (req, res, next) => {
 
 router.get("/analyst/pitcher-lab", async (req, res, next) => {
   try {
-    const profile = await getPitcherLab(
-      requestedPlayerId(req.query.playerId),
-      String(req.query.search ?? "").trim(),
-      requestedWindow(req.query.window),
-      requestedDate(req.query.date),
+    const playerId = requestedPlayerId(req.query.playerId);
+    const search = String(req.query.search ?? "").trim();
+    const window = requestedWindow(req.query.window);
+    const date = requestedDate(req.query.date);
+    const profile = await readThroughCache(
+      `pitcher-lab:${playerId ?? "search"}:${search}:${window}:${date}`,
+      CACHE_POLICY.labs,
+      () => getPitcherLab(playerId, search, window, date),
     );
     res.json(GetAnalystPitcherLabResponse.parse(profile));
   } catch (error) {
@@ -661,6 +682,99 @@ router.get("/analyst/settings", (_req, res) => {
     defaultMarket: "2+ total bases",
     refreshCadence: "Manual refresh during data foundation",
   }));
+});
+
+// ─── Phase 9 – Operations, settlement automation, and derived exports ─────────
+
+router.get("/analyst/orchestration/runs", async (req, res, next) => {
+  try {
+    const date = req.query.date == null ? undefined : requestedDate(req.query.date);
+    const runs = await queryOrchestrationRuns(date);
+    res.json({
+      runs,
+      total: runs.length,
+      schedulePolicy: {
+        timezone: "America/New_York",
+        morningRefreshLocal: "08:00",
+        snapshotFreeze: "90 minutes before the earliest scheduled first pitch",
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/orchestration/run", async (req, res, next) => {
+  try {
+    const run = await launchOrchestrationRun(requiredDate(req.query.date), "OPERATOR");
+    res.status(202).json(run);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/orchestration/runs/:runId/interrupt", async (req, res, next) => {
+  try {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(req.params.runId)) {
+      res.status(400).json({ error: "runId must be a UUID" });
+      return;
+    }
+    res.json(await interruptOrchestrationRun(req.params.runId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/orchestration/late-scratches", async (req, res, next) => {
+  try {
+    res.status(201).json(await detectLateScratches(requiredDate(req.query.date)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/settlements/automate", async (req, res, next) => {
+  try {
+    res.status(201).json(await automateSettlementDate(requiredDate(req.query.date)));
+  } catch (error) {
+    if (error instanceof SettlementValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.get("/analyst/export/slate-json", async (req, res, next) => {
+  try {
+    // The platform is the official record. This is a read-only derived export.
+    res.json(await buildSlateExport(requiredDate(req.query.date)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/analyst/export/workbook", async (req, res, next) => {
+  try {
+    // The platform is the official record. This Excel-compatible workbook is derived output.
+    const result = await buildWorkbookExport(requiredDate(req.query.date));
+    res.type("application/vnd.ms-excel");
+    res.setHeader("Content-Disposition", `attachment; filename="${result.filename}"`);
+    res.send(result.workbook);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/analyst/audit-events", async (req, res, next) => {
+  try {
+    const parsed = req.query.limit == null ? 100 : Number(req.query.limit);
+    if (!Number.isFinite(parsed)) throw new Error("limit must be numeric");
+    const events = await queryAuditEvents(parsed);
+    res.json({ events, total: events.length });
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post("/analyst/refresh/mlb", async (req, res, next) => {
@@ -929,7 +1043,7 @@ router.get("/analyst/bullpen-room", async (req, res, next) => {
     const team = typeof req.query.team === "string" && req.query.team.trim()
       ? req.query.team.trim().toUpperCase()
       : undefined;
-    const data = await getBullpenRoom(date, team);
+    const data = await readThroughCache(`bullpen:${date}:${team ?? "all"}`, CACHE_POLICY.bullpen, () => getBullpenRoom(date, team));
     res.json(GetAnalystBullpenRoomResponse.parse(data));
   } catch (error) {
     next(error);
@@ -940,6 +1054,7 @@ router.post("/analyst/refresh/bullpen", async (req, res, next) => {
   try {
     const date = requestedDate(req.query.date);
     const result = await refreshBullpen(date);
+    invalidateCache(`bullpen:${date}:`);
     res.status(201).json(RefreshBullpenResponse.parse({
       source: "BULLPEN",
       slateDate: date,
@@ -1567,7 +1682,7 @@ function issueOperatorApprovalSession(res: Parameters<RequestHandler>[1], secret
   const payload = Buffer.from(JSON.stringify({ operatorId: APPROVAL_OPERATOR_ID, expiresAt: Date.now() + 15 * 60 * 1000 })).toString("base64url");
   const signature = createHmac("sha256", secret).update(payload).digest("base64url");
   res.cookie("ai_operator_approval", `${payload}.${signature}`, {
-    httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production", maxAge: 15 * 60 * 1000, path: "/api/analyst/ai",
+    httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production", maxAge: 15 * 60 * 1000, path: "/api",
   });
 }
 

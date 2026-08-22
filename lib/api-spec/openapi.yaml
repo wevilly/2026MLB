@@ -67,6 +67,134 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataHealth"
+  /analyst/orchestration/runs:
+    get:
+      operationId: getAnalystOrchestrationRuns
+      tags: [analyst]
+      summary: List daily orchestration runs
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Orchestration history and schedule policy
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrchestrationRunList" }
+  /analyst/orchestration/run:
+    post:
+      operationId: startAnalystOrchestrationRun
+      tags: [analyst]
+      summary: Start a manual daily orchestration run
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "202":
+          description: Run accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrchestrationRun" }
+  /analyst/orchestration/runs/{runId}/interrupt:
+    post:
+      operationId: interruptAnalystOrchestrationRun
+      tags: [analyst]
+      summary: Request safe interruption of an active run
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Updated run record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OrchestrationRun" }
+  /analyst/orchestration/late-scratches:
+    post:
+      operationId: detectAnalystLateScratches
+      tags: [analyst]
+      summary: Record post-freeze lineup scratches as immutable corrections
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Late-scratch detection result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LateScratchDetection" }
+  /analyst/settlements/automate:
+    post:
+      operationId: automateAnalystSettlement
+      tags: [analyst]
+      summary: Settle a completed slate and create missing postmortems
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Official settlement automation result
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+  /analyst/export/slate-json:
+    get:
+      operationId: exportAnalystSlateJson
+      tags: [analyst]
+      summary: Export platform state as slate JSON
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Derived slate export; platform remains official record
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SlateExport" }
+  /analyst/export/workbook:
+    get:
+      operationId: exportAnalystWorkbook
+      tags: [analyst]
+      summary: Export the compatibility workbook
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Excel-compatible derived workbook
+          content:
+            application/vnd.ms-excel:
+              schema: { type: string, format: binary }
+  /analyst/audit-events:
+    get:
+      operationId: getAnalystAuditEvents
+      tags: [analyst]
+      summary: List append-only operational audit events
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500 }
+      responses:
+        "200":
+          description: Audit event list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditEventList" }
   /analyst/settings:
     get:
       operationId: getAnalystSettings
@@ -2762,4 +2890,76 @@ components:
           items: { $ref: "#/components/schemas/ResearchNote" }
         total: { type: integer, minimum: 0 }
       required: [notes, total]
+    OrchestrationStep:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string }
+        status: { type: string, enum: [PENDING, RUNNING, SUCCESS, WARNING, FAILED, CANCELLED] }
+        startedAt: { type: ["string", "null"], format: date-time }
+        finishedAt: { type: ["string", "null"], format: date-time }
+        detail: { type: ["string", "null"] }
+      required: [name, status, startedAt, finishedAt, detail]
+    OrchestrationRun:
+      type: object
+      additionalProperties: false
+      properties:
+        runId: { type: string, format: uuid }
+        runDate: { type: string, format: date }
+        triggeredBy: { type: string, enum: [SCHEDULED, OPERATOR] }
+        overallStatus: { type: string, enum: [RUNNING, COMPLETE, PARTIAL, FAILED, CANCELLED] }
+        steps: { type: array, items: { $ref: "#/components/schemas/OrchestrationStep" } }
+        schedule: { type: object, additionalProperties: true }
+        frozenAt: { type: ["string", "null"], format: date-time }
+        cancelRequestedAt: { type: ["string", "null"], format: date-time }
+        errorMessage: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+        finishedAt: { type: ["string", "null"], format: date-time }
+      required: [runId, runDate, triggeredBy, overallStatus, steps, schedule, frozenAt, cancelRequestedAt, errorMessage, createdAt, finishedAt]
+    OrchestrationRunList:
+      type: object
+      additionalProperties: false
+      properties:
+        runs: { type: array, items: { $ref: "#/components/schemas/OrchestrationRun" } }
+        total: { type: integer }
+        schedulePolicy: { type: object, additionalProperties: true }
+      required: [runs, total, schedulePolicy]
+    LateScratchDetection:
+      type: object
+      additionalProperties: false
+      properties:
+        slateDate: { type: string, format: date }
+        corrections: { type: integer }
+        targetedRerun: { type: boolean }
+      required: [slateDate, corrections, targetedRerun]
+    SlateExport:
+      type: object
+      additionalProperties: true
+      properties:
+        formatVersion: { type: string }
+        officialRecord: { type: string }
+        exportedAt: { type: string, format: date-time }
+        slateDate: { type: string, format: date }
+        games: { type: array, items: { type: object, additionalProperties: true } }
+        marketBoard: { type: array, items: { type: object, additionalProperties: true } }
+        researchStates: { type: array, items: { type: object, additionalProperties: true } }
+      required: [formatVersion, officialRecord, exportedAt, slateDate, games, marketBoard, researchStates]
+    AuditEvent:
+      type: object
+      additionalProperties: true
+      properties:
+        auditEventId: { type: string, format: uuid }
+        occurredAt: { type: string, format: date-time }
+        actor: { type: string }
+        action: { type: string }
+        resourceType: { type: string }
+        resourceId: { type: ["string", "null"] }
+      required: [auditEventId, occurredAt, actor, action, resourceType, resourceId]
+    AuditEventList:
+      type: object
+      additionalProperties: false
+      properties:
+        events: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } }
+        total: { type: integer }
+      required: [events, total]
 

@@ -2037,8 +2037,151 @@ export interface ResearchNoteList {
   total: number;
 }
 
+export type OrchestrationStepStatus = typeof OrchestrationStepStatus[keyof typeof OrchestrationStepStatus];
+
+
+export const OrchestrationStepStatus = {
+  PENDING: 'PENDING',
+  RUNNING: 'RUNNING',
+  SUCCESS: 'SUCCESS',
+  WARNING: 'WARNING',
+  FAILED: 'FAILED',
+  CANCELLED: 'CANCELLED',
+} as const;
+
+export interface OrchestrationStep {
+  name: string;
+  status: OrchestrationStepStatus;
+  /** @nullable */
+  startedAt: string | null;
+  /** @nullable */
+  finishedAt: string | null;
+  /** @nullable */
+  detail: string | null;
+}
+
+export type OrchestrationRunTriggeredBy = typeof OrchestrationRunTriggeredBy[keyof typeof OrchestrationRunTriggeredBy];
+
+
+export const OrchestrationRunTriggeredBy = {
+  SCHEDULED: 'SCHEDULED',
+  OPERATOR: 'OPERATOR',
+} as const;
+
+export type OrchestrationRunOverallStatus = typeof OrchestrationRunOverallStatus[keyof typeof OrchestrationRunOverallStatus];
+
+
+export const OrchestrationRunOverallStatus = {
+  RUNNING: 'RUNNING',
+  COMPLETE: 'COMPLETE',
+  PARTIAL: 'PARTIAL',
+  FAILED: 'FAILED',
+  CANCELLED: 'CANCELLED',
+} as const;
+
+export type OrchestrationRunSchedule = { [key: string]: unknown };
+
+export interface OrchestrationRun {
+  runId: string;
+  runDate: string;
+  triggeredBy: OrchestrationRunTriggeredBy;
+  overallStatus: OrchestrationRunOverallStatus;
+  steps: OrchestrationStep[];
+  schedule: OrchestrationRunSchedule;
+  /** @nullable */
+  frozenAt: string | null;
+  /** @nullable */
+  cancelRequestedAt: string | null;
+  /** @nullable */
+  errorMessage: string | null;
+  createdAt: string;
+  /** @nullable */
+  finishedAt: string | null;
+}
+
+export type OrchestrationRunListSchedulePolicy = { [key: string]: unknown };
+
+export interface OrchestrationRunList {
+  runs: OrchestrationRun[];
+  total: number;
+  schedulePolicy: OrchestrationRunListSchedulePolicy;
+}
+
+export interface LateScratchDetection {
+  slateDate: string;
+  corrections: number;
+  targetedRerun: boolean;
+}
+
+export type SlateExportGamesItem = { [key: string]: unknown };
+
+export type SlateExportMarketBoardItem = { [key: string]: unknown };
+
+export type SlateExportResearchStatesItem = { [key: string]: unknown };
+
+export interface SlateExport {
+  formatVersion: string;
+  officialRecord: string;
+  exportedAt: string;
+  slateDate: string;
+  games: SlateExportGamesItem[];
+  marketBoard: SlateExportMarketBoardItem[];
+  researchStates: SlateExportResearchStatesItem[];
+  [key: string]: unknown;
+ }
+
+export interface AuditEvent {
+  auditEventId: string;
+  occurredAt: string;
+  actor: string;
+  action: string;
+  resourceType: string;
+  /** @nullable */
+  resourceId: string | null;
+  [key: string]: unknown;
+ }
+
+export interface AuditEventList {
+  events: AuditEvent[];
+  total: number;
+}
+
 export type GetAnalystProjectionsParams = {
 date?: string;
+};
+
+export type GetAnalystOrchestrationRunsParams = {
+date?: string;
+};
+
+export type StartAnalystOrchestrationRunParams = {
+date: string;
+};
+
+export type DetectAnalystLateScratchesParams = {
+date: string;
+};
+
+export type AutomateAnalystSettlementParams = {
+date: string;
+};
+
+export type AutomateAnalystSettlement201 = { [key: string]: unknown };
+
+export type ExportAnalystSlateJsonParams = {
+date: string;
+};
+
+export type ExportAnalystWorkbookParams = {
+date: string;
+};
+
+export type GetAnalystAuditEventsParams = {
+/**
+ * @minimum 1
+ * @maximum 500
+ */
+limit?: number;
 };
 
 export type GetAnalystPlayerLabParams = {

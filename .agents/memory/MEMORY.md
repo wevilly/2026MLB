@@ -4,3 +4,4 @@
 - [Bettor source-text retention](bettor-source-text-retention.md) — long source rationales are stored only as structured non-verbatim summaries, never silently truncated excerpts.
 - [Bettor evaluation eligibility](bettor-evaluation-eligibility.md) — ambiguous doubleheader and post-first-pitch picks remain auditable but are ineligible for performance scoring.
 - [AI tool audit integrity](ai-tool-audit-integrity.md) — AI gateway audit records are permanently append-only; no application-level bypass may weaken this boundary.
+- [Orchestration freeze safety](orchestration-freeze-safety.md) — scheduled runs must be DB-claimed and freeze only after all gates pass at the persisted cutoff.
