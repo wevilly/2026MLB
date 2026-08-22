@@ -104,10 +104,35 @@ test("Phase 10 health and audit responses are safe operational read models", asy
   assert.ok([200, 503].includes(health.response.status));
   assert.ok(health.response.headers.get("x-request-id"));
   assert.ok(!JSON.stringify(health.body).includes("DATABASE_URL"));
+  if (health.response.status === 200) {
+    assert.equal(health.body.dependencies?.database, "ok");
+    assert.ok(health.body.dependencies?.modelStatus);
+    assert.ok(health.body.dependencies?.cache);
+  }
 
   const audit = await json("/analyst/audit-events?limit=10");
   assert.equal(audit.response.status, 200);
   assert.ok(Array.isArray(audit.body.events));
+});
+
+test("Phase 10 provides bounded single-flight caching and documented operational checks", async () => {
+  const [cache, app, runbook, loadTest, restoreDrill] = await Promise.all([
+    import("node:fs/promises").then((fs) => fs.readFile("artifacts/api-server/src/services/cache.ts", "utf8")),
+    import("node:fs/promises").then((fs) => fs.readFile("artifacts/api-server/src/app.ts", "utf8")),
+    import("node:fs/promises").then((fs) => fs.readFile("docs/operator-runbook.md", "utf8")),
+    import("node:fs/promises").then((fs) => fs.readFile("scripts/load-test.mjs", "utf8")),
+    import("node:fs/promises").then((fs) => fs.readFile("lib/db/scripts/verify-restore-drill.mjs", "utf8")),
+  ]);
+  assert.match(cache, /pendingLoads/);
+  assert.match(cache, /MAX_ENTRIES/);
+  assert.match(app, /invalidateCache\(""\)/);
+  assert.match(app, /REQUIRE_OPERATOR_APPROVAL/);
+  assert.match(app, /configuredOrigins/);
+  assert.match(runbook, /pnpm test:load/);
+  assert.match(runbook, /pnpm verify:restore-drill/);
+  assert.match(loadTest, /p95SlaMs/);
+  assert.match(restoreDrill, /RESTORE_DATABASE_URL must not point at the active DATABASE_URL/);
+  assert.ok(!restoreDrill.includes("?? process.env.DATABASE_URL"));
 });
 
 test("Phase 9A makes a queued interruption terminal without allowing a future freeze", async () => {

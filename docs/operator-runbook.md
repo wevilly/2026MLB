@@ -65,15 +65,31 @@ editing the old one.
 
 ### Database backup and restore drill
 
-1. Take a managed PostgreSQL backup before schema changes and record the
-   timestamp in the change log.
-2. Restore only into a non-production database first.
-3. Verify `orchestration_runs`, frozen snapshots, historical outcomes,
-   market postmortems, and audit events are present and internally linked.
+**Recovery targets:** retain daily backups for 30 days, restore the most recent
+backup with an RPO of 24 hours, and complete the initial verified restore
+assessment within four hours. Keep backup access restricted to deployment
+operators and encrypt backups at rest in the managed backup provider.
+
+1. Take a managed PostgreSQL backup before schema changes and record its
+   timestamp, retention expiry, and the target RPO/RTO in the change log.
+2. Restore only into a non-production database first; set
+   `RESTORE_DATABASE_URL` to that isolated database.
+3. Run `pnpm verify:restore-drill`. It verifies the operational ledger,
+   frozen snapshots, official outcomes, postmortems, and append-only audit
+   records all exist in the restored database.
 4. Run read-only health, market-board, feature-store, settlement, and export
-   checks before considering a production restore.
+   checks before considering a production restore. Record the command output
+   and elapsed restore time with the change record.
 5. Never delete immutable records to resolve a restore discrepancy; create a
    documented correction or restore the proper backup instead.
+
+### Read-performance verification
+
+Run `pnpm test:load` against a warm API service before a production release.
+It applies concurrent traffic to the health, slate, bullpen, market board, and
+game-summary reads and fails if any endpoint reaches a p95 of 500 ms. Override
+`API_BASE_URL`, `LOAD_TEST_REQUESTS`, or `LOAD_TEST_CONCURRENCY` only when
+recording the reason and environment in the release log.
 
 ## Known limitations
 

@@ -1734,7 +1734,8 @@ router.post("/analyst/ai/chat", async (req, res, next) => {
     res.json(ChatWithAnalystAiResponse.parse(chat));
   } catch (error) {
     if (aiWorkflowErrorResponse(error, res)) return;
-    res.status(502).json({ error: error instanceof Error ? error.message : "AI Analyst chat failed" });
+    req.log.error({ err: error, requestId: req.id }, "AI Analyst chat request failed");
+    res.status(502).json({ error: "AI Analyst chat is temporarily unavailable.", requestId: req.id });
   }
 });
 
