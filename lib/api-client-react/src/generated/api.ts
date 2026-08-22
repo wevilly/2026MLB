@@ -22,6 +22,7 @@ import type {
 import type {
   AnalystSettings,
   BackfillFeatureStoreParams,
+  BettorEvaluation,
   BettorPickIngestInput,
   BettorPickIngestResult,
   BettorPickList,
@@ -48,6 +49,7 @@ import type {
   FeatureStoreCorrectionResult,
   FeatureStoreResult,
   GameLab,
+  GetAnalystBettorEvaluationParams,
   GetAnalystBettorPicksParams,
   GetAnalystBullpenRoomParams,
   GetAnalystDailyBoardGameSummaryParams,
@@ -3438,6 +3440,94 @@ export function useGetAnalystBettorPicks<TData = Awaited<ReturnType<typeof getAn
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAnalystBettorPicksQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAnalystBettorEvaluationUrl = (params?: GetAnalystBettorEvaluationParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/bettor/evaluation?${stringifiedParams}` : `/api/analyst/bettor/evaluation`
+}
+
+/**
+ * Returns persisted source performance by market and approved mechanism,
+ * plus settled pick history. Likely copied picks receive reduced weight
+ * in outcome and independence calculations. This observational output is
+ * isolated from model training and daily confidence labels.
+ * @summary Evaluate bettor performance against settled official outcomes
+ */
+export const getAnalystBettorEvaluation = async (params?: GetAnalystBettorEvaluationParams, options?: Parameters<typeof customFetch>[1]): Promise<BettorEvaluation> => {
+
+  return customFetch<BettorEvaluation>(getGetAnalystBettorEvaluationUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystBettorEvaluationQueryKey = (params?: GetAnalystBettorEvaluationParams,) => {
+    return [
+    `/api/analyst/bettor/evaluation`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystBettorEvaluationQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystBettorEvaluation>>, TError = ErrorType<ErrorResponse>>(params?: GetAnalystBettorEvaluationParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystBettorEvaluation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystBettorEvaluationQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystBettorEvaluation>>> = ({ signal }) => getAnalystBettorEvaluation(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystBettorEvaluation>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystBettorEvaluationQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystBettorEvaluation>>>
+export type GetAnalystBettorEvaluationQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Evaluate bettor performance against settled official outcomes
+ */
+
+export function useGetAnalystBettorEvaluation<TData = Awaited<ReturnType<typeof getAnalystBettorEvaluation>>, TError = ErrorType<ErrorResponse>>(
+ params?: GetAnalystBettorEvaluationParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystBettorEvaluation>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystBettorEvaluationQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

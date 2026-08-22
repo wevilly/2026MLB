@@ -1103,6 +1103,53 @@ export const pickDuplicationLineage = pgTable(
 );
 
 /**
+ * Persisted, observational performance rollup for one bettor source. These
+ * rows are recalculated from bettor picks and official settlement outcomes;
+ * they never feed model training or confidence-label logic.
+ */
+export const bettorPerformanceRecords = pgTable(
+  "bettor_performance_records",
+  {
+    performanceRecordId: uuid("performance_record_id").primaryKey().defaultRandom(),
+    sourceId: uuid("source_id").notNull().references(() => bettorSources.sourceId, { onDelete: "cascade" }),
+    market: marketTypeEnum("market").notNull(),
+    mechanism: bettorMechanismEnum("mechanism").notNull(),
+    pickCount: integer("pick_count").notNull().default(0),
+    settledPickCount: integer("settled_pick_count").notNull().default(0),
+    outcomeRate: numeric("outcome_rate").notNull().default("0"),
+    baseRateDelta: numeric("base_rate_delta").notNull().default("0"),
+    duplicationAdjustedCount: numeric("duplication_adjusted_count").notNull().default("0"),
+    independenceScore: numeric("independence_score").notNull().default("0"),
+    evaluationWindow: text("evaluation_window").notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sourceMarketMechanismWindowIdx: uniqueIndex("bettor_performance_source_market_mechanism_window_idx").on(
+      table.sourceId,
+      table.market,
+      table.mechanism,
+      table.evaluationWindow,
+    ),
+    countsCheck: check(
+      "bettor_performance_counts_check",
+      sql`${table.pickCount} >= 0 AND ${table.settledPickCount} >= 0 AND ${table.settledPickCount} <= ${table.pickCount}`,
+    ),
+    ratesCheck: check(
+      "bettor_performance_rates_check",
+      sql`${table.outcomeRate} >= 0 AND ${table.outcomeRate} <= 1
+        AND ${table.independenceScore} >= 0 AND ${table.independenceScore} <= 1
+        AND ${table.baseRateDelta} >= -1 AND ${table.baseRateDelta} <= 1
+        AND ${table.duplicationAdjustedCount} >= 0
+        AND ${table.duplicationAdjustedCount} <= ${table.settledPickCount}`,
+    ),
+    evaluationWindowCheck: check(
+      "bettor_performance_evaluation_window_check",
+      sql`char_length(btrim(${table.evaluationWindow})) BETWEEN 1 AND 80`,
+    ),
+  }),
+);
+
+/**
  * PLACEHOLDER — extended by Phase 4B (Official Settlement and Postmortem Engine).
  *
  * Phase 4 extension contract:

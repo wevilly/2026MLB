@@ -1620,6 +1620,124 @@ export interface BettorPickList {
   total: number;
 }
 
+export interface BettorEvaluationSource {
+  sourceId: string;
+  platform: string;
+  accountHandle: string;
+}
+
+export type BettorPerformanceRecordMarket = typeof BettorPerformanceRecordMarket[keyof typeof BettorPerformanceRecordMarket];
+
+
+export const BettorPerformanceRecordMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export interface BettorPerformanceRecord {
+  performanceRecordId: string;
+  sourceId: string;
+  source: BettorEvaluationSource;
+  market: BettorPerformanceRecordMarket;
+  mechanism: BettorMechanism;
+  /** @minimum 0 */
+  pickCount: number;
+  /** @minimum 0 */
+  settledPickCount: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  outcomeRate: number;
+  /**
+     * @minimum -1
+     * @maximum 1
+     */
+  baseRateDelta: number;
+  /** @minimum 0 */
+  duplicationAdjustedCount: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  independenceScore: number;
+  evaluationWindow: string;
+  computedAt: string;
+}
+
+export type BettorSettledOutcomeSettlementState = typeof BettorSettledOutcomeSettlementState[keyof typeof BettorSettledOutcomeSettlementState];
+
+
+export const BettorSettledOutcomeSettlementState = {
+  SETTLED: 'SETTLED',
+} as const;
+
+export interface BettorSettledOutcome {
+  outcomeId: string;
+  outcomeValue: number;
+  outcomeHit: boolean;
+  settlementState: BettorSettledOutcomeSettlementState;
+  /** @nullable */
+  settledAt: string | null;
+}
+
+export type BettorEvaluationPickMarket = typeof BettorEvaluationPickMarket[keyof typeof BettorEvaluationPickMarket];
+
+
+export const BettorEvaluationPickMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type BettorEvaluationPickPickDirection = typeof BettorEvaluationPickPickDirection[keyof typeof BettorEvaluationPickPickDirection];
+
+
+export const BettorEvaluationPickPickDirection = {
+  YES: 'YES',
+  NO: 'NO',
+} as const;
+
+export type BettorEvaluationPickDuplicationFlag = typeof BettorEvaluationPickDuplicationFlag[keyof typeof BettorEvaluationPickDuplicationFlag];
+
+
+export const BettorEvaluationPickDuplicationFlag = {
+  INDEPENDENT: 'INDEPENDENT',
+  IS_LIKELY_COPY: 'IS_LIKELY_COPY',
+} as const;
+
+export interface BettorEvaluationPick {
+  pickId: string;
+  slateDate: string;
+  /** @minimum 1 */
+  playerId: number;
+  playerName: string;
+  market: BettorEvaluationPickMarket;
+  pickDirection: BettorEvaluationPickPickDirection;
+  mechanismTags: BettorMechanism[];
+  duplicationFlag: BettorEvaluationPickDuplicationFlag;
+  isLikelyCopy: boolean;
+  source: BettorEvaluationSource;
+  settledOutcome: BettorSettledOutcome | null;
+  /** @nullable */
+  predictionCorrect: boolean | null;
+}
+
+export interface BettorEvaluation {
+  evaluationWindow: string;
+  computedAt: string;
+  records: BettorPerformanceRecord[];
+  picks: BettorEvaluationPick[];
+  sources: BettorEvaluationSource[];
+  /** @minimum 0 */
+  totalRecords: number;
+  /** @minimum 0 */
+  totalPicks: number;
+}
+
 export type GetAnalystProjectionsParams = {
 date?: string;
 };
@@ -1951,6 +2069,21 @@ export type GetAnalystBettorPicksMarket = typeof GetAnalystBettorPicksMarket[key
 
 
 export const GetAnalystBettorPicksMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type GetAnalystBettorEvaluationParams = {
+sourceId?: string;
+market?: GetAnalystBettorEvaluationMarket;
+};
+
+export type GetAnalystBettorEvaluationMarket = typeof GetAnalystBettorEvaluationMarket[keyof typeof GetAnalystBettorEvaluationMarket];
+
+
+export const GetAnalystBettorEvaluationMarket = {
   TB: 'TB',
   XBH: 'XBH',
   WALK: 'WALK',

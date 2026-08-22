@@ -1663,6 +1663,96 @@ export const GetAnalystBettorPicksResponse = zod.object({
 
 
 /**
+ * Returns persisted source performance by market and approved mechanism,
+ * plus settled pick history. Likely copied picks receive reduced weight
+ * in outcome and independence calculations. This observational output is
+ * isolated from model training and daily confidence labels.
+ * @summary Evaluate bettor performance against settled official outcomes
+ */
+export const GetAnalystBettorEvaluationQueryParams = zod.object({
+  "sourceId": zod.coerce.string().uuid().optional(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional()
+})
+
+export const getAnalystBettorEvaluationResponseRecordsItemPickCountMin = 0;
+
+export const getAnalystBettorEvaluationResponseRecordsItemSettledPickCountMin = 0;
+
+export const getAnalystBettorEvaluationResponseRecordsItemOutcomeRateMin = 0;
+export const getAnalystBettorEvaluationResponseRecordsItemOutcomeRateMax = 1;
+
+export const getAnalystBettorEvaluationResponseRecordsItemBaseRateDeltaMin = -1;
+export const getAnalystBettorEvaluationResponseRecordsItemBaseRateDeltaMax = 1;
+
+export const getAnalystBettorEvaluationResponseRecordsItemDuplicationAdjustedCountMin = 0;
+
+export const getAnalystBettorEvaluationResponseRecordsItemIndependenceScoreMin = 0;
+export const getAnalystBettorEvaluationResponseRecordsItemIndependenceScoreMax = 1;
+
+
+export const getAnalystBettorEvaluationResponseTotalRecordsMin = 0;
+
+export const getAnalystBettorEvaluationResponseTotalPicksMin = 0;
+
+
+
+export const GetAnalystBettorEvaluationResponse = zod.object({
+  "evaluationWindow": zod.string(),
+  "computedAt": zod.coerce.date(),
+  "records": zod.array(zod.object({
+  "performanceRecordId": zod.string().uuid(),
+  "sourceId": zod.string().uuid(),
+  "source": zod.object({
+  "sourceId": zod.string().uuid(),
+  "platform": zod.string(),
+  "accountHandle": zod.string()
+}),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "mechanism": zod.enum(['CONTACT_VOLUME', 'POWER_ROUTE', 'MULTI_PATH', 'DOUBLE_ROUTE', 'TRIPLE_ROUTE', 'HOME_RUN_ROUTE', 'PATIENCE_VS_COMMAND', 'COUNT_CREATION', 'BULLPEN_WALK_PATH', 'PULL_AIR', 'BARREL_POWER', 'PITCH_SHAPE_MISMATCH', 'PARK_ENVIRONMENT']),
+  "pickCount": zod.number().int().min(getAnalystBettorEvaluationResponseRecordsItemPickCountMin),
+  "settledPickCount": zod.number().int().min(getAnalystBettorEvaluationResponseRecordsItemSettledPickCountMin),
+  "outcomeRate": zod.number().min(getAnalystBettorEvaluationResponseRecordsItemOutcomeRateMin).max(getAnalystBettorEvaluationResponseRecordsItemOutcomeRateMax),
+  "baseRateDelta": zod.number().min(getAnalystBettorEvaluationResponseRecordsItemBaseRateDeltaMin).max(getAnalystBettorEvaluationResponseRecordsItemBaseRateDeltaMax),
+  "duplicationAdjustedCount": zod.number().min(getAnalystBettorEvaluationResponseRecordsItemDuplicationAdjustedCountMin),
+  "independenceScore": zod.number().min(getAnalystBettorEvaluationResponseRecordsItemIndependenceScoreMin).max(getAnalystBettorEvaluationResponseRecordsItemIndependenceScoreMax),
+  "evaluationWindow": zod.string(),
+  "computedAt": zod.coerce.date()
+})),
+  "picks": zod.array(zod.object({
+  "pickId": zod.string().uuid(),
+  "slateDate": zod.string(),
+  "playerId": zod.number().int().min(1),
+  "playerName": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "pickDirection": zod.enum(['YES', 'NO']),
+  "mechanismTags": zod.array(zod.enum(['CONTACT_VOLUME', 'POWER_ROUTE', 'MULTI_PATH', 'DOUBLE_ROUTE', 'TRIPLE_ROUTE', 'HOME_RUN_ROUTE', 'PATIENCE_VS_COMMAND', 'COUNT_CREATION', 'BULLPEN_WALK_PATH', 'PULL_AIR', 'BARREL_POWER', 'PITCH_SHAPE_MISMATCH', 'PARK_ENVIRONMENT'])),
+  "duplicationFlag": zod.enum(['INDEPENDENT', 'IS_LIKELY_COPY']),
+  "isLikelyCopy": zod.boolean(),
+  "source": zod.object({
+  "sourceId": zod.string().uuid(),
+  "platform": zod.string(),
+  "accountHandle": zod.string()
+}),
+  "settledOutcome": zod.union([zod.object({
+  "outcomeId": zod.string().uuid(),
+  "outcomeValue": zod.number(),
+  "outcomeHit": zod.boolean(),
+  "settlementState": zod.enum(['SETTLED']),
+  "settledAt": zod.coerce.date().nullable()
+}),zod.null()]),
+  "predictionCorrect": zod.boolean().nullable()
+})),
+  "sources": zod.array(zod.object({
+  "sourceId": zod.string().uuid(),
+  "platform": zod.string(),
+  "accountHandle": zod.string()
+})),
+  "totalRecords": zod.number().int().min(getAnalystBettorEvaluationResponseTotalRecordsMin),
+  "totalPicks": zod.number().int().min(getAnalystBettorEvaluationResponseTotalPicksMin)
+})
+
+
+/**
  * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage for all 30 teams
  */
 export const GetAnalystBullpenRoomQueryParams = zod.object({

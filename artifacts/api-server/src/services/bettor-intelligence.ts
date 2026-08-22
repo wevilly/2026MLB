@@ -29,6 +29,8 @@ export const MAX_RETAINED_REASONING_LENGTH = 500;
 const LIKELY_COPY_THRESHOLD = 0.8;
 const LINEAGE_THRESHOLD = 0.5;
 const COPY_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const LIKELY_COPY_EVALUATION_WEIGHT = 0.25;
+export const BETTOR_EVALUATION_WINDOW = "ALL_SETTLED";
 
 const DB_MARKET: Record<BettorMarket, string> = {
   TB: "TOTAL_BASES_2_PLUS",
@@ -380,6 +382,283 @@ async function queryPickRows(filters: { date?: string; market?: BettorMarket; pi
 
 export async function queryBettorPicks(filters: { date: string; market?: BettorMarket | null }) {
   return queryPickRows({ date: filters.date, market: filters.market ?? undefined });
+}
+
+type EvaluationPickRow = {
+  pick_id: string;
+  slate_date: string;
+  player_id: number;
+  player_name: string;
+  market: string;
+  pick_direction: "YES" | "NO";
+  mechanism_tags: BettorMechanism[] | string;
+  duplication_flag: "INDEPENDENT" | "IS_LIKELY_COPY";
+  source_id: string;
+  platform: string;
+  account_handle: string;
+  outcome_id: string | null;
+  outcome_value: string | number | null;
+  outcome_hit: boolean | null;
+  settlement_state: string | null;
+  settled_at: string | Date | null;
+};
+
+type EvaluationRecordRow = {
+  performance_record_id: string;
+  source_id: string;
+  platform: string;
+  account_handle: string;
+  market: string;
+  mechanism: BettorMechanism;
+  pick_count: number;
+  settled_pick_count: number;
+  outcome_rate: string | number;
+  base_rate_delta: string | number;
+  duplication_adjusted_count: string | number;
+  independence_score: string | number;
+  evaluation_window: string;
+  computed_at: string | Date;
+};
+
+function predictionCorrect(pickDirection: "YES" | "NO", outcomeHit: boolean | null) {
+  if (outcomeHit == null) return null;
+  return pickDirection === "YES" ? outcomeHit : !outcomeHit;
+}
+
+function mapEvaluationRecord(row: EvaluationRecordRow) {
+  return {
+    performanceRecordId: row.performance_record_id,
+    sourceId: row.source_id,
+    source: { sourceId: row.source_id, platform: row.platform, accountHandle: row.account_handle },
+    market: SHORT_MARKET[row.market],
+    mechanism: row.mechanism,
+    pickCount: row.pick_count,
+    settledPickCount: row.settled_pick_count,
+    outcomeRate: Number(row.outcome_rate),
+    baseRateDelta: Number(row.base_rate_delta),
+    duplicationAdjustedCount: Number(row.duplication_adjusted_count),
+    independenceScore: Number(row.independence_score),
+    evaluationWindow: row.evaluation_window,
+    computedAt: iso(row.computed_at),
+  };
+}
+
+function mapEvaluationPick(row: EvaluationPickRow) {
+  return {
+    pickId: row.pick_id,
+    slateDate: row.slate_date,
+    playerId: row.player_id,
+    playerName: row.player_name,
+    market: SHORT_MARKET[row.market],
+    pickDirection: row.pick_direction,
+    mechanismTags: parseMechanismTags(row.mechanism_tags),
+    duplicationFlag: row.duplication_flag,
+    isLikelyCopy: row.duplication_flag === "IS_LIKELY_COPY",
+    source: {
+      sourceId: row.source_id,
+      platform: row.platform,
+      accountHandle: row.account_handle,
+    },
+    settledOutcome: row.outcome_id ? {
+      outcomeId: row.outcome_id,
+      outcomeValue: Number(row.outcome_value),
+      outcomeHit: row.outcome_hit,
+      settlementState: row.settlement_state,
+      settledAt: row.settled_at ? iso(row.settled_at) : null,
+    } : null,
+    predictionCorrect: predictionCorrect(row.pick_direction, row.outcome_hit),
+  };
+}
+
+/**
+ * Rebuild the current all-settled bettor evaluation from source-attributed
+ * picks and terminal MLB outcomes. This is deliberately a separate read
+ * model: its rows are never read by the model engines or daily confidence
+ * board.
+ */
+export async function queryBettorEvaluation(filters: {
+  sourceId?: string | null;
+  market?: BettorMarket | null;
+}) {
+  const params: unknown[] = [];
+  const conditions: string[] = ["bp.market IN ('TOTAL_BASES_2_PLUS', 'EXTRA_BASE_HIT', 'BATTER_WALK', 'HOME_RUN')"];
+  if (filters.sourceId) {
+    params.push(filters.sourceId);
+    conditions.push(`bp.source_id = $${params.length}`);
+  }
+  if (filters.market) {
+    params.push(DB_MARKET[filters.market]);
+    conditions.push(`bp.market = $${params.length}`);
+  }
+  const where = conditions.join(" AND ");
+  const picksResult = await pool.query<EvaluationPickRow>(
+    `SELECT bp.pick_id, bp.slate_date::text, bp.player_id, p.full_name AS player_name,
+            bp.market, bp.pick_direction, bp.mechanism_tags, bp.duplication_flag,
+            bp.source_id, bs.platform, bs.account_handle,
+            ho.outcome_id, ho.outcome_value, ho.outcome_hit,
+            ho.settlement_state, ho.settled_at
+       FROM bettor_picks bp
+       JOIN bettor_sources bs ON bs.source_id = bp.source_id
+       JOIN players p ON p.player_id = bp.player_id
+       LEFT JOIN LATERAL (
+         SELECT ho.outcome_id, ho.outcome_value, ho.outcome_hit,
+                ho.settlement_state, ho.settled_at
+           FROM historical_outcomes ho
+           JOIN games g ON g.game_pk = ho.game_pk
+          WHERE ho.player_id = bp.player_id
+            AND ho.slate_date = bp.slate_date
+            AND ho.market = bp.market
+            AND ho.settlement_state = 'SETTLED'
+            AND ho.source_id = 'MLB_OFFICIAL'
+            AND g.start_time_utc IS NOT NULL
+            AND bp.posted_at <= g.start_time_utc
+            AND NOT EXISTS (
+              SELECT 1 FROM historical_outcomes newer
+               WHERE newer.correction_of = ho.outcome_id
+            )
+            AND 1 = (
+              SELECT count(*)
+                FROM historical_outcomes candidate
+                JOIN games candidate_game ON candidate_game.game_pk = candidate.game_pk
+               WHERE candidate.player_id = bp.player_id
+                 AND candidate.slate_date = bp.slate_date
+                 AND candidate.market = bp.market
+                 AND candidate.settlement_state = 'SETTLED'
+                 AND candidate.source_id = 'MLB_OFFICIAL'
+                 AND candidate_game.start_time_utc IS NOT NULL
+                 AND bp.posted_at <= candidate_game.start_time_utc
+                 AND NOT EXISTS (
+                   SELECT 1 FROM historical_outcomes candidate_newer
+                    WHERE candidate_newer.correction_of = candidate.outcome_id
+                 )
+            )
+          LIMIT 1
+       ) ho ON true
+      WHERE ${where}
+      ORDER BY bp.slate_date DESC, bp.posted_at DESC, bp.pick_id`,
+    params,
+  );
+
+  const marketBaseRates = new Map<string, number>();
+  const baseResult = await pool.query<{ market: string; rate: string | number }>(
+    `SELECT market, AVG(CASE WHEN outcome_hit THEN 1 ELSE 0 END)::numeric AS rate
+       FROM historical_outcomes ho
+      WHERE ho.settlement_state = 'SETTLED'
+        AND ho.source_id = 'MLB_OFFICIAL'
+        AND NOT EXISTS (
+          SELECT 1 FROM historical_outcomes newer
+           WHERE newer.correction_of = ho.outcome_id
+        )
+      GROUP BY market`,
+  );
+  for (const row of baseResult.rows) marketBaseRates.set(row.market, Number(row.rate));
+
+  const aggregates = new Map<string, {
+    sourceId: string;
+    market: string;
+    mechanism: BettorMechanism;
+    pickCount: number;
+    settledPickCount: number;
+    weightedCorrect: number;
+    weightedBase: number;
+    adjustedCount: number;
+  }>();
+  for (const pick of picksResult.rows) {
+    for (const mechanism of parseMechanismTags(pick.mechanism_tags)) {
+      const key = `${pick.source_id}:${pick.market}:${mechanism}`;
+      const aggregate = aggregates.get(key) ?? {
+        sourceId: pick.source_id,
+        market: pick.market,
+        mechanism,
+        pickCount: 0,
+        settledPickCount: 0,
+        weightedCorrect: 0,
+        weightedBase: 0,
+        adjustedCount: 0,
+      };
+      aggregate.pickCount += 1;
+      if (pick.outcome_id) {
+        const weight = pick.duplication_flag === "IS_LIKELY_COPY" ? LIKELY_COPY_EVALUATION_WEIGHT : 1;
+        const marketBaseRate = marketBaseRates.get(pick.market) ?? 0;
+        const directionBaseRate = pick.pick_direction === "YES" ? marketBaseRate : 1 - marketBaseRate;
+        aggregate.settledPickCount += 1;
+        aggregate.adjustedCount += weight;
+        aggregate.weightedCorrect += weight * (predictionCorrect(pick.pick_direction, pick.outcome_hit) ? 1 : 0);
+        aggregate.weightedBase += weight * directionBaseRate;
+      }
+      aggregates.set(key, aggregate);
+    }
+  }
+
+  const computedAt = new Date().toISOString();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const persisted: EvaluationRecordRow[] = [];
+    for (const aggregate of aggregates.values()) {
+      const outcomeRate = aggregate.adjustedCount > 0 ? aggregate.weightedCorrect / aggregate.adjustedCount : 0;
+      const baseRateDelta = aggregate.adjustedCount > 0
+        ? outcomeRate - (aggregate.weightedBase / aggregate.adjustedCount)
+        : 0;
+      const independenceScore = aggregate.settledPickCount > 0
+        ? aggregate.adjustedCount / aggregate.settledPickCount
+        : 0;
+      const result = await client.query<EvaluationRecordRow>(
+        `INSERT INTO bettor_performance_records
+           (source_id, market, mechanism, pick_count, settled_pick_count,
+            outcome_rate, base_rate_delta, duplication_adjusted_count,
+            independence_score, evaluation_window, computed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         ON CONFLICT (source_id, market, mechanism, evaluation_window)
+         DO UPDATE SET pick_count = EXCLUDED.pick_count,
+                       settled_pick_count = EXCLUDED.settled_pick_count,
+                       outcome_rate = EXCLUDED.outcome_rate,
+                       base_rate_delta = EXCLUDED.base_rate_delta,
+                       duplication_adjusted_count = EXCLUDED.duplication_adjusted_count,
+                       independence_score = EXCLUDED.independence_score,
+                       computed_at = EXCLUDED.computed_at
+         RETURNING performance_record_id, source_id, market, mechanism,
+                   pick_count, settled_pick_count, outcome_rate,
+                   base_rate_delta, duplication_adjusted_count,
+                   independence_score, evaluation_window, computed_at,
+                   (SELECT platform FROM bettor_sources WHERE source_id = $1) AS platform,
+                   (SELECT account_handle FROM bettor_sources WHERE source_id = $1) AS account_handle`,
+        [
+          aggregate.sourceId,
+          aggregate.market,
+          aggregate.mechanism,
+          aggregate.pickCount,
+          aggregate.settledPickCount,
+          outcomeRate,
+          baseRateDelta,
+          aggregate.adjustedCount,
+          independenceScore,
+          BETTOR_EVALUATION_WINDOW,
+          computedAt,
+        ],
+      );
+      persisted.push(result.rows[0]);
+    }
+    await client.query("COMMIT");
+    const sources = [...new Map(picksResult.rows.map((pick) => [
+      pick.source_id,
+      { sourceId: pick.source_id, platform: pick.platform, accountHandle: pick.account_handle },
+    ])).values()];
+    return {
+      evaluationWindow: BETTOR_EVALUATION_WINDOW,
+      computedAt,
+      records: persisted.map(mapEvaluationRecord),
+      picks: picksResult.rows.map(mapEvaluationPick),
+      sources,
+      totalRecords: persisted.length,
+      totalPicks: picksResult.rows.length,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function ingestBettorPick(input: BettorPickInput) {

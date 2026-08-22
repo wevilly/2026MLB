@@ -35,6 +35,8 @@ import {
   IngestAnalystBettorPickBody,
   IngestAnalystBettorPickResponse,
   GetAnalystBettorPicksResponse,
+  GetAnalystBettorEvaluationQueryParams,
+  GetAnalystBettorEvaluationResponse,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
@@ -86,6 +88,7 @@ import {
   createBettorSource,
   deleteBettorSource,
   ingestBettorPick,
+  queryBettorEvaluation,
   queryBettorPicks,
   queryBettorSources,
   updateBettorSource,
@@ -1442,6 +1445,28 @@ router.get("/analyst/bettor/picks", async (req, res, next) => {
     const market = requestedBettorMarket(req.query.market);
     const picks = await queryBettorPicks({ date, market });
     res.json(GetAnalystBettorPicksResponse.parse({ date, market, picks, total: picks.length }));
+  } catch (error) {
+    if (bettorErrorResponse(error, res)) return;
+    next(error);
+  }
+});
+
+// ── Phase 7B – Bettor Evaluation (read-only observational data) ─────────────
+
+router.get("/analyst/bettor/evaluation", async (req, res, next) => {
+  try {
+    const params = GetAnalystBettorEvaluationQueryParams.safeParse(req.query);
+    if (!params.success) {
+      req.log.warn({ issues: params.error.issues }, "Rejected invalid bettor evaluation query");
+      res.status(400).json({ error: "sourceId must be a UUID and market must be TB, XBH, WALK, or HR" });
+      return;
+    }
+    const market = requestedBettorMarket(params.data.market);
+    const evaluation = await queryBettorEvaluation({
+      sourceId: params.data.sourceId ?? null,
+      market,
+    });
+    res.json(GetAnalystBettorEvaluationResponse.parse(evaluation));
   } catch (error) {
     if (bettorErrorResponse(error, res)) return;
     next(error);

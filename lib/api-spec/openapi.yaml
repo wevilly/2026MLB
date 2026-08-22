@@ -1050,6 +1050,37 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /analyst/bettor/evaluation:
+    get:
+      operationId: getAnalystBettorEvaluation
+      tags: [analyst]
+      summary: Evaluate bettor performance against settled official outcomes
+      description: |
+        Returns persisted source performance by market and approved mechanism,
+        plus settled pick history. Likely copied picks receive reduced weight
+        in outcome and independence calculations. This observational output is
+        isolated from model training and daily confidence labels.
+      parameters:
+        - name: sourceId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: market
+          in: query
+          required: false
+          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+      responses:
+        "200":
+          description: Bettor evaluation records and settled pick history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BettorEvaluation"
+        "400":
+          description: Invalid source ID or market
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -2237,4 +2268,80 @@ components:
           items: { $ref: "#/components/schemas/BettorPick" }
         total: { type: integer, minimum: 0 }
       required: [date, market, picks, total]
+    BettorEvaluationSource:
+      type: object
+      additionalProperties: false
+      properties:
+        sourceId: { type: string, format: uuid }
+        platform: { type: string }
+        accountHandle: { type: string }
+      required: [sourceId, platform, accountHandle]
+    BettorPerformanceRecord:
+      type: object
+      additionalProperties: false
+      properties:
+        performanceRecordId: { type: string, format: uuid }
+        sourceId: { type: string, format: uuid }
+        source: { $ref: "#/components/schemas/BettorEvaluationSource" }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        mechanism: { $ref: "#/components/schemas/BettorMechanism" }
+        pickCount: { type: integer, minimum: 0 }
+        settledPickCount: { type: integer, minimum: 0 }
+        outcomeRate: { type: number, minimum: 0, maximum: 1 }
+        baseRateDelta: { type: number, minimum: -1, maximum: 1 }
+        duplicationAdjustedCount: { type: number, minimum: 0 }
+        independenceScore: { type: number, minimum: 0, maximum: 1 }
+        evaluationWindow: { type: string }
+        computedAt: { type: string, format: date-time }
+      required: [performanceRecordId, sourceId, source, market, mechanism, pickCount, settledPickCount, outcomeRate, baseRateDelta, duplicationAdjustedCount, independenceScore, evaluationWindow, computedAt]
+    BettorSettledOutcome:
+      type: object
+      additionalProperties: false
+      properties:
+        outcomeId: { type: string, format: uuid }
+        outcomeValue: { type: number }
+        outcomeHit: { type: boolean }
+        settlementState: { type: string, enum: [SETTLED] }
+        settledAt: { type: ["string", "null"], format: date-time }
+      required: [outcomeId, outcomeValue, outcomeHit, settlementState, settledAt]
+    BettorEvaluationPick:
+      type: object
+      additionalProperties: false
+      properties:
+        pickId: { type: string, format: uuid }
+        slateDate: { type: string }
+        playerId: { type: integer, minimum: 1 }
+        playerName: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        pickDirection: { type: string, enum: [YES, NO] }
+        mechanismTags:
+          type: array
+          items: { $ref: "#/components/schemas/BettorMechanism" }
+        duplicationFlag: { type: string, enum: [INDEPENDENT, IS_LIKELY_COPY] }
+        isLikelyCopy: { type: boolean }
+        source: { $ref: "#/components/schemas/BettorEvaluationSource" }
+        settledOutcome:
+          anyOf:
+            - $ref: "#/components/schemas/BettorSettledOutcome"
+            - type: "null"
+        predictionCorrect: { type: ["boolean", "null"] }
+      required: [pickId, slateDate, playerId, playerName, market, pickDirection, mechanismTags, duplicationFlag, isLikelyCopy, source, settledOutcome, predictionCorrect]
+    BettorEvaluation:
+      type: object
+      additionalProperties: false
+      properties:
+        evaluationWindow: { type: string }
+        computedAt: { type: string, format: date-time }
+        records:
+          type: array
+          items: { $ref: "#/components/schemas/BettorPerformanceRecord" }
+        picks:
+          type: array
+          items: { $ref: "#/components/schemas/BettorEvaluationPick" }
+        sources:
+          type: array
+          items: { $ref: "#/components/schemas/BettorEvaluationSource" }
+        totalRecords: { type: integer, minimum: 0 }
+        totalPicks: { type: integer, minimum: 0 }
+      required: [evaluationWindow, computedAt, records, picks, sources, totalRecords, totalPicks]
 
