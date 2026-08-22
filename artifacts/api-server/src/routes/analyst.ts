@@ -142,12 +142,23 @@ import {
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
 
+function currentEasternDate() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
 function requestedDate(value: unknown) {
   const date = value instanceof Date
     ? value.toISOString().slice(0, 10)
     : typeof value === "string"
       ? value
-      : new Date().toISOString().slice(0, 10);
+      : currentEasternDate();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must use YYYY-MM-DD");
   return date;
 }
@@ -221,10 +232,11 @@ function isoString(value: string | Date | null | undefined) {
   return value instanceof Date ? value.toISOString() : value;
 }
 
-async function sourceBadges() {
+async function sourceBadges(effectiveDate: string) {
   const runs = await pool.query<{
     source_id: string;
     status: string;
+    effective_date: Date;
     finished_at: string | null;
     row_count: number | null;
     normalized_row_count: number | null;
@@ -233,38 +245,46 @@ async function sourceBadges() {
      duration_ms: number | null;
     error_message: string | null;
   }>(
-    `SELECT DISTINCT ON (source_id) source_id, status, finished_at, row_count, normalized_row_count, rejected_row_count, http_status, duration_ms, error_message
+    `SELECT DISTINCT ON (source_id) source_id, status, effective_date, finished_at, row_count, normalized_row_count, rejected_row_count, http_status, duration_ms, error_message
      FROM ingest_runs
      WHERE source_id IN ('MLB_OFFICIAL', 'FANTASYPROS', 'STATCAST', 'FANGRAPHS', 'PARK_FACTORS')
-     ORDER BY source_id, started_at DESC`,
+       AND effective_date <= $1
+     ORDER BY source_id, effective_date DESC, started_at DESC`,
+    [effectiveDate],
   );
   const bySource = new Map(runs.rows.map((row) => [row.source_id, row]));
   const makeRunBadge = (name: string, run: {
-    status: string; finished_at: string | null; row_count: number | null; normalized_row_count: number | null;
+    status: string; effective_date: Date; finished_at: string | null; row_count: number | null; normalized_row_count: number | null;
     rejected_row_count: number | null; http_status: number | null; duration_ms: number | null; error_message: string | null;
   } | undefined, configured = true) => {
     if (!configured) return { name, status: "NOT CONFIGURED", freshness: "Credential missing", lastSuccess: null, rowCount: 0, detail: "A server-side credential is required." };
     if (!run) return { name, status: "NOT RUN", freshness: "No successful ingest", lastSuccess: null, rowCount: 0, detail: "No ingestion run has completed." };
-    const status = run.status === "SUCCESS" ? "FRESH" : run.status === "PARTIAL" ? "PARTIAL" : "BLOCKED";
-    const detail = run.error_message
+    const runDate = dateOnly(run.effective_date);
+    const isCurrentDate = runDate === effectiveDate;
+    const status = !isCurrentDate ? "STALE" : run.status === "SUCCESS" ? "FRESH" : run.status === "PARTIAL" ? "PARTIAL" : "BLOCKED";
+    const runDetail = run.error_message
       ? run.error_message
       : `${run.normalized_row_count ?? 0} normalized · ${run.rejected_row_count ?? 0} rejected${run.http_status ? ` · HTTP ${run.http_status}` : ""}${run.duration_ms ? ` · ${run.duration_ms}ms` : ""}`;
     return {
       name,
       status,
-      freshness: run.finished_at ? `Last attempt ${new Date(run.finished_at).toLocaleString("en-US", { timeZone: "America/New_York" })}` : "In progress",
+      freshness: !isCurrentDate
+        ? `Latest effective date ${runDate}`
+        : run.finished_at ? `Last attempt ${new Date(run.finished_at).toLocaleString("en-US", { timeZone: "America/New_York" })}` : "In progress",
       lastSuccess: run.status === "SUCCESS" || run.status === "PARTIAL" ? isoString(run.finished_at) : null,
       rowCount: run.row_count ?? 0,
-      detail,
+      detail: isCurrentDate ? runDetail : `No ${effectiveDate} run. ${runDetail}`,
     };
   };
   const splitRun = await pool.query<{
-    status: string; finished_at: string | null; row_count: number | null; normalized_row_count: number | null;
+    status: string; effective_date: Date; finished_at: string | null; row_count: number | null; normalized_row_count: number | null;
     rejected_row_count: number | null; http_status: number | null; duration_ms: number | null; error_message: string | null;
   }>(
-    `SELECT status, finished_at, row_count, normalized_row_count, rejected_row_count, http_status, duration_ms, error_message
+    `SELECT status, effective_date, finished_at, row_count, normalized_row_count, rejected_row_count, http_status, duration_ms, error_message
      FROM ingest_runs WHERE source_id = 'STATCAST' AND job_name = 'statcast_search_handedness_fallback'
-     ORDER BY started_at DESC LIMIT 1`,
+       AND effective_date <= $1
+     ORDER BY effective_date DESC, started_at DESC LIMIT 1`,
+    [effectiveDate],
   );
   const makeBadge = (sourceId: string, name: string, configured: boolean) => makeRunBadge(name, bySource.get(sourceId), configured);
   return [
@@ -398,7 +418,7 @@ router.get("/analyst/today", async (req, res, next) => {
          WHERE g.game_date = $1 ORDER BY g.start_time_utc NULLS LAST`,
         [date],
       ),
-      sourceBadges(),
+      sourceBadges(date),
       identityCoverage(date),
     ]);
     const games = gameResult.rows.map((game) => ({
@@ -514,11 +534,11 @@ router.get("/analyst/projections", async (req, res, next) => {
   }
 });
 
-router.get("/analyst/data-health", async (_req, res, next) => {
+router.get("/analyst/data-health", async (req, res, next) => {
   try {
-    const date = requestedDate(undefined);
-    const [sources, issueResult, lastRun, coverage, research] = await Promise.all([
-      sourceBadges(),
+    const date = requestedDate(req.query.date);
+    const [sources, issueResult, lastRun, coverage, research, slate] = await Promise.all([
+      sourceBadges(date),
       pool.query<{ issue_type: string; detail: string; severity: string }>(
         `SELECT issue_type, detail, severity FROM ingest_issues WHERE resolved_at IS NULL
          UNION ALL
@@ -526,9 +546,10 @@ router.get("/analyst/data-health", async (_req, res, next) => {
          FROM identity_review_queue WHERE state = 'OPEN'
          ORDER BY issue_type LIMIT 50`,
       ),
-      pool.query<{ finished_at: string | null }>("SELECT max(finished_at) AS finished_at FROM ingest_runs"),
+      pool.query<{ finished_at: string | null }>("SELECT max(finished_at) AS finished_at FROM ingest_runs WHERE effective_date <= $1", [date]),
       identityCoverage(date),
-      researchHealth(),
+      researchHealth(date),
+      pool.query<{ games: number }>("SELECT count(*)::int AS games FROM games WHERE game_date = $1", [date]),
     ]);
     const phaseTwoSources = sources.filter((source) => !["FanGraphs", "Weather"].includes(source.name));
     const phaseTwoReady = research.handednessCoverageScope === "FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE"
@@ -537,13 +558,20 @@ router.get("/analyst/data-health", async (_req, res, next) => {
       && research.handednessTargetPlayers === research.handednessCoveredPlayers
       && research.parkRequiredVenues > 0
       && research.parkVenueCoverageGaps === 0;
-    const sourceStatus = !phaseTwoReady || phaseTwoSources.some((source) => source.status === "BLOCKED" || source.status === "NOT RUN") ? "BLOCKED"
+    const readinessIssues = [
+      ...(slate.rows[0]?.games ? [] : [{ label: "CURRENT SLATE MISSING", detail: `No official MLB schedule records are available for ${date}.`, severity: "CRITICAL" }]),
+      ...(phaseTwoReady ? [] : [{ label: "CURRENT RESEARCH INCOMPLETE", detail: `Same-day research coverage is not complete for ${date}.`, severity: "CRITICAL" }]),
+    ];
+    const sourceStatus = !slate.rows[0]?.games || !phaseTwoReady || phaseTwoSources.some((source) => ["BLOCKED", "NOT RUN", "STALE"].includes(source.status)) ? "BLOCKED"
       : "READY";
     res.json(GetAnalystDataHealthResponse.parse({
       overall: sourceStatus,
       phase2aReady: phaseTwoReady,
       sources,
-      issues: issueResult.rows.map((issue) => ({ label: issue.issue_type.replaceAll("_", " "), detail: issue.detail, severity: issue.severity })),
+      issues: [
+        ...readinessIssues,
+        ...issueResult.rows.map((issue) => ({ label: issue.issue_type.replaceAll("_", " "), detail: issue.detail, severity: issue.severity })),
+      ],
       identityCoverage: coverage,
       researchHealth: research,
       lastRun: isoString(lastRun.rows[0]?.finished_at) ?? "No completed ingestion runs recorded",

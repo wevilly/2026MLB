@@ -173,7 +173,7 @@ async function executeRun(runId: string, slateDate: string) {
     healthStep.startedAt = new Date().toISOString();
     await persistSteps(runId, steps);
     try {
-      const health = await researchHealth();
+       const health = await researchHealth(slateDate);
       const issues = Number(health.identityQuarantines ?? 0) + Number(health.metricDefinitionConflicts ?? 0)
         + Number(health.staleWindows ?? 0) + Number(health.identityOrEligibilityGaps ?? 0);
       healthStep.status = issues ? "WARNING" : "SUCCESS";

@@ -15,6 +15,17 @@ const queryClient = new QueryClient();
 export type Tone = 'good' | 'warn' | 'bad' | 'neutral' | 'accent';
 type MarketShortCode = MarketResearchCandidate['market'];
 
+function currentEasternDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
 const navGroups: { label: string; items: Array<{ href: string; label: string; icon: typeof Home; future?: boolean }> }[] = [
   {
     label: 'Operations',
@@ -186,7 +197,7 @@ function AppShell({ children }: { children: ReactNode }) {
             <div className="breadcrumb"><span>OPERATIONS ROOM</span><ChevronRight size={13} /><strong>{pageTitle.toUpperCase()}</strong></div>
           </div>
           <div className="topbar-right">
-            <div className="live-clock"><span className="live-pip" /> LIVE <span className="clock-divider">/</span> {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+            <div className="live-clock"><span className="live-pip" /> LIVE <span className="clock-divider">/</span> {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' })} ET</div>
             <Link href="/settings" className="topbar-icon" data-testid="link-topbar-settings"><SlidersHorizontal size={17} /></Link>
             <div className="analyst-avatar" data-testid="text-analyst-avatar">AN</div>
           </div>
@@ -383,7 +394,7 @@ async function operationsRequest<T>(path: string, init?: RequestInit): Promise<T
 }
 
 function OrchestrationPage() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = currentEasternDate();
   const [date, setDate] = useState(today);
   const [runs, setRuns] = useState<OrchestrationRun[]>([]);
   const [message, setMessage] = useState<string | null>(null);
@@ -458,15 +469,6 @@ function IssueRow({ issue }: { issue: HealthIssue }) {
 function SettingsPage() {
   const query = useGetAnalystSettings();
   const data = query.data as AnalystSettings | undefined;
-  const [cadence, setCadence] = useState('');
-  const [market, setMarket] = useState('');
-  const [saved, setSaved] = useState(false);
-  const activeCadence = cadence || data?.refreshCadence || '';
-  const activeMarket = market || data?.defaultMarket || '';
-  function savePreferences() {
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 2200);
-  }
   return (
     <div className="page-content page-settings rise-in">
       <div className="page-intro">
@@ -476,7 +478,7 @@ function SettingsPage() {
       {query.isLoading ? <LoadingPanel rows={5} /> : query.isError ? <QueryMessage kind="error" onRetry={() => query.refetch()} /> : !data ? <QueryMessage kind="empty" /> : (
         <div className="settings-layout">
           <Panel><SectionHeading eyebrow="Connections" title="Source access" detail="No credentials are rendered in the analyst surface." /><div className="connection-list">{data.connections?.length ? data.connections.map((connection) => <div className="connection-row" key={connection.name} data-testid={`connection-${connection.name.replaceAll(' ', '-').toLowerCase()}`}><div className={`connection-icon ${connection.configured ? 'connection-on' : ''}`}>{connection.configured ? <Check size={16} /> : <LockKeyhole size={16} />}</div><div className="flex-1"><div className="connection-head"><strong>{connection.name}</strong><Badge tone={connection.configured ? 'good' : 'warn'}>{connection.configured ? 'Configured' : 'Not configured'}</Badge></div><p>{connection.detail}</p></div><span className="connection-chevron"><ChevronRight size={15} /></span></div>) : <QueryMessage kind="empty" />}</div><div className="settings-note"><ShieldCheck size={16} /><span>Tokens, keys, and secrets remain server-side. This panel only reports safe connection metadata.</span></div></Panel>
-          <Panel className="preference-panel"><SectionHeading eyebrow="Analyst defaults" title="Working preferences" detail="Stored values shape future reads of the platform." /><div className="preference-form"><label htmlFor="timezone">Timezone<span>Used for slate timestamps</span></label><div className="select-wrap"><select id="timezone" defaultValue={data.timezone} data-testid="select-timezone"><option value={data.timezone}>{data.timezone}</option></select><ChevronRight size={15} /></div><label htmlFor="market">Default market<span>Projection display context</span></label><div className="select-wrap"><select id="market" value={activeMarket} onChange={(event) => setMarket(event.target.value)} data-testid="select-default-market"><option value={data.defaultMarket}>{data.defaultMarket}</option><option value="Fantasy points">Fantasy points</option><option value="Runs + RBI">Runs + RBI</option></select><ChevronRight size={15} /></div><label htmlFor="cadence">Refresh cadence<span>How often the workspace checks</span></label><div className="select-wrap"><select id="cadence" value={activeCadence} onChange={(event) => setCadence(event.target.value)} data-testid="select-refresh-cadence"><option value={data.refreshCadence}>{data.refreshCadence}</option><option value="Manual">Manual</option><option value="Every 15 minutes">Every 15 minutes</option><option value="Hourly">Hourly</option></select><ChevronRight size={15} /></div><button className="button button-yellow save-button" onClick={savePreferences} data-testid="button-save-preferences">{saved ? <><Check size={15} /> Preferences staged</> : <>Save preferences <ArrowUpRight size={15} /></>}</button></div></Panel>
+          <Panel className="preference-panel"><SectionHeading eyebrow="Analyst defaults" title="Working preferences" detail="Defaults are visible but not editable in this release." /><div className="preference-form"><label htmlFor="timezone">Timezone<span>Used for slate timestamps</span></label><div className="select-wrap"><select id="timezone" value={data.timezone} disabled data-testid="select-timezone"><option value={data.timezone}>{data.timezone}</option></select><ChevronRight size={15} /></div><label htmlFor="market">Default market<span>Projection display context</span></label><div className="select-wrap"><select id="market" value={data.defaultMarket} disabled data-testid="select-default-market"><option value={data.defaultMarket}>{data.defaultMarket}</option></select><ChevronRight size={15} /></div><label htmlFor="cadence">Refresh cadence<span>How often the workspace checks</span></label><div className="select-wrap"><select id="cadence" value={data.refreshCadence} disabled data-testid="select-refresh-cadence"><option value={data.refreshCadence}>{data.refreshCadence}</option></select><ChevronRight size={15} /></div><div className="settings-note"><LockKeyhole size={16} /><span>Preference changes are not configured. This panel is intentionally read-only.</span></div></div></Panel>
         </div>
       )}
     </div>

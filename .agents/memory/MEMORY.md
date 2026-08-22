@@ -5,3 +5,4 @@
 - [Bettor evaluation eligibility](bettor-evaluation-eligibility.md) — ambiguous doubleheader and post-first-pitch picks remain auditable but are ineligible for performance scoring.
 - [AI tool audit integrity](ai-tool-audit-integrity.md) — AI gateway audit records are permanently append-only; no application-level bypass may weaken this boundary.
 - [Orchestration freeze safety](orchestration-freeze-safety.md) — scheduled runs must be DB-claimed and freeze only after all gates pass at the persisted cutoff.
+- [Research refresh proxy timeouts](research-refresh-proxy-timeouts.md) — long full-universe research may outlive proxied requests and delay live health reads.
