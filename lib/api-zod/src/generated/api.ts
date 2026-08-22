@@ -20,6 +20,10 @@ export const HealthCheckResponse = zod.object({
 /**
  * @summary Get today's MLB slate and source state
  */
+export const GetAnalystTodayQueryParams = zod.object({
+  "date": zod.date().optional().describe('Requested MLB slate date in Eastern Time. Defaults to the current Eastern date.')
+})
+
 export const GetAnalystTodayResponse = zod.object({
   "date": zod.string(),
   "timezone": zod.string(),

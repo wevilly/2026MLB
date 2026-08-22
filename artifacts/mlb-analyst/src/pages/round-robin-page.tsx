@@ -1,0 +1,408 @@
+import React, { useMemo, useState } from 'react';
+import {
+  useGetAnalystDataHealth,
+  useGetAnalystMarketResearch,
+  useGetAnalystToday,
+  type MarketResearchCandidate,
+} from '@workspace/api-client-react';
+import { AlertTriangle, CalendarDays, Info, Layers, Plus, RefreshCw, Search, X } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Badge, Kicker, LoadingPanel, Panel, QueryMessage, SectionHeading, toneFor } from '../App';
+
+type ResearchMarket = Extract<MarketResearchCandidate['market'], 'TB' | 'XBH' | 'WALK' | 'HR'>;
+type BoardId = 'rr1' | 'rr2' | 'rr3' | 'rr4' | 'rr5';
+type CombinationSize = 2 | 3 | 4;
+
+type BoardConfig = {
+  id: BoardId;
+  label: string;
+  description: string;
+  activeMarkets: ResearchMarket[];
+  unavailableMarket?: string;
+  exposureOptIn?: boolean;
+};
+
+const BOARDS: BoardConfig[] = [
+  {
+    id: 'rr1',
+    label: 'RR1 · TB + TB',
+    description: 'Two different-player 2+ Total Bases legs from the usable research universe.',
+    activeMarkets: ['TB'],
+  },
+  {
+    id: 'rr2',
+    label: 'RR2 · TB + Walk',
+    description: '2+ Total Bases and 1+ Batter Walk legs. Select only the evidence available for this slate.',
+    activeMarkets: ['TB', 'WALK'],
+  },
+  {
+    id: 'rr3',
+    label: 'RR3 · XBH + H+R+RBI',
+    description: '1+ Extra Base Hit is available when researched. The H+R+RBI companion remains inactive until its evidence contract ships.',
+    activeMarkets: ['XBH'],
+    unavailableMarket: '2+ H+R+RBI',
+  },
+  {
+    id: 'rr4',
+    label: 'RR4 · XBH + Walk',
+    description: '1+ Extra Base Hit and 1+ Batter Walk legs. Same-player mixed-market exposure requires an explicit opt-in.',
+    activeMarkets: ['XBH', 'WALK'],
+    exposureOptIn: true,
+  },
+  {
+    id: 'rr5',
+    label: 'RR5 · All / General',
+    description: 'Extensible research shell. Only markets with usable current research rows are selectable.',
+    activeMarkets: ['TB', 'XBH', 'WALK', 'HR'],
+  },
+];
+
+const MARKET_LABELS: Record<ResearchMarket, string> = {
+  TB: '2+ Total Bases',
+  XBH: '1+ Extra Base Hit',
+  WALK: '1+ Batter Walk',
+  HR: '1+ Home Run',
+};
+
+function currentEasternDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
+function combinationPreview<T>(values: T[], size: number, limit = 20): T[][] {
+  const output: T[][] = [];
+  const build = (start: number, remaining: number, current: T[]) => {
+    if (output.length >= limit) return;
+    if (remaining === 0) {
+      output.push(current);
+      return;
+    }
+    for (let index = start; index <= values.length - remaining && output.length < limit; index += 1) {
+      build(index + 1, remaining - 1, [...current, values[index]]);
+    }
+  };
+  build(0, size, []);
+  return output;
+}
+
+function combinationCount(n: number, k: number) {
+  if (n < k || k < 1) return 0;
+  let value = 1;
+  for (let index = 1; index <= k; index += 1) value = (value * (n - index + 1)) / index;
+  return Math.round(value);
+}
+
+function createEmptyTrays(): Record<BoardId, MarketResearchCandidate[]> {
+  return { rr1: [], rr2: [], rr3: [], rr4: [], rr5: [] };
+}
+
+export default function RoundRobinPage() {
+  const [date, setDate] = useState(currentEasternDate);
+  const [activeBoardId, setActiveBoardId] = useState<BoardId>('rr1');
+  const [search, setSearch] = useState('');
+  const [teamFilter, setTeamFilter] = useState('');
+  const [gameFilter, setGameFilter] = useState('');
+  const [combinationSize, setCombinationSize] = useState<CombinationSize>(2);
+  const [trays, setTrays] = useState<Record<BoardId, MarketResearchCandidate[]>>(createEmptyTrays);
+  const [pendingCandidate, setPendingCandidate] = useState<MarketResearchCandidate | null>(null);
+
+  const researchQuery = useGetAnalystMarketResearch({ date });
+  const slateQuery = useGetAnalystToday({ date });
+  const healthQuery = useGetAnalystDataHealth();
+  const activeBoard = BOARDS.find((board) => board.id === activeBoardId) ?? BOARDS[0];
+  const candidates = researchQuery.data?.candidates ?? [];
+  const tray = trays[activeBoardId];
+  const games = slateQuery.data?.games ?? [];
+
+  const gamesById = useMemo(
+    () => new Map(games.map((game) => [game.id, game])),
+    [games],
+  );
+
+  const teamOptions = useMemo(
+    () => Array.from(new Set(games.flatMap((game) => [game.away, game.home]))).sort(),
+    [games],
+  );
+
+  const filteredCandidates = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return candidates
+      .filter((candidate) => activeBoard.activeMarkets.includes(candidate.market as ResearchMarket))
+      .filter((candidate) => !term || candidate.playerName.toLowerCase().includes(term) || candidate.market.toLowerCase().includes(term))
+      .filter((candidate) => {
+        const game = gamesById.get(String(candidate.gamePk));
+        return !teamFilter || game?.away === teamFilter || game?.home === teamFilter;
+      })
+      .filter((candidate) => !gameFilter || String(candidate.gamePk) === gameFilter)
+      .sort((a, b) => (a.researchRank ?? Number.MAX_SAFE_INTEGER) - (b.researchRank ?? Number.MAX_SAFE_INTEGER));
+  }, [activeBoard.activeMarkets, candidates, gameFilter, gamesById, search, teamFilter]);
+
+  const generatedCombinations = useMemo(() => combinationPreview(tray, combinationSize), [combinationSize, tray]);
+  const totalCombinations = combinationCount(tray.length, combinationSize);
+  const activeHealth = healthQuery.data;
+
+  const gameLabel = (candidate: MarketResearchCandidate) => {
+    const game = gamesById.get(String(candidate.gamePk));
+    return game ? `${game.away} @ ${game.home}` : `Game ${candidate.gamePk}`;
+  };
+
+  const updateActiveTray = (updater: (current: MarketResearchCandidate[]) => MarketResearchCandidate[]) => {
+    setTrays((current) => ({ ...current, [activeBoardId]: updater(current[activeBoardId]) }));
+  };
+
+  const addCandidate = (candidate: MarketResearchCandidate) => {
+    if (tray.some((leg) => leg.playerId === candidate.playerId && leg.market === candidate.market)) return;
+
+    const mixedSamePlayer = activeBoard.exposureOptIn
+      && ['XBH', 'WALK'].includes(candidate.market)
+      && tray.some((leg) => leg.playerId === candidate.playerId && leg.market !== candidate.market && ['XBH', 'WALK'].includes(leg.market));
+
+    if (mixedSamePlayer) {
+      setPendingCandidate(candidate);
+      return;
+    }
+
+    updateActiveTray((current) => [...current, candidate]);
+  };
+
+  const switchBoard = (boardId: BoardId) => {
+    setActiveBoardId(boardId);
+    setSearch('');
+    setTeamFilter('');
+    setGameFilter('');
+    setCombinationSize(2);
+  };
+
+  const changeDate = (nextDate: string) => {
+    if (!nextDate || nextDate === date) return;
+    setDate(nextDate);
+    setTrays(createEmptyTrays());
+    setSearch('');
+    setTeamFilter('');
+    setGameFilter('');
+    setCombinationSize(2);
+    setPendingCandidate(null);
+  };
+
+  return (
+    <div className="page-content rise-in" data-testid="round-robin-page">
+      <div className="page-intro">
+        <div>
+          <Kicker>Analysis boards / read-only research</Kicker>
+          <h1>Round Robin <span className="slash">//</span> workspace</h1>
+          <p>Construct market-specific research combinations from the active MLB slate using only source-backed player context.</p>
+        </div>
+        <button className="button button-dark" onClick={() => researchQuery.refetch()} disabled={researchQuery.isFetching} data-testid="button-refresh-round-robin">
+          <RefreshCw size={15} className={researchQuery.isFetching ? 'animate-spin' : ''} />
+          {researchQuery.isFetching ? 'Refreshing…' : 'Refresh research'}
+        </button>
+      </div>
+
+      <div className="round-robin-context">
+        <label>
+          <span><CalendarDays size={13} /> Active slate date</span>
+          <input type="date" value={date} onChange={(event) => changeDate(event.target.value)} data-testid="input-round-robin-date" />
+        </label>
+        <div>
+          <span>Viewing</span>
+          <strong>{date} ET</strong>
+        </div>
+        <div>
+          <span>Research context</span>
+          <Badge tone={toneFor(activeHealth?.overall ?? 'NOT RUN')}>{activeHealth?.overall ?? 'NOT RUN'}</Badge>
+        </div>
+        <div>
+          <span>Usable records</span>
+          <strong>{candidates.length.toLocaleString()}</strong>
+        </div>
+      </div>
+
+      <div className="round-robin-tabs" role="tablist" aria-label="Round Robin boards">
+        {BOARDS.map((board) => (
+          <button
+            key={board.id}
+            className={activeBoardId === board.id ? 'round-robin-tab active' : 'round-robin-tab'}
+            onClick={() => switchBoard(board.id)}
+            role="tab"
+            aria-selected={activeBoardId === board.id}
+            data-testid={`tab-${board.id}`}
+          >
+            {board.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="round-robin-layout">
+        <div className="round-robin-main">
+          <Panel>
+            <SectionHeading eyebrow="Board rules" title={activeBoard.label} detail={activeBoard.description} />
+            <div className="round-robin-rulebar">
+              <span>Available: {activeBoard.activeMarkets.map((market) => MARKET_LABELS[market]).join(' · ')}</span>
+              {activeBoard.unavailableMarket && <Badge tone="warn">{activeBoard.unavailableMarket} · NOT EVALUATED</Badge>}
+              {activeBoard.exposureOptIn && <span>Same-player XBH + Walk needs opt-in</span>}
+            </div>
+          </Panel>
+
+          {activeBoard.unavailableMarket && (
+            <div className="round-robin-notice" data-testid="msg-not-evaluated">
+              <Info size={16} />
+              <div><strong>{activeBoard.unavailableMarket} — NOT EVALUATED</strong><p>This companion market has no current usable research contract, so it cannot be selected or fabricated on this board.</p></div>
+            </div>
+          )}
+
+          <Panel className="round-robin-candidates">
+            <SectionHeading eyebrow="Eligible player research" title="Add a leg" detail="Only rows returned by the active research contract are selectable." />
+            <div className="round-robin-filters">
+              <label className="round-robin-search">
+                <Search size={14} />
+                <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search player or market" data-testid="input-round-robin-search" />
+              </label>
+              <select value={teamFilter} onChange={(event) => setTeamFilter(event.target.value)} data-testid="select-round-robin-team">
+                <option value="">All slate teams</option>
+                {teamOptions.map((team) => <option key={team} value={team}>{team}</option>)}
+              </select>
+              <select value={gameFilter} onChange={(event) => setGameFilter(event.target.value)} data-testid="select-round-robin-game">
+                <option value="">All games</option>
+                {games.map((game) => <option key={game.id} value={game.id}>{game.away} @ {game.home}</option>)}
+              </select>
+            </div>
+
+            {researchQuery.isLoading ? (
+              <div className="round-robin-state"><LoadingPanel rows={5} /></div>
+            ) : researchQuery.isError ? (
+              <div className="round-robin-state"><QueryMessage kind="error" onRetry={() => researchQuery.refetch()} /></div>
+            ) : candidates.length === 0 ? (
+              <div className="round-robin-empty" data-testid="round-robin-not-found">
+                <AlertTriangle size={18} />
+                <div><strong>NOT EVALUATED</strong><p>No usable market research records exist for {date} ET. Add research records before selecting legs for this board.</p></div>
+              </div>
+            ) : filteredCandidates.length === 0 ? (
+              <div className="round-robin-empty">
+                <Search size={18} />
+                <div><strong>NOT FOUND</strong><p>Research exists for the slate, but no records match these filters.</p></div>
+              </div>
+            ) : (
+              <div className="table-wrap">
+                <table className="data-table" data-testid="round-robin-candidate-table">
+                  <thead>
+                    <tr><th>Player</th><th>Game</th><th>Leg</th><th>Research</th><th>Why / availability</th><th className="number">Action</th></tr>
+                  </thead>
+                  <tbody>
+                    {filteredCandidates.map((candidate) => {
+                      const alreadyAdded = tray.some((leg) => leg.playerId === candidate.playerId && leg.market === candidate.market);
+                      return (
+                        <tr key={candidate.candidateId} data-testid={`row-round-robin-${candidate.playerId}-${candidate.market}`}>
+                          <td><strong>{candidate.playerName}</strong></td>
+                          <td className="text-xs">{gameLabel(candidate)}</td>
+                          <td><Badge tone="accent">{MARKET_LABELS[candidate.market as ResearchMarket]}</Badge></td>
+                          <td><Badge tone={toneFor(candidate.researchState)}>{candidate.researchState}</Badge></td>
+                          <td className="text-xs">
+                            <span>{candidate.primaryMechanism?.replaceAll('_', ' ') ?? 'NOT FOUND'}</span>
+                            {candidate.missingStaleEvidence && <small className="round-robin-missing"> · {candidate.missingStaleEvidence}</small>}
+                          </td>
+                          <td className="number">
+                            <button className="button button-quiet round-robin-add" onClick={() => addCandidate(candidate)} disabled={alreadyAdded} data-testid={`button-add-leg-${candidate.playerId}-${candidate.market}`}>
+                              <Plus size={13} /> {alreadyAdded ? 'Added' : 'Add'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Panel>
+        </div>
+
+        <aside className="round-robin-tray">
+          <Panel>
+            <SectionHeading
+              eyebrow="Selected-leg tray"
+              title={`${tray.length} ${tray.length === 1 ? 'leg' : 'legs'}`}
+              detail="Selections remain separated by board."
+              action={tray.length ? <button className="button button-quiet" onClick={() => updateActiveTray(() => [])} data-testid="button-clear-round-robin">Clear</button> : undefined}
+            />
+            <div className="round-robin-tray-body">
+              {!tray.length ? (
+                <div className="round-robin-tray-empty"><Layers size={21} /><p>Add eligible player legs to build combinations.</p></div>
+              ) : (
+                <ol className="round-robin-legs">
+                  {tray.map((leg, index) => {
+                    const samePlayerExposure = activeBoard.exposureOptIn
+                      && tray.some((other, otherIndex) => otherIndex !== index && other.playerId === leg.playerId && other.market !== leg.market);
+                    return (
+                      <li key={`${leg.candidateId}-${index}`}>
+                        <div>
+                          <strong>{leg.playerName}</strong>
+                          <span>{gameLabel(leg)}</span>
+                          <div><Badge tone="accent">{MARKET_LABELS[leg.market as ResearchMarket]}</Badge> <Badge tone={toneFor(leg.researchState)}>{leg.researchState}</Badge></div>
+                          {samePlayerExposure && <small className="round-robin-exposure">Same-player mixed-market exposure allowed</small>}
+                        </div>
+                        <button className="icon-button" onClick={() => updateActiveTray((current) => current.filter((_, currentIndex) => currentIndex !== index))} aria-label={`Remove ${leg.playerName}`} data-testid={`button-remove-round-robin-leg-${index}`}><X size={13} /></button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+
+              <div className="round-robin-combinations">
+                <Kicker>Combination builder</Kicker>
+                <div className="round-robin-size-selector" role="group" aria-label="Combination size">
+                  {([2, 3, 4] as CombinationSize[]).map((size) => (
+                    <button key={size} className={combinationSize === size ? 'active' : ''} onClick={() => setCombinationSize(size)} disabled={tray.length < size} data-testid={`button-round-robin-${size}s`}>
+                      {size}s
+                    </button>
+                  ))}
+                </div>
+                <div className="round-robin-combination-summary">
+                  <strong>{totalCombinations.toLocaleString()}</strong>
+                  <span>{combinationSize}-leg combinations from {tray.length} selected legs</span>
+                </div>
+                {totalCombinations > 0 ? (
+                  <>
+                    <ol className="round-robin-combination-list" data-testid="round-robin-combination-list">
+                      {generatedCombinations.slice(0, 20).map((combination, index) => (
+                        <li key={combination.map((leg) => leg.candidateId).join('-')}>
+                          <span>{index + 1}</span>
+                          <p>{combination.map((leg) => `${leg.playerName} · ${MARKET_LABELS[leg.market as ResearchMarket]}`).join('  +  ')}</p>
+                        </li>
+                      ))}
+                    </ol>
+                    {totalCombinations > 20 && <p className="round-robin-list-note">Showing the first 20 of {totalCombinations.toLocaleString()} generated combinations.</p>}
+                  </>
+                ) : (
+                  <p className="round-robin-list-note">Add at least {combinationSize} legs to generate combinations.</p>
+                )}
+              </div>
+            </div>
+          </Panel>
+        </aside>
+      </div>
+
+      <AlertDialog open={Boolean(pendingCandidate)} onOpenChange={(open) => !open && setPendingCandidate(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Same-player multi-market exposure</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingCandidate?.playerName} is already selected for the other XBH/Walk market. Adding this leg creates same-player exposure in RR4. This is allowed only with your explicit opt-in.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingCandidate(null)}>Keep separate</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (pendingCandidate) updateActiveTray((current) => [...current, pendingCandidate]);
+              setPendingCandidate(null);
+            }}>Allow exposure</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

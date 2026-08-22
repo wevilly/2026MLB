@@ -795,6 +795,75 @@ button:active:not(:disabled), a:active {
 .game-btn-teams { font-family: var(--font-serif); font-size: 15px; color: hsl(var(--foreground)); }
 .game-btn-meta { font-family: var(--font-mono); font-size: 10px; color: hsl(var(--muted-foreground)); }
 
+/* ─── Round Robin Research Workspace ─────────────────────────────────────── */
+.round-robin-context {
+  display: grid; grid-template-columns: minmax(180px, 1.25fr) repeat(3, minmax(120px, .75fr)); gap: 1px;
+  margin: 0 0 20px; border: 1px solid hsl(var(--border)); background: hsl(var(--border));
+}
+.round-robin-context > * { display: flex; min-height: 62px; flex-direction: column; justify-content: center; gap: 5px; padding: 11px 14px; background: hsl(var(--card)); }
+.round-robin-context span { display: flex; align-items: center; gap: 6px; color: hsl(var(--muted-foreground)); font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+.round-robin-context strong { color: hsl(var(--foreground)); font-family: var(--font-serif); font-size: 17px; }
+.round-robin-context input { width: 100%; border: 0; background: transparent; color: hsl(var(--foreground)); font-family: var(--font-mono); font-size: 11px; outline: none; }
+.round-robin-tabs { display: flex; gap: 5px; overflow-x: auto; margin-bottom: 20px; border-bottom: 1px solid hsl(var(--border)); }
+.round-robin-tab { flex: 0 0 auto; padding: 10px 13px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: hsl(var(--muted-foreground)); cursor: pointer; font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+.round-robin-tab:hover { color: hsl(var(--foreground)); background: hsl(var(--muted)); }
+.round-robin-tab.active { border-bottom-color: hsl(var(--accent)); color: hsl(var(--foreground)); }
+.round-robin-layout { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 24px; align-items: start; }
+.round-robin-main { display: grid; gap: 18px; min-width: 0; }
+.round-robin-tray { position: sticky; top: 18px; min-width: 0; }
+.round-robin-rulebar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 13px; padding: 0 21px 17px; color: hsl(var(--muted-foreground)); font-family: var(--font-mono); font-size: 10px; line-height: 1.5; }
+.round-robin-notice, .round-robin-empty { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px; border: 1px solid hsl(var(--border)); background: hsl(var(--muted) / .36); color: hsl(var(--muted-foreground)); font-size: 11px; line-height: 1.55; }
+.round-robin-notice { border-left: 3px solid hsl(28 72% 52%); }
+.round-robin-notice strong, .round-robin-empty strong { color: hsl(var(--foreground)); font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; }
+.round-robin-notice p, .round-robin-empty p { margin: 3px 0 0; }
+.round-robin-candidates { overflow: hidden; }
+.round-robin-filters { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(130px, .5fr) minmax(150px, .6fr); gap: 8px; padding: 0 21px 18px; }
+.round-robin-filters select, .round-robin-search { min-width: 0; height: 35px; border: 1px solid hsl(var(--border)); background: hsl(var(--input) / .3); color: hsl(var(--foreground)); font-family: var(--font-mono); font-size: 10px; }
+.round-robin-filters select { padding: 0 9px; }
+.round-robin-search { display: flex; align-items: center; gap: 7px; padding: 0 10px; }
+.round-robin-search svg { color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+.round-robin-search input { min-width: 0; flex: 1; border: 0; outline: none; background: transparent; color: hsl(var(--foreground)); font: inherit; }
+.round-robin-state { padding: 21px; }
+.round-robin-empty { margin: 0 21px 21px; }
+.round-robin-missing { color: hsl(28 65% 40%); font-family: var(--font-mono); font-size: 9px; }
+.round-robin-add { min-width: 63px; padding: 6px 8px; font-size: 9px; }
+.round-robin-tray-body { padding: 0 21px 21px; }
+.round-robin-tray-empty { display: grid; min-height: 132px; place-items: center; align-content: center; gap: 8px; border: 1px dashed hsl(var(--border)); background: hsl(var(--background) / .35); color: hsl(var(--muted-foreground)); text-align: center; }
+.round-robin-tray-empty p { max-width: 190px; margin: 0; font-size: 11px; line-height: 1.5; }
+.round-robin-legs { display: grid; gap: 7px; margin: 0 0 16px; padding: 0; list-style: none; }
+.round-robin-legs li { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 10px; border: 1px solid hsl(var(--border)); background: hsl(var(--background) / .52); }
+.round-robin-legs strong { display: block; color: hsl(var(--foreground)); font-size: 12px; }
+.round-robin-legs li > div > span { display: block; margin: 2px 0 7px; color: hsl(var(--muted-foreground)); font-family: var(--font-mono); font-size: 9px; }
+.round-robin-legs .badge { margin-right: 4px; }
+.round-robin-exposure { display: block; margin-top: 7px; color: hsl(28 65% 40%); font-family: var(--font-mono); font-size: 9px; line-height: 1.35; }
+.round-robin-combinations { padding-top: 16px; border-top: 1px solid hsl(var(--border)); }
+.round-robin-size-selector { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin: 11px 0; }
+.round-robin-size-selector button { padding: 8px; border: 1px solid hsl(var(--border)); background: transparent; color: hsl(var(--muted-foreground)); cursor: pointer; font-family: var(--font-mono); font-size: 10px; }
+.round-robin-size-selector button:hover:not(:disabled) { color: hsl(var(--foreground)); background: hsl(var(--muted)); }
+.round-robin-size-selector button.active { border-color: hsl(var(--foreground)); background: hsl(var(--foreground)); color: hsl(var(--background)); }
+.round-robin-size-selector button:disabled { cursor: not-allowed; opacity: .38; }
+.round-robin-combination-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding: 11px; border: 1px solid hsl(var(--border)); background: hsl(var(--muted) / .28); }
+.round-robin-combination-summary strong { color: hsl(var(--foreground)); font-family: var(--font-serif); font-size: 28px; line-height: 1; }
+.round-robin-combination-summary span { color: hsl(var(--muted-foreground)); font-family: var(--font-mono); font-size: 9px; line-height: 1.45; text-align: right; }
+.round-robin-combination-list { display: grid; gap: 5px; max-height: 320px; margin: 11px 0 0; padding: 0; overflow-y: auto; list-style: none; }
+.round-robin-combination-list li { display: grid; grid-template-columns: 19px minmax(0, 1fr); gap: 7px; padding: 8px; border: 1px solid hsl(var(--border) / .75); background: hsl(var(--background) / .3); }
+.round-robin-combination-list li > span { color: hsl(var(--muted-foreground)); font-family: var(--font-mono); font-size: 9px; }
+.round-robin-combination-list p { margin: 0; color: hsl(var(--foreground)); font-size: 10px; line-height: 1.4; }
+.round-robin-list-note { margin: 10px 0 0; color: hsl(var(--muted-foreground)); font-family: var(--font-mono); font-size: 9px; line-height: 1.45; }
+@media (max-width: 1050px) {
+  .round-robin-layout { grid-template-columns: 1fr; }
+  .round-robin-tray { position: static; }
+}
+@media (max-width: 700px) {
+  .round-robin-context { grid-template-columns: 1fr 1fr; }
+  .round-robin-context > :first-child { grid-column: 1 / -1; }
+  .round-robin-filters { grid-template-columns: 1fr; padding-left: 14px; padding-right: 14px; }
+  .round-robin-rulebar, .round-robin-tray-body { padding-left: 14px; padding-right: 14px; }
+  .round-robin-empty { margin-left: 14px; margin-right: 14px; }
+  .round-robin-combination-summary { align-items: flex-start; flex-direction: column; }
+  .round-robin-combination-summary span { text-align: left; }
+}
+
 /* ─── Phase 2B: Bullpen Room ────────────────────────────────────────────────── */
 .bullpen-team-list { display: flex; flex-direction: column; gap: 6px; }
 

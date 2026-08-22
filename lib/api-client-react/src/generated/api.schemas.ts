@@ -2152,6 +2152,13 @@ export interface AuditEventList {
   total: number;
 }
 
+export type GetAnalystTodayParams = {
+/**
+ * Requested MLB slate date in Eastern Time. Defaults to the current Eastern date.
+ */
+date?: string;
+};
+
 export type GetAnalystProjectionsParams = {
 date?: string;
 };

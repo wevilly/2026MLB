@@ -91,6 +91,7 @@ import type {
   GetAnalystPostmortemsParams,
   GetAnalystProjectionsParams,
   GetAnalystSettlementsParams,
+  GetAnalystTodayParams,
   HREngineResult,
   HealthStatus,
   HistoricalOutcomeInput,
@@ -248,20 +249,27 @@ export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, 
 
 
 
-export const getGetAnalystTodayUrl = () => {
+export const getGetAnalystTodayUrl = (params?: GetAnalystTodayParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/analyst/today`
+  return stringifiedParams.length > 0 ? `/api/analyst/today?${stringifiedParams}` : `/api/analyst/today`
 }
 
 /**
  * @summary Get today's MLB slate and source state
  */
-export const getAnalystToday = async ( options?: Parameters<typeof customFetch>[1]): Promise<TodayDashboard> => {
+export const getAnalystToday = async (params?: GetAnalystTodayParams, options?: Parameters<typeof customFetch>[1]): Promise<TodayDashboard> => {
 
-  return customFetch<TodayDashboard>(getGetAnalystTodayUrl(),
+  return customFetch<TodayDashboard>(getGetAnalystTodayUrl(params),
   {
     ...options,
     method: 'GET'
@@ -274,23 +282,23 @@ export const getAnalystToday = async ( options?: Parameters<typeof customFetch>[
 
 
 
-export const getGetAnalystTodayQueryKey = () => {
+export const getGetAnalystTodayQueryKey = (params?: GetAnalystTodayParams,) => {
     return [
-    `/api/analyst/today`
+    `/api/analyst/today`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetAnalystTodayQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystToday>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystToday>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetAnalystTodayQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystToday>>, TError = ErrorType<unknown>>(params?: GetAnalystTodayParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystToday>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetAnalystTodayQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystTodayQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystToday>>> = ({ signal }) => getAnalystToday({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystToday>>> = ({ signal }) => getAnalystToday(params, { signal, ...requestOptions });
 
 
 
@@ -308,11 +316,11 @@ export type GetAnalystTodayQueryError = ErrorType<unknown>
  */
 
 export function useGetAnalystToday<TData = Awaited<ReturnType<typeof getAnalystToday>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystToday>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: GetAnalystTodayParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystToday>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetAnalystTodayQueryOptions(options)
+  const queryOptions = getGetAnalystTodayQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

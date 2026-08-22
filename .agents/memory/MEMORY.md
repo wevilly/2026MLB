@@ -6,3 +6,4 @@
 - [AI tool audit integrity](ai-tool-audit-integrity.md) — AI gateway audit records are permanently append-only; no application-level bypass may weaken this boundary.
 - [Orchestration freeze safety](orchestration-freeze-safety.md) — scheduled runs must be DB-claimed and freeze only after all gates pass at the persisted cutoff.
 - [Research refresh proxy timeouts](research-refresh-proxy-timeouts.md) — long full-universe research may outlive proxied requests and delay live health reads.
+- [Generated client refreshes](generated-client-refreshes.md) — OpenAPI regeneration temporarily removes generated modules; restart the Vite workflow after codegen to clear transient import errors.

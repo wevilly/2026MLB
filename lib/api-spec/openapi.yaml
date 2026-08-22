@@ -31,6 +31,12 @@ paths:
       operationId: getAnalystToday
       tags: [analyst]
       summary: Get today's MLB slate and source state
+      parameters:
+        - name: date
+          in: query
+          required: false
+          description: Requested MLB slate date in Eastern Time. Defaults to the current Eastern date.
+          schema: { type: string, format: date }
       responses:
         "200":
           description: Today's analyst dashboard state

@@ -10,6 +10,8 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 
+import RoundRobinPage from './pages/round-robin-page';
+
 const queryClient = new QueryClient();
 
 export type Tone = 'good' | 'warn' | 'bad' | 'neutral' | 'accent';
@@ -45,6 +47,7 @@ const navGroups: { label: string; items: Array<{ href: string; label: string; ic
       { href: '/pitcher-lab', label: 'Pitcher lab', icon: Activity },
       { href: '/bullpen-room', label: 'Bullpen room', icon: ShieldCheck },
       { href: '/market-board', label: 'Market board', icon: BarChart3 },
+      { href: '/round-robin', label: 'Round robin', icon: Database },
       { href: '/bettor-intelligence', label: 'Bettor intelligence', icon: Gauge },
       { href: '/model-lab', label: 'Model lab', icon: GitBranch, future: true },
       { href: '/ai-analyst', label: 'AI analyst', icon: Sparkles },
@@ -2605,6 +2608,7 @@ function Router() {
           <Route path="/orchestration" component={OrchestrationPage} />
           <Route path="/audit-trail" component={AuditTrailPage} />
           <Route path="/settings" component={SettingsPage} />
+          <Route path="/round-robin" component={RoundRobinPage} />
           <Route path="/game-lab" component={GameLabPage} />
           <Route path="/player-lab" component={PlayerLabPage} />
           <Route path="/pitcher-lab" component={PitcherLabPage} />

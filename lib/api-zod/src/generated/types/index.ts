@@ -160,6 +160,7 @@ export * from './getAnalystPostmortemsParams';
 export * from './getAnalystProjectionsParams';
 export * from './getAnalystSettlementsMarket';
 export * from './getAnalystSettlementsParams';
+export * from './getAnalystTodayParams';
 export * from './healthIssue';
 export * from './healthStatus';
 export * from './historicalOutcomeInput';
