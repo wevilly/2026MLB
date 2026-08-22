@@ -29,6 +29,9 @@ import type {
   CorrectFeatureStoreSnapshot404,
   CreateAnalystPostmortem400,
   CreateMarketPostmortemInput,
+  DailyBoardGameSummary,
+  DailyMarketBoard,
+  DailyMarketBoardRefreshResult,
   DataHealth,
   FeatureSnapshotCorrectionInput,
   FeatureStoreBackfillResult,
@@ -37,6 +40,9 @@ import type {
   FeatureStoreResult,
   GameLab,
   GetAnalystBullpenRoomParams,
+  GetAnalystDailyBoardGameSummaryParams,
+  GetAnalystDailyMarketBoard400,
+  GetAnalystDailyMarketBoardParams,
   GetAnalystFeatureStoreParams,
   GetAnalystGameLabParams,
   GetAnalystMarketResearchParams,
@@ -63,6 +69,8 @@ import type {
   OfficialSettlementRefreshResult,
   PostmortemList,
   ProjectionCenter,
+  RefreshAnalystDailyMarketBoard400,
+  RefreshAnalystDailyMarketBoardParams,
   RefreshAnalystResearchParams,
   RefreshBullpenParams,
   RefreshFantasyProsParams,
@@ -2711,6 +2719,260 @@ export function useGetAnalystModelValidation<TData = Awaited<ReturnType<typeof g
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAnalystModelValidationQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRefreshAnalystDailyMarketBoardUrl = (params?: RefreshAnalystDailyMarketBoardParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/market-board/refresh?${stringifiedParams}` : `/api/analyst/market-board/refresh`
+}
+
+/**
+ * Resolves current research candidates to corrected frozen pregame snapshots,
+ * verifies the immutable ACTIVE model artifact for each market, then stores
+ * calibrated probability and confidence. FIRE/HALF/HOLD/NONE are confidence
+ * states, not betting recommendations. This endpoint accepts no odds,
+ * prices, EV, CLV, sportsbook, or recommendation data.
+ * @summary Persist the server-computed daily confidence board
+ */
+export const refreshAnalystDailyMarketBoard = async (params?: RefreshAnalystDailyMarketBoardParams, options?: Parameters<typeof customFetch>[1]): Promise<DailyMarketBoardRefreshResult> => {
+
+  return customFetch<DailyMarketBoardRefreshResult>(getRefreshAnalystDailyMarketBoardUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshAnalystDailyMarketBoardMutationOptions = <TError = ErrorType<RefreshAnalystDailyMarketBoard400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshAnalystDailyMarketBoard>>, TError,{params?: RefreshAnalystDailyMarketBoardParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshAnalystDailyMarketBoard>>, TError,{params?: RefreshAnalystDailyMarketBoardParams}, TContext> => {
+
+const mutationKey = ['refreshAnalystDailyMarketBoard'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshAnalystDailyMarketBoard>>, {params?: RefreshAnalystDailyMarketBoardParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshAnalystDailyMarketBoard(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshAnalystDailyMarketBoardMutationResult = NonNullable<Awaited<ReturnType<typeof refreshAnalystDailyMarketBoard>>>
+
+    export type RefreshAnalystDailyMarketBoardMutationError = ErrorType<RefreshAnalystDailyMarketBoard400>
+
+    /**
+ * @summary Persist the server-computed daily confidence board
+ */
+export const useRefreshAnalystDailyMarketBoard = <TError = ErrorType<RefreshAnalystDailyMarketBoard400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshAnalystDailyMarketBoard>>, TError,{params?: RefreshAnalystDailyMarketBoardParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshAnalystDailyMarketBoard>>,
+        TError,
+        {params?: RefreshAnalystDailyMarketBoardParams},
+        TContext
+      > => {
+      return useMutation(getRefreshAnalystDailyMarketBoardMutationOptions(options));
+    }
+
+export const getGetAnalystDailyMarketBoardUrl = (params?: GetAnalystDailyMarketBoardParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/market-board?${stringifiedParams}` : `/api/analyst/market-board`
+}
+
+/**
+ * Returns only server-persisted research and model confidence rows. A FIRE
+ * requires STRONG research plus model confirmation at the FIRE probability
+ * threshold. No model or calibration is exposed as NONE / RESEARCH_ONLY.
+ * @summary Get persisted market confidence rows
+ */
+export const getAnalystDailyMarketBoard = async (params?: GetAnalystDailyMarketBoardParams, options?: Parameters<typeof customFetch>[1]): Promise<DailyMarketBoard> => {
+
+  return customFetch<DailyMarketBoard>(getGetAnalystDailyMarketBoardUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystDailyMarketBoardQueryKey = (params?: GetAnalystDailyMarketBoardParams,) => {
+    return [
+    `/api/analyst/market-board`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystDailyMarketBoardQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystDailyMarketBoard>>, TError = ErrorType<GetAnalystDailyMarketBoard400>>(params?: GetAnalystDailyMarketBoardParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystDailyMarketBoard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystDailyMarketBoardQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystDailyMarketBoard>>> = ({ signal }) => getAnalystDailyMarketBoard(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystDailyMarketBoard>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystDailyMarketBoardQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystDailyMarketBoard>>>
+export type GetAnalystDailyMarketBoardQueryError = ErrorType<GetAnalystDailyMarketBoard400>
+
+
+/**
+ * @summary Get persisted market confidence rows
+ */
+
+export function useGetAnalystDailyMarketBoard<TData = Awaited<ReturnType<typeof getAnalystDailyMarketBoard>>, TError = ErrorType<GetAnalystDailyMarketBoard400>>(
+ params?: GetAnalystDailyMarketBoardParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystDailyMarketBoard>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystDailyMarketBoardQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAnalystDailyBoardGameSummaryUrl = (params?: GetAnalystDailyBoardGameSummaryParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/market-board/game-summary?${stringifiedParams}` : `/api/analyst/market-board/game-summary`
+}
+
+/**
+ * @summary Get game-level context for persisted board candidates
+ */
+export const getAnalystDailyBoardGameSummary = async (params?: GetAnalystDailyBoardGameSummaryParams, options?: Parameters<typeof customFetch>[1]): Promise<DailyBoardGameSummary> => {
+
+  return customFetch<DailyBoardGameSummary>(getGetAnalystDailyBoardGameSummaryUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystDailyBoardGameSummaryQueryKey = (params?: GetAnalystDailyBoardGameSummaryParams,) => {
+    return [
+    `/api/analyst/market-board/game-summary`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystDailyBoardGameSummaryQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystDailyBoardGameSummary>>, TError = ErrorType<unknown>>(params?: GetAnalystDailyBoardGameSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystDailyBoardGameSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystDailyBoardGameSummaryQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystDailyBoardGameSummary>>> = ({ signal }) => getAnalystDailyBoardGameSummary(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystDailyBoardGameSummary>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystDailyBoardGameSummaryQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystDailyBoardGameSummary>>>
+export type GetAnalystDailyBoardGameSummaryQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get game-level context for persisted board candidates
+ */
+
+export function useGetAnalystDailyBoardGameSummary<TData = Awaited<ReturnType<typeof getAnalystDailyBoardGameSummary>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystDailyBoardGameSummaryParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystDailyBoardGameSummary>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystDailyBoardGameSummaryQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

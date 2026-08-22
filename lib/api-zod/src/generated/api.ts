@@ -1301,6 +1301,133 @@ export const GetAnalystModelValidationResponse = zod.object({
 
 
 /**
+ * Resolves current research candidates to corrected frozen pregame snapshots,
+ * verifies the immutable ACTIVE model artifact for each market, then stores
+ * calibrated probability and confidence. FIRE/HALF/HOLD/NONE are confidence
+ * states, not betting recommendations. This endpoint accepts no odds,
+ * prices, EV, CLV, sportsbook, or recommendation data.
+ * @summary Persist the server-computed daily confidence board
+ */
+export const RefreshAnalystDailyMarketBoardQueryParams = zod.object({
+  "date": zod.date().optional(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional()
+})
+
+export const refreshAnalystDailyMarketBoardResponseCandidatesFoundMin = 0;
+
+export const refreshAnalystDailyMarketBoardResponseModeledRowsMin = 0;
+
+export const refreshAnalystDailyMarketBoardResponseResearchOnlyRowsMin = 0;
+
+
+
+export const RefreshAnalystDailyMarketBoardResponse = zod.object({
+  "slateDate": zod.coerce.date(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).nullable(),
+  "candidatesFound": zod.number().int().min(refreshAnalystDailyMarketBoardResponseCandidatesFoundMin),
+  "modeledRows": zod.number().int().min(refreshAnalystDailyMarketBoardResponseModeledRowsMin),
+  "researchOnlyRows": zod.number().int().min(refreshAnalystDailyMarketBoardResponseResearchOnlyRowsMin)
+})
+
+
+/**
+ * Returns only server-persisted research and model confidence rows. A FIRE
+ * requires STRONG research plus model confirmation at the FIRE probability
+ * threshold. No model or calibration is exposed as NONE / RESEARCH_ONLY.
+ * @summary Get persisted market confidence rows
+ */
+export const GetAnalystDailyMarketBoardQueryParams = zod.object({
+  "date": zod.date().optional(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional()
+})
+
+export const getAnalystDailyMarketBoardResponseTotalMin = 0;
+
+
+
+export const GetAnalystDailyMarketBoardResponse = zod.object({
+  "date": zod.coerce.date(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).nullable(),
+  "entries": zod.array(zod.object({
+  "boardId": zod.string(),
+  "slateDate": zod.coerce.date(),
+  "gamePk": zod.number().int(),
+  "playerId": zod.number().int(),
+  "playerName": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "researchRank": zod.number().int().nullable(),
+  "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
+  "primaryMechanism": zod.string().nullable(),
+  "modelPrediction": zod.number().nullable(),
+  "confidenceLabel": zod.enum(['FIRE', 'HALF', 'HOLD', 'NONE']),
+  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_REJECTED']),
+  "calibratedProbability": zod.number().nullable(),
+  "modelVersionId": zod.string().nullable(),
+  "boardFrozenAt": zod.string()
+}).describe('One persisted confidence record. Model values are generated only by a\nverified ACTIVE artifact with accepted calibration; no betting fields are\npart of this contract.\n')),
+  "total": zod.number().int().min(getAnalystDailyMarketBoardResponseTotalMin),
+  "notes": zod.array(zod.string())
+})
+
+
+/**
+ * @summary Get game-level context for persisted board candidates
+ */
+export const GetAnalystDailyBoardGameSummaryQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
+export const getAnalystDailyBoardGameSummaryResponseGamesItemBullpenContextAwayAvailableArmsMin = 0;
+
+export const getAnalystDailyBoardGameSummaryResponseGamesItemBullpenContextHomeAvailableArmsMin = 0;
+
+export const getAnalystDailyBoardGameSummaryResponseTotalMin = 0;
+
+
+
+export const GetAnalystDailyBoardGameSummaryResponse = zod.object({
+  "date": zod.coerce.date(),
+  "games": zod.array(zod.object({
+  "gamePk": zod.number().int(),
+  "awayTeam": zod.string(),
+  "homeTeam": zod.string(),
+  "startTimeUtc": zod.string().nullable(),
+  "park": zod.string().nullable(),
+  "awayStarter": zod.object({
+  "name": zod.string(),
+  "state": zod.string()
+}),
+  "homeStarter": zod.object({
+  "name": zod.string(),
+  "state": zod.string()
+}),
+  "bullpenContext": zod.object({
+  "awayAvailableArms": zod.number().int().min(getAnalystDailyBoardGameSummaryResponseGamesItemBullpenContextAwayAvailableArmsMin),
+  "homeAvailableArms": zod.number().int().min(getAnalystDailyBoardGameSummaryResponseGamesItemBullpenContextHomeAvailableArmsMin)
+}),
+  "topCandidates": zod.record(zod.string(), zod.object({
+  "boardId": zod.string(),
+  "slateDate": zod.coerce.date(),
+  "gamePk": zod.number().int(),
+  "playerId": zod.number().int(),
+  "playerName": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "researchRank": zod.number().int().nullable(),
+  "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
+  "primaryMechanism": zod.string().nullable(),
+  "modelPrediction": zod.number().nullable(),
+  "confidenceLabel": zod.enum(['FIRE', 'HALF', 'HOLD', 'NONE']),
+  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_REJECTED']),
+  "calibratedProbability": zod.number().nullable(),
+  "modelVersionId": zod.string().nullable(),
+  "boardFrozenAt": zod.string()
+}).describe('One persisted confidence record. Model values are generated only by a\nverified ACTIVE artifact with accepted calibration; no betting fields are\npart of this contract.\n'))
+})),
+  "total": zod.number().int().min(getAnalystDailyBoardGameSummaryResponseTotalMin)
+})
+
+
+/**
  * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage for all 30 teams
  */
 export const GetAnalystBullpenRoomQueryParams = zod.object({

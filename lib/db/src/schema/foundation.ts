@@ -102,6 +102,19 @@ export const walkForwardStatusEnum = pgEnum("walk_forward_status", [
   "INCOMPLETE",
 ]);
 
+export const confidenceLabelEnum = pgEnum("confidence_label", [
+  "FIRE",
+  "HALF",
+  "HOLD",
+  "NONE",
+]);
+
+export const confidenceBasisEnum = pgEnum("confidence_basis", [
+  "RESEARCH_ONLY",
+  "MODEL_CONFIRMED",
+  "MODEL_REJECTED",
+]);
+
 export const researchWindowEnum = pgEnum("research_window", [
   "SEASON",
   "CAREER",
@@ -1159,6 +1172,37 @@ export const modelVersions = pgTable("model_versions", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   marketStatusIdx: index("model_versions_market_status_idx").on(table.market, table.status),
+}));
+
+/**
+ * Server-computed daily confidence rows are kept separate from mutable research
+ * candidates so each displayed output retains its frozen snapshot and model
+ * identity. FIRE/HALF/HOLD/NONE are approved confidence states, not betting
+ * recommendations. No sportsbook, odds, EV, CLV, or recommendation field belongs here.
+ */
+export const dailyMarketBoard = pgTable("daily_market_board", {
+  boardId: uuid("board_id").primaryKey().defaultRandom(),
+  slateDate: date("slate_date").notNull(),
+  gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
+  playerId: integer("player_id").notNull().references(() => players.playerId),
+  market: marketTypeEnum("market").notNull(),
+  researchRank: integer("research_rank"),
+  researchState: researchStateEnum("research_state").notNull(),
+  primaryMechanism: text("primary_mechanism"),
+  snapshotId: uuid("snapshot_id").references(() => pregameFeatureSnapshots.snapshotId),
+  modelVersionId: text("model_version_id").references(() => modelVersions.versionId),
+  modelPrediction: numeric("model_prediction"),
+  confidenceLabel: confidenceLabelEnum("confidence_label").notNull().default("NONE"),
+  confidenceBasis: confidenceBasisEnum("confidence_basis").notNull().default("RESEARCH_ONLY"),
+  calibratedProbability: numeric("calibrated_probability"),
+  boardFrozenAt: timestamp("board_frozen_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  dailyBoardUniqueIdx: uniqueIndex("daily_market_board_slate_market_player_game_idx").on(
+    table.slateDate, table.market, table.playerId, table.gamePk,
+  ),
+  slateMarketIdx: index("daily_market_board_slate_market_idx").on(table.slateDate, table.market),
 }));
 
 export const walkForwardRuns = pgTable("walk_forward_runs", {

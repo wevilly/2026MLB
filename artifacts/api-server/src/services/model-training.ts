@@ -24,7 +24,7 @@ function featureSetHash(names: string[]): string {
   return createHash("sha256").update(names.slice().sort().join("\n")).digest("hex");
 }
 
-function flattenNumbers(value: unknown, path = "", result: Record<string, number> = {}): Record<string, number> {
+export function flattenNumbers(value: unknown, path = "", result: Record<string, number> = {}): Record<string, number> {
   if (typeof value === "number" && Number.isFinite(value)) {
     result[path || "value"] = value;
   } else if (Array.isArray(value)) {

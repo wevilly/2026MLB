@@ -21,6 +21,9 @@ import {
   GetAnalystModelsResponse,
   ValidateAnalystModelResponse,
   GetAnalystModelValidationResponse,
+  GetAnalystDailyMarketBoardResponse,
+  GetAnalystDailyBoardGameSummaryResponse,
+  RefreshAnalystDailyMarketBoardResponse,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
@@ -58,6 +61,13 @@ import {
   validateModelVersion,
   WalkForwardValidationError,
 } from "../services/walk-forward-validation";
+import {
+  DailyMarketBoardValidationError,
+  type BoardMarket,
+  populateDailyMarketBoard,
+  queryDailyBoardGameSummary,
+  queryDailyMarketBoard,
+} from "../services/daily-market-board";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
@@ -69,6 +79,20 @@ function requestedDate(value: unknown) {
       ? value
       : new Date().toISOString().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must use YYYY-MM-DD");
+  return date;
+}
+
+function requestedBoardDate(value: unknown) {
+  const date = requestedDate(value);
+  const [year, month, day] = date.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+  ) {
+    throw new DailyMarketBoardValidationError("date must be a real calendar date");
+  }
   return date;
 }
 
@@ -1142,6 +1166,15 @@ function requestedModelMarket(value: unknown): ModelMarket {
   return market as ModelMarket;
 }
 
+function requestedBoardMarket(value: unknown): BoardMarket | null {
+  if (value == null || value === "") return null;
+  const market = String(value).trim().toUpperCase();
+  if (!MODEL_MARKETS.includes(market as ModelMarket)) {
+    throw new DailyMarketBoardValidationError("market must be TB, XBH, WALK, or HR");
+  }
+  return market as BoardMarket;
+}
+
 router.post("/analyst/models/train", async (req, res, next) => {
   try {
     const result = await trainMarketModel(requestedModelMarket(req.query.market));
@@ -1193,6 +1226,61 @@ router.get("/analyst/models/validation", async (req, res, next) => {
     res.json(GetAnalystModelValidationResponse.parse({ runs, total: runs.length }));
   } catch (error) {
     if (error instanceof WalkForwardValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.post("/analyst/market-board/refresh", async (req, res, next) => {
+  try {
+    const result = await populateDailyMarketBoard(
+      requestedBoardDate(req.query.date),
+      requestedBoardMarket(req.query.market),
+    );
+    res.status(201).json(RefreshAnalystDailyMarketBoardResponse.parse(result));
+  } catch (error) {
+    if (error instanceof DailyMarketBoardValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.get("/analyst/market-board", async (req, res, next) => {
+  try {
+    const date = requestedBoardDate(req.query.date);
+    const market = requestedBoardMarket(req.query.market);
+    const entries = await queryDailyMarketBoard(date, market);
+    res.json(GetAnalystDailyMarketBoardResponse.parse({
+      date,
+      market,
+      entries,
+      total: entries.length,
+      notes: [
+        "Confidence and calibrated probability are computed server-side from frozen snapshots and verified ACTIVE artifacts.",
+        "FIRE requires STRONG research and a calibrated probability of at least 0.65. No ACTIVE calibrated model yields NONE / RESEARCH_ONLY.",
+        "No odds, prices, EV, CLV, or related betting fields are included.",
+      ],
+    }));
+  } catch (error) {
+    if (error instanceof DailyMarketBoardValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+router.get("/analyst/market-board/game-summary", async (req, res, next) => {
+  try {
+    const date = requestedBoardDate(req.query.date);
+    const games = await queryDailyBoardGameSummary(date);
+    res.json(GetAnalystDailyBoardGameSummaryResponse.parse({ date, games, total: games.length }));
+  } catch (error) {
+    if (error instanceof DailyMarketBoardValidationError) {
       res.status(400).json({ error: error.message });
       return;
     }

@@ -805,6 +805,93 @@ paths:
                 properties:
                   error: { type: string }
                 required: [error]
+  /analyst/market-board/refresh:
+    post:
+      operationId: refreshAnalystDailyMarketBoard
+      tags: [analyst]
+      summary: Persist the server-computed daily confidence board
+      description: |
+        Resolves current research candidates to corrected frozen pregame snapshots,
+        verifies the immutable ACTIVE model artifact for each market, then stores
+        calibrated probability and confidence. FIRE/HALF/HOLD/NONE are confidence
+        states, not betting recommendations. This endpoint accepts no odds,
+        prices, EV, CLV, sportsbook, or recommendation data.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: market
+          in: query
+          required: false
+          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+      responses:
+        "201":
+          description: Daily board population completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyMarketBoardRefreshResult"
+        "400":
+          description: Invalid date or market
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
+  /analyst/market-board:
+    get:
+      operationId: getAnalystDailyMarketBoard
+      tags: [analyst]
+      summary: Get persisted market confidence rows
+      description: |
+        Returns only server-persisted research and model confidence rows. A FIRE
+        requires STRONG research plus model confirmation at the FIRE probability
+        threshold. No model or calibration is exposed as NONE / RESEARCH_ONLY.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: market
+          in: query
+          required: false
+          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+      responses:
+        "200":
+          description: Persisted daily market board
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyMarketBoard"
+        "400":
+          description: Invalid date or market
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
+  /analyst/market-board/game-summary:
+    get:
+      operationId: getAnalystDailyBoardGameSummary
+      tags: [analyst]
+      summary: Get game-level context for persisted board candidates
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Starters, bullpen availability counts, and top confidence candidate by market
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyBoardGameSummary"
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -1758,4 +1845,95 @@ components:
         candidateCount: { type: integer }
         systemNote: { type: string }
       required: [date, market, gameId, rankSemantics, prohibitedFields, candidates, candidateCount, systemNote]
+    DailyMarketBoardEntry:
+      type: object
+      additionalProperties: false
+      description: |
+        One persisted confidence record. Model values are generated only by a
+        verified ACTIVE artifact with accepted calibration; no betting fields are
+        part of this contract.
+      properties:
+        boardId: { type: string }
+        slateDate: { type: string, format: date }
+        gamePk: { type: integer }
+        playerId: { type: integer }
+        playerName: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        researchRank: { type: ["integer", "null"] }
+        researchState: { type: string, enum: [STRONG, POSITIVE, NEUTRAL, NEGATIVE, BLOCKED] }
+        primaryMechanism: { type: ["string", "null"] }
+        modelPrediction: { type: ["number", "null"] }
+        confidenceLabel: { type: string, enum: [FIRE, HALF, HOLD, NONE] }
+        confidenceBasis: { type: string, enum: [RESEARCH_ONLY, MODEL_CONFIRMED, MODEL_REJECTED] }
+        calibratedProbability: { type: ["number", "null"] }
+        modelVersionId: { type: ["string", "null"] }
+        boardFrozenAt: { type: string }
+      required: [boardId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, modelPrediction, confidenceLabel, confidenceBasis, calibratedProbability, modelVersionId, boardFrozenAt]
+    DailyMarketBoard:
+      type: object
+      additionalProperties: false
+      properties:
+        date: { type: string, format: date }
+        market: { type: ["string", "null"], enum: [TB, XBH, WALK, HR] }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/DailyMarketBoardEntry" }
+        total: { type: integer, minimum: 0 }
+        notes: { type: array, items: { type: string } }
+      required: [date, market, entries, total, notes]
+    DailyMarketBoardRefreshResult:
+      type: object
+      additionalProperties: false
+      properties:
+        slateDate: { type: string, format: date }
+        market: { type: ["string", "null"], enum: [TB, XBH, WALK, HR] }
+        candidatesFound: { type: integer, minimum: 0 }
+        modeledRows: { type: integer, minimum: 0 }
+        researchOnlyRows: { type: integer, minimum: 0 }
+      required: [slateDate, market, candidatesFound, modeledRows, researchOnlyRows]
+    DailyBoardGameSummaryGame:
+      type: object
+      additionalProperties: false
+      properties:
+        gamePk: { type: integer }
+        awayTeam: { type: string }
+        homeTeam: { type: string }
+        startTimeUtc: { type: ["string", "null"] }
+        park: { type: ["string", "null"] }
+        awayStarter:
+          type: object
+          additionalProperties: false
+          properties:
+            name: { type: string }
+            state: { type: string }
+          required: [name, state]
+        homeStarter:
+          type: object
+          additionalProperties: false
+          properties:
+            name: { type: string }
+            state: { type: string }
+          required: [name, state]
+        bullpenContext:
+          type: object
+          additionalProperties: false
+          properties:
+            awayAvailableArms: { type: integer, minimum: 0 }
+            homeAvailableArms: { type: integer, minimum: 0 }
+          required: [awayAvailableArms, homeAvailableArms]
+        topCandidates:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/DailyMarketBoardEntry"
+      required: [gamePk, awayTeam, homeTeam, startTimeUtc, park, awayStarter, homeStarter, bullpenContext, topCandidates]
+    DailyBoardGameSummary:
+      type: object
+      additionalProperties: false
+      properties:
+        date: { type: string, format: date }
+        games:
+          type: array
+          items: { $ref: "#/components/schemas/DailyBoardGameSummaryGame" }
+        total: { type: integer, minimum: 0 }
+      required: [date, games, total]
 

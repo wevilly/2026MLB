@@ -1,8 +1,8 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore } from '@workspace/api-client-react';
-import type { AnalystSettings, BackfillFeatureStoreParams, BullpenArm, BullpenRoom, BullpenTeam, CaptureFeatureStoreSlateParams, DataHealth, FeatureStoreCaptureResult, FeatureStoreResult, HealthIssue, HREngineResult, MarketResearch, MarketResearchCandidate, PregameFeatureSnapshot, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile } from '@workspace/api-client-react';
+import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore, useGetAnalystDailyMarketBoard, useGetAnalystDailyBoardGameSummary, useRefreshAnalystDailyMarketBoard } from '@workspace/api-client-react';
+import type { AnalystSettings, BackfillFeatureStoreParams, BullpenArm, BullpenRoom, BullpenTeam, CaptureFeatureStoreSlateParams, DataHealth, FeatureStoreCaptureResult, FeatureStoreResult, HealthIssue, HREngineResult, MarketResearchCandidate, PregameFeatureSnapshot, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile, DailyMarketBoard, DailyBoardGameSummary } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useSearch, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -1894,40 +1894,50 @@ function FeatureStorePage() {
 function MarketBoardPage() {
   const [dateParam, setDateParam] = useState('');
   const [marketParam, setMarketParam] = useState<MarketShortCode | ''>('');
-  const [gameIdParam, setGameIdParam] = useState('');
-
   const effectiveDate = dateParam || new Date().toISOString().slice(0, 10);
   const params = {
     date: effectiveDate,
     ...(marketParam ? { market: marketParam as MarketShortCode } : {}),
-    ...(gameIdParam ? { gameId: gameIdParam } : {}),
   };
-
-  const query = useGetAnalystMarketResearch(params);
-  const data = query.data as MarketResearch | undefined;
+  const boardQuery = useGetAnalystDailyMarketBoard(params);
+  const gameQuery = useGetAnalystDailyBoardGameSummary({ date: effectiveDate });
+  const refreshBoard = useRefreshAnalystDailyMarketBoard({
+    mutation: {
+      onSuccess: () => {
+        void boardQuery.refetch();
+        void gameQuery.refetch();
+      },
+    },
+  });
+  const board = boardQuery.data as DailyMarketBoard | undefined;
+  const gameSummary = gameQuery.data as DailyBoardGameSummary | undefined;
+  const entries = board?.entries ?? [];
+  const confidenceTone = (label: string): Tone => (
+    label === 'FIRE' ? 'good' : label === 'HALF' ? 'accent' : label === 'HOLD' ? 'warn' : 'neutral'
+  );
+  const refresh = () => refreshBoard.mutate({ params });
 
   return (
     <div className="page-content rise-in">
       <div className="page-intro">
         <div>
-          <Kicker>Market research / Phase 3</Kicker>
+          <Kicker>Daily confidence / Phase 6</Kicker>
           <h1>Market <span className="slash">//</span> board</h1>
           <p>
-            Four independent hitter markets: 2+ Total Bases, Extra Base Hit, Batter Walk, Home Run.
-            Populated by engines 3A–3D. Empty until at least one engine has completed a research pass.
+            Server-persisted confidence for 2+ Total Bases, Extra Base Hit, Batter Walk, and Home Run.
+            Confidence is calculated from frozen research context and accepted calibrated model artifacts.
           </p>
         </div>
         <button
           className="button button-dark"
-          onClick={() => query.refetch()}
-          disabled={query.isLoading}
+          onClick={refresh}
+          disabled={refreshBoard.isPending}
           data-testid="button-refresh-market-board"
         >
-          <RefreshCw size={15} /> {query.isLoading ? 'Loading…' : 'Refresh'}
+          <RefreshCw size={15} /> {refreshBoard.isPending ? 'Refreshing…' : 'Refresh board'}
         </button>
       </div>
 
-      {/* Filters */}
       <div className="flex gap-2 items-center flex-wrap mb-6">
         <input
           type="date"
@@ -1947,37 +1957,15 @@ function MarketBoardPage() {
             <option key={m} value={m}>{MARKET_LABELS[m]}</option>
           ))}
         </select>
-        <input
-          type="text"
-          className="search-input !h-[35px] !w-[120px]"
-          value={gameIdParam}
-          onChange={(e) => setGameIdParam(e.target.value.trim())}
-          placeholder="Game ID"
-          data-testid="input-market-board-gameid"
-        />
       </div>
 
-      {/* TB Engine panel */}
-      <TBEnginePanel slateDate={effectiveDate} onComplete={() => query.refetch()} />
-
-      {/* XBH Engine panel */}
-      <XBHEnginePanel slateDate={effectiveDate} onComplete={() => query.refetch()} />
-
-      {/* WALK Engine panel */}
-      <WALKEnginePanel slateDate={effectiveDate} onComplete={() => query.refetch()} />
-
-      {/* HR Engine panel */}
-      <HREnginePanel slateDate={effectiveDate} onComplete={() => query.refetch()} />
-
-      {/* Contract banner — always visible */}
       <Panel className="mb-6 bg-accent/5 border-accent/20">
         <div className="p-4 space-y-3">
-          <Kicker>Phase 3 contract</Kicker>
-          {data && (
-            <p className="text-xs font-mono text-muted-foreground" data-testid="rank-semantics">
-              {data.rankSemantics}
-            </p>
-          )}
+          <Kicker>Confidence policy</Kicker>
+          <p className="text-xs font-mono text-muted-foreground" data-testid="confidence-policy">
+            FIRE requires STRONG research plus calibrated probability ≥ 65%. HALF requires model confirmation ≥ 55% and positive research.
+            HOLD means an active model did not confirm the candidate or its inputs were insufficient. NONE means no usable ACTIVE calibrated model.
+          </p>
           <div className="flex flex-wrap gap-3 mt-3">
             {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
               <button
@@ -1990,69 +1978,43 @@ function MarketBoardPage() {
               </button>
             ))}
           </div>
-          {data && (
-            <div className="mt-2">
-              <span className="text-xs text-muted-foreground">Prohibited fields (absent from contract): </span>
-              <span className="font-mono text-xs text-muted-foreground" data-testid="prohibited-fields">
-                {data.prohibitedFields.join(', ')}
-              </span>
-            </div>
-          )}
+          <p className="text-xs text-muted-foreground" data-testid="prohibited-fields">
+            This board intentionally excludes odds, prices, EV, CLV, implied probability, vig, and recommendation fields.
+          </p>
         </div>
       </Panel>
 
-      {/* Summary metrics */}
-      {data && (
+      {board && (
         <div className="metric-grid mb-6">
-          <Metric label="Candidates" value={data.candidateCount} note={`${marketParam ? MARKET_LABELS[marketParam] : 'all markets'} · ${effectiveDate}`} tone="accent" />
+          <Metric label="Candidates" value={board.total} note={`${marketParam ? MARKET_LABELS[marketParam] : 'all markets'} · ${effectiveDate}`} tone="accent" />
           <Metric label="Market" value={marketParam ? MARKET_LABELS[marketParam] : 'All 4 markets'} note="TB / XBH / WALK / HR are independent" tone="neutral" />
-          <Metric
-            label="STRONG / POSITIVE"
-            value={data.candidates.filter((c) => c.researchState === 'STRONG' || c.researchState === 'POSITIVE').length}
-            note="Positive research state"
-            tone={data.candidates.some((c) => c.researchState === 'STRONG' || c.researchState === 'POSITIVE') ? 'good' : 'neutral'}
-          />
-          <Metric
-            label="BLOCKED"
-            value={data.candidates.filter((c) => c.researchState === 'BLOCKED').length}
-            note="Evidence structurally absent"
-            tone={data.candidates.some((c) => c.researchState === 'BLOCKED') ? 'bad' : 'good'}
-          />
+          <Metric label="FIRE" value={entries.filter((entry) => entry.confidenceLabel === 'FIRE').length} note="STRONG research + 65% calibrated probability" tone="good" />
+          <Metric label="Model-ready" value={entries.filter((entry) => entry.calibratedProbability !== null).length} note="Verified ACTIVE model and calibration" tone="neutral" />
         </div>
       )}
 
-      {query.isLoading ? (
+      {boardQuery.isLoading ? (
         <LoadingPanel rows={5} />
-      ) : query.isError ? (
-        <QueryMessage kind="error" onRetry={() => query.refetch()} />
-      ) : !data || data.candidateCount === 0 ? (
+      ) : boardQuery.isError ? (
+        <QueryMessage kind="error" onRetry={() => boardQuery.refetch()} />
+      ) : !board || board.total === 0 ? (
         <Panel>
           <div className="p-8 text-center space-y-3">
-            <Kicker>No candidates yet</Kicker>
-            <h2 className="text-lg">Run an engine above or wait for engines 3A–3D</h2>
+            <Kicker>No persisted board rows</Kicker>
+            <h2 className="text-lg">Refresh the daily board after the research engines and snapshot capture have completed</h2>
             <p className="text-sm text-muted-foreground max-w-lg mx-auto">
-              Click "Run TB engine" above to populate 2+ Total Bases candidates for today's slate.
-              Extra Base Hit (3B), Batter Walk (3C), and Home Run (3D) engines will appear here
-              as they are built.
+              This view intentionally reads persisted server outputs, not browser-derived confidence.
+              Research-only candidates will be stored as NONE until an ACTIVE calibrated model is available.
             </p>
-            <div className="flex justify-center gap-2 mt-4">
-              {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
-                <span key={m} className="badge badge-neutral font-mono text-xs" data-testid={`market-contract-badge-${m}`}>{m}</span>
-              ))}
-            </div>
-            {data && (
-              <p className="text-xs font-mono text-muted-foreground mt-3" data-testid="system-note">
-                {data.systemNote}
-              </p>
-            )}
           </div>
         </Panel>
       ) : (
+        <>
         <Panel>
           <SectionHeading
-            eyebrow={`${data.candidateCount} candidates · ${effectiveDate}`}
-            title="Research board"
-            detail="Ordered by research_rank ASC (1 = highest). Ties share the same rank value. RANK_DONT_GATE — no state removes a candidate from the board."
+            eyebrow={`${board.total} persisted rows · ${effectiveDate}`}
+            title="Confidence board"
+            detail="All confidence labels and calibrated probabilities were calculated server-side from a pinned model artifact and frozen snapshot."
           />
           <div className="table-wrap">
             <table className="data-table" data-testid="market-board-table">
@@ -2061,22 +2023,66 @@ function MarketBoardPage() {
                   <th>Rank</th>
                   <th>Player</th>
                   <th>Market</th>
-                  <th>State</th>
+                  <th>Research</th>
                   <th>Mechanism</th>
-                  <th>Slot</th>
-                  <th>Pitcher xSLG alw</th>
-                  <th>Counter flags</th>
-                  <th>Missing/Stale</th>
+                  <th>Confidence</th>
+                  <th>Calibrated probability</th>
+                  <th>Model context</th>
                 </tr>
               </thead>
               <tbody>
-                {data.candidates.map((c, i) => (
-                  <CandidateRow key={c.candidateId} candidate={c} index={i} />
+                {entries.map((entry) => (
+                  <tr key={entry.boardId}>
+                    <td className="font-mono">{entry.researchRank ?? '—'}</td>
+                    <td><strong>{entry.playerName}</strong></td>
+                    <td><Badge tone="accent">{MARKET_LABELS[entry.market as MarketShortCode] ?? entry.market}</Badge></td>
+                    <td><Badge tone={toneFor(entry.researchState)}>{entry.researchState}</Badge></td>
+                    <td className="text-xs">{entry.primaryMechanism ?? 'Not classified'}</td>
+                    <td><Badge tone={confidenceTone(entry.confidenceLabel)}>{entry.confidenceLabel}</Badge></td>
+                    <td className="font-mono">
+                      {entry.calibratedProbability === null ? 'No ACTIVE calibration' : `${(entry.calibratedProbability * 100).toFixed(1)}%`}
+                    </td>
+                    <td className="text-xs">
+                      {entry.modelVersionId ? <span title={entry.modelVersionId}>{entry.confidenceBasis.replaceAll('_', ' ')}</span> : 'Research only'}
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </Panel>
+        <Panel className="mt-6">
+          <SectionHeading
+            eyebrow={`${gameSummary?.total ?? 0} games with board context`}
+            title="Game summaries"
+            detail="Starters, bullpen availability counts, and the highest confidence row for each market."
+          />
+          {gameQuery.isLoading ? <LoadingPanel rows={2} /> : gameQuery.isError ? (
+            <QueryMessage kind="error" onRetry={() => gameQuery.refetch()} />
+          ) : !gameSummary?.games.length ? (
+            <QueryMessage kind="empty" />
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              {gameSummary.games.map((game) => (
+                <div key={game.gamePk} className="rounded border border-border p-4 space-y-3" data-testid={`game-summary-${game.gamePk}`}>
+                  <div className="flex justify-between gap-2"><strong>{game.awayTeam} @ {game.homeTeam}</strong><span className="text-xs text-muted-foreground">{game.park ?? 'Park unavailable'}</span></div>
+                  <p className="text-xs text-muted-foreground">
+                    Starters: {game.awayStarter.name} ({game.awayStarter.state}) / {game.homeStarter.name} ({game.homeStarter.state}) ·
+                    available bullpen arms: {game.bullpenContext.awayAvailableArms} / {game.bullpenContext.homeAvailableArms}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.values(game.topCandidates).map((candidate) => (
+                      <Badge key={candidate.boardId} tone={confidenceTone(candidate.confidenceLabel)}>
+                        {candidate.market} · {candidate.playerName} · {candidate.confidenceLabel}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+        </>
       )}
     </div>
   );

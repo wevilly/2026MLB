@@ -1242,6 +1242,162 @@ export interface MarketResearch {
   systemNote: string;
 }
 
+export type DailyMarketBoardEntryMarket = typeof DailyMarketBoardEntryMarket[keyof typeof DailyMarketBoardEntryMarket];
+
+
+export const DailyMarketBoardEntryMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type DailyMarketBoardEntryResearchState = typeof DailyMarketBoardEntryResearchState[keyof typeof DailyMarketBoardEntryResearchState];
+
+
+export const DailyMarketBoardEntryResearchState = {
+  STRONG: 'STRONG',
+  POSITIVE: 'POSITIVE',
+  NEUTRAL: 'NEUTRAL',
+  NEGATIVE: 'NEGATIVE',
+  BLOCKED: 'BLOCKED',
+} as const;
+
+export type DailyMarketBoardEntryConfidenceLabel = typeof DailyMarketBoardEntryConfidenceLabel[keyof typeof DailyMarketBoardEntryConfidenceLabel];
+
+
+export const DailyMarketBoardEntryConfidenceLabel = {
+  FIRE: 'FIRE',
+  HALF: 'HALF',
+  HOLD: 'HOLD',
+  NONE: 'NONE',
+} as const;
+
+export type DailyMarketBoardEntryConfidenceBasis = typeof DailyMarketBoardEntryConfidenceBasis[keyof typeof DailyMarketBoardEntryConfidenceBasis];
+
+
+export const DailyMarketBoardEntryConfidenceBasis = {
+  RESEARCH_ONLY: 'RESEARCH_ONLY',
+  MODEL_CONFIRMED: 'MODEL_CONFIRMED',
+  MODEL_REJECTED: 'MODEL_REJECTED',
+} as const;
+
+/**
+ * One persisted confidence record. Model values are generated only by a
+ * verified ACTIVE artifact with accepted calibration; no betting fields are
+ * part of this contract.
+ */
+export interface DailyMarketBoardEntry {
+  boardId: string;
+  slateDate: string;
+  gamePk: number;
+  playerId: number;
+  playerName: string;
+  market: DailyMarketBoardEntryMarket;
+  /** @nullable */
+  researchRank: number | null;
+  researchState: DailyMarketBoardEntryResearchState;
+  /** @nullable */
+  primaryMechanism: string | null;
+  /** @nullable */
+  modelPrediction: number | null;
+  confidenceLabel: DailyMarketBoardEntryConfidenceLabel;
+  confidenceBasis: DailyMarketBoardEntryConfidenceBasis;
+  /** @nullable */
+  calibratedProbability: number | null;
+  /** @nullable */
+  modelVersionId: string | null;
+  boardFrozenAt: string;
+}
+
+/**
+ * @nullable
+ */
+export type DailyMarketBoardMarket = typeof DailyMarketBoardMarket[keyof typeof DailyMarketBoardMarket] | null;
+
+
+export const DailyMarketBoardMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export interface DailyMarketBoard {
+  date: string;
+  /** @nullable */
+  market: DailyMarketBoardMarket;
+  entries: DailyMarketBoardEntry[];
+  /** @minimum 0 */
+  total: number;
+  notes: string[];
+}
+
+/**
+ * @nullable
+ */
+export type DailyMarketBoardRefreshResultMarket = typeof DailyMarketBoardRefreshResultMarket[keyof typeof DailyMarketBoardRefreshResultMarket] | null;
+
+
+export const DailyMarketBoardRefreshResultMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export interface DailyMarketBoardRefreshResult {
+  slateDate: string;
+  /** @nullable */
+  market: DailyMarketBoardRefreshResultMarket;
+  /** @minimum 0 */
+  candidatesFound: number;
+  /** @minimum 0 */
+  modeledRows: number;
+  /** @minimum 0 */
+  researchOnlyRows: number;
+}
+
+export type DailyBoardGameSummaryGameAwayStarter = {
+  name: string;
+  state: string;
+};
+
+export type DailyBoardGameSummaryGameHomeStarter = {
+  name: string;
+  state: string;
+};
+
+export type DailyBoardGameSummaryGameBullpenContext = {
+  /** @minimum 0 */
+  awayAvailableArms: number;
+  /** @minimum 0 */
+  homeAvailableArms: number;
+};
+
+export type DailyBoardGameSummaryGameTopCandidates = {[key: string]: DailyMarketBoardEntry};
+
+export interface DailyBoardGameSummaryGame {
+  gamePk: number;
+  awayTeam: string;
+  homeTeam: string;
+  /** @nullable */
+  startTimeUtc: string | null;
+  /** @nullable */
+  park: string | null;
+  awayStarter: DailyBoardGameSummaryGameAwayStarter;
+  homeStarter: DailyBoardGameSummaryGameHomeStarter;
+  bullpenContext: DailyBoardGameSummaryGameBullpenContext;
+  topCandidates: DailyBoardGameSummaryGameTopCandidates;
+}
+
+export interface DailyBoardGameSummary {
+  date: string;
+  games: DailyBoardGameSummaryGame[];
+  /** @minimum 0 */
+  total: number;
+}
+
 export type GetAnalystProjectionsParams = {
 date?: string;
 };
@@ -1520,6 +1676,48 @@ export const GetAnalystModelValidationMarket = {
 
 export type GetAnalystModelValidation400 = {
   error: string;
+};
+
+export type RefreshAnalystDailyMarketBoardParams = {
+date?: string;
+market?: RefreshAnalystDailyMarketBoardMarket;
+};
+
+export type RefreshAnalystDailyMarketBoardMarket = typeof RefreshAnalystDailyMarketBoardMarket[keyof typeof RefreshAnalystDailyMarketBoardMarket];
+
+
+export const RefreshAnalystDailyMarketBoardMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type RefreshAnalystDailyMarketBoard400 = {
+  error: string;
+};
+
+export type GetAnalystDailyMarketBoardParams = {
+date?: string;
+market?: GetAnalystDailyMarketBoardMarket;
+};
+
+export type GetAnalystDailyMarketBoardMarket = typeof GetAnalystDailyMarketBoardMarket[keyof typeof GetAnalystDailyMarketBoardMarket];
+
+
+export const GetAnalystDailyMarketBoardMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type GetAnalystDailyMarketBoard400 = {
+  error: string;
+};
+
+export type GetAnalystDailyBoardGameSummaryParams = {
+date?: string;
 };
 
 export type GetAnalystBullpenRoomParams = {
