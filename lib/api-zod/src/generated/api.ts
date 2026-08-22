@@ -472,215 +472,513 @@ export const RefreshFullUniverseStatcastSplitsResponse = zod.object({
 
 
 /**
- * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage
- */
-export const GetAnalystBullpenRoomQueryParams = zod.object({
-  "date": zod.string().optional(),
-  "team": zod.string().optional()
-})
-
-export const GetAnalystBullpenRoomResponse = zod.object({
-  "date": zod.string(),
-  "requestedTeam": zod.string().nullable(),
-  "staleFreshnessWindowSeconds": zod.number(),
-  "teams": zod.array(zod.object({
-    "teamId": zod.number(),
-    "abbreviation": zod.string(),
-    "name": zod.string(),
-    "slateDate": zod.string(),
-    "leverageMap": zod.object({
-      "projected9th": zod.number().nullable(),
-      "projected8th": zod.number().nullable(),
-      "projected7th": zod.number().nullable(),
-      "highestLeverageLefty": zod.number().nullable(),
-      "longMan": zod.number().nullable(),
-      "highestWalkReliever": zod.number().nullable(),
-      "lowestWalkReliever": zod.number().nullable(),
-      "roleUncertainty": zod.boolean(),
-      "notes": zod.string().nullable(),
-      "computedAt": zod.string().nullable()
-    }),
-    "arms": zod.array(zod.object({
-      "playerId": zod.number(),
-      "name": zod.string(),
-      "throws": zod.string(),
-      "role": zod.string(),
-      "availability": zod.enum(['AVAILABLE', 'LIKELY_AVAILABLE', 'DOUBTFUL', 'OUT', 'UNKNOWN', 'STALE']),
-      "confidence": zod.enum(['HEURISTIC', 'MANAGER_OVERRIDE', 'UNKNOWN']),
-      "d1Pitches": zod.number().nullable(),
-      "d2Pitches": zod.number().nullable(),
-      "d3Pitches": zod.number().nullable(),
-      "consecutiveDays": zod.number(),
-      "multiInningYesterday": zod.boolean(),
-      "daysSinceLastUse": zod.number().nullable(),
-      "managerOverride": zod.string().nullable(),
-      "managerOverrideNote": zod.string().nullable(),
-      "staleBadge": zod.boolean(),
-      "sourceFreshness": zod.string().nullable(),
-      "computedAt": zod.string().nullable()
-    })),
-    "usage": zod.object({
-      "d1": zod.array(zod.object({ "playerId": zod.number(), "name": zod.string(), "pitches": zod.number(), "ip": zod.string(), "multiInning": zod.boolean() })),
-      "d2": zod.array(zod.object({ "playerId": zod.number(), "name": zod.string(), "pitches": zod.number(), "ip": zod.string(), "multiInning": zod.boolean() })),
-      "d3": zod.array(zod.object({ "playerId": zod.number(), "name": zod.string(), "pitches": zod.number(), "ip": zod.string(), "multiInning": zod.boolean() }))
-    }),
-    "coveragePercentage": zod.number(),
-    "staleBadge": zod.boolean(),
-    "computedAt": zod.string().nullable()
-  })),
-  "summary": zod.object({
-    "teamsWithData": zod.number(),
-    "teamsStale": zod.number(),
-    "totalArms": zod.number(),
-    "armsAvailable": zod.number(),
-    "armsLikelyAvailable": zod.number(),
-    "armsDoubtful": zod.number(),
-    "armsOut": zod.number(),
-    "armsUnknown": zod.number()
-  })
-})
-
-
-/**
- * @summary Ingest reliever appearances and recompute availability and leverage maps
- */
-export const RefreshBullpenQueryParams = zod.object({
-  "date": zod.string().optional()
-})
-
-export const RefreshBullpenResponse = zod.object({
-  "source": zod.string(),
-  "slateDate": zod.string(),
-  "gamesProcessed": zod.number(),
-  "appearancesNormalized": zod.number(),
-  "appearancesRejected": zod.number(),
-  "teamsComputed": zod.number(),
-  "error": zod.string().nullable()
-})
-
-
-/**
- * Phase 3 – Shared Market Research Contract
+ * Returns the market research candidate board for one or all markets on the given date.
+ * The board is populated by the Phase 3A–3D market engines; it is empty until at least
+ * one engine has completed a research pass.
+ *
+ * RANK, DON'T GATE rule: research_rank is an ordinal integer only. No state value
+ * removes a candidate from the board. The prohibitedFields array in the response
+ * documents which fields are permanently absent from this contract.
  * @summary Get market research candidates for a given date and market
  */
-/**
- * @summary Run the Total Bases (2+) research engine for a slate date
- */
-export const RefreshMarketResearchTBQueryParams = zod.object({
-  "date": zod.string().optional()
-})
-
-export const RefreshMarketResearchTBResponse = zod.object({
-  "market": zod.string(),
-  "slateDate": zod.string(),
-  "gamesProcessed": zod.number(),
-  "candidatesProcessed": zod.number(),
-  "candidatesWritten": zod.number(),
-  "blockedCandidates": zod.number(),
-  "strongCandidates": zod.number(),
-  "positiveCandidates": zod.number(),
-  "neutralCandidates": zod.number(),
-  "negativeCandidates": zod.number(),
-  "processingMs": zod.number(),
-  "notes": zod.array(zod.string()),
-  "error": zod.string().nullable()
-})
-
-export const RefreshMarketResearchXBHQueryParams = zod.object({
-  "date": zod.string().optional()
-})
-
-export const RefreshMarketResearchXBHResponse = zod.object({
-  "market": zod.string(),
-  "slateDate": zod.string(),
-  "gamesProcessed": zod.number(),
-  "candidatesProcessed": zod.number(),
-  "candidatesWritten": zod.number(),
-  "blockedCandidates": zod.number(),
-  "strongCandidates": zod.number(),
-  "positiveCandidates": zod.number(),
-  "neutralCandidates": zod.number(),
-  "negativeCandidates": zod.number(),
-  "processingMs": zod.number(),
-  "notes": zod.array(zod.string()),
-  "error": zod.string().nullable()
-})
-
-export const RefreshMarketResearchWALKQueryParams = zod.object({
-  "date": zod.string().optional()
-})
-
-export const RefreshMarketResearchWALKResponse = zod.object({
-  "market": zod.string(),
-  "slateDate": zod.string(),
-  "gamesProcessed": zod.number(),
-  "candidatesProcessed": zod.number(),
-  "candidatesWritten": zod.number(),
-  "blockedCandidates": zod.number(),
-  "strongCandidates": zod.number(),
-  "positiveCandidates": zod.number(),
-  "neutralCandidates": zod.number(),
-  "negativeCandidates": zod.number(),
-  "processingMs": zod.number(),
-  "notes": zod.array(zod.string()),
-  "error": zod.string().nullable()
-})
-
-export const RefreshMarketResearchHRQueryParams = zod.object({
-  "date": zod.string().optional()
-})
-
-export const RefreshMarketResearchHRResponse = zod.object({
-  "market": zod.string(),
-  "slateDate": zod.string(),
-  "gamesProcessed": zod.number(),
-  "candidatesProcessed": zod.number(),
-  "candidatesWritten": zod.number(),
-  "blockedCandidates": zod.number(),
-  "strongCandidates": zod.number(),
-  "positiveCandidates": zod.number(),
-  "neutralCandidates": zod.number(),
-  "negativeCandidates": zod.number(),
-  "processingMs": zod.number(),
-  "notes": zod.array(zod.string()),
-  "error": zod.string().nullable()
-})
-
 export const GetAnalystMarketResearchQueryParams = zod.object({
-  "date": zod.string().optional(),
-  "market": zod.enum(["TB", "XBH", "WALK", "HR"]).optional(),
-  "gameId": zod.string().optional()
+  "date": zod.date().optional(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional().describe('Filter to one market (TB=2+Total Bases, XBH=Extra Base Hit, WALK=Batter Walk, HR=Home Run)'),
+  "gameId": zod.coerce.string().optional().describe('Filter to a specific game by game_pk')
 })
 
 export const GetAnalystMarketResearchResponse = zod.object({
-  "date": zod.string(),
+  "date": zod.coerce.date(),
   "market": zod.string().nullable(),
   "gameId": zod.string().nullable(),
   "rankSemantics": zod.string(),
   "prohibitedFields": zod.array(zod.string()),
   "candidates": zod.array(zod.object({
-    "candidateId": zod.string(),
-    "slateDate": zod.string(),
-    "gamePk": zod.number(),
-    "playerId": zod.number(),
-    "playerName": zod.string(),
-    "market": zod.enum(["TB", "XBH", "WALK", "HR"]),
-    "researchRank": zod.number().nullable(),
-    "researchState": zod.enum(["STRONG", "POSITIVE", "NEUTRAL", "NEGATIVE", "BLOCKED"]),
-    "primaryMechanism": zod.string().nullable(),
-    "secondaryMechanism": zod.string().nullable(),
-    "opportunityEvidence": zod.record(zod.unknown()),
-    "starterMatchupEvidence": zod.record(zod.unknown()),
-    "bullpenPathEvidence": zod.record(zod.unknown()),
-    "parkEvidence": zod.record(zod.unknown()),
-    "recentVsSeasonVsCareer": zod.record(zod.unknown()),
-    "counterEvidence": zod.record(zod.unknown()),
-    "missingStaleEvidence": zod.string().nullable(),
-    "createdAt": zod.string(),
-    "updatedAt": zod.string()
-  })),
-  "candidateCount": zod.number(),
+  "candidateId": zod.string(),
+  "slateDate": zod.coerce.date(),
+  "gamePk": zod.number().int(),
+  "playerId": zod.number().int(),
+  "playerName": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "researchRank": zod.number().int().nullable(),
+  "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
+  "primaryMechanism": zod.string().nullable(),
+  "secondaryMechanism": zod.string().nullable(),
+  "opportunityEvidence": zod.object({
+
+}).passthrough(),
+  "starterMatchupEvidence": zod.object({
+
+}).passthrough(),
+  "bullpenPathEvidence": zod.object({
+
+}).passthrough(),
+  "parkEvidence": zod.object({
+
+}).passthrough(),
+  "recentVsSeasonVsCareer": zod.object({
+
+}).passthrough(),
+  "counterEvidence": zod.object({
+
+}).passthrough(),
+  "missingStaleEvidence": zod.string().nullable(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).describe('One research candidate for a player-market-slate_date-game combination.\nRANK_DONT_GATE: research_rank is ordinal only; it implies no threshold, gate, or probability.\nTies share the same integer rank and are never collapsed.\nProhibited fields absent from this schema: ev, clv, odds, impliedProbability, vigJuice,\nedgePercent, kellyFraction, expectedValue.\n')),
+  "candidateCount": zod.number().int(),
   "systemNote": zod.string()
+}).describe('Market research board for a given date\/market\/game.\nPopulated by Phase 3A–3D engines. Empty until at least one engine has run.\nThe prohibitedFields array documents which analytics are permanently absent from this contract.\n')
+
+
+/**
+ * Executes the Phase 3A Total Bases research engine for all lineup candidates
+ * on the given slate date. Writes ranked candidates into the market_research_candidates
+ * table via the shared Phase 3 contract.
+ *
+ * RANK, DON'T GATE: produces ordinal research_rank only; no odds, EV, CLV, or
+ * implied probability is computed or stored. Idempotent — re-running overwrites
+ * prior results for the same slate date.
+ * @summary Run the Total Bases (2+) research engine for a slate date
+ */
+export const RefreshMarketResearchTBQueryParams = zod.object({
+  "date": zod.date().optional().describe('Slate date to run (defaults to today)')
+})
+
+export const RefreshMarketResearchTBResponse = zod.object({
+  "market": zod.string(),
+  "slateDate": zod.coerce.date(),
+  "gamesProcessed": zod.number().int(),
+  "candidatesProcessed": zod.number().int(),
+  "candidatesWritten": zod.number().int(),
+  "blockedCandidates": zod.number().int(),
+  "strongCandidates": zod.number().int(),
+  "positiveCandidates": zod.number().int(),
+  "neutralCandidates": zod.number().int(),
+  "negativeCandidates": zod.number().int(),
+  "processingMs": zod.number().int(),
+  "notes": zod.array(zod.string()),
+  "error": zod.string().nullable()
+}).describe('Result of a Total Bases (2+) research engine run.\nRANK_DONT_GATE: produces ordinal research_rank only.\nNo odds, EV, CLV, or implied probability is produced.\n')
+
+
+/**
+ * Executes the Phase 3B Extra Base Hit research engine for all lineup candidates
+ * on the given slate date. Singles are explicitly excluded from all mechanism paths.
+ * Mechanisms: DOUBLE_ROUTE, TRIPLE_ROUTE, HOME_RUN_ROUTE, MULTI_PATH.
+ * Counter-evidence: WEAK_EXIT_VELOCITY, LOW_HARD_HIT_RATE, GROUND_BALL_HEAVY,
+ * PLATOON_DISADVANTAGE, INSUFFICIENT_SAMPLE.
+ *
+ * RANK, DON'T GATE: produces ordinal research_rank only; no odds, EV, CLV, or
+ * implied probability is computed or stored. Idempotent — re-running overwrites
+ * prior results for the same slate date.
+ * @summary Run the Extra Base Hit research engine for a slate date
+ */
+export const RefreshMarketResearchXBHQueryParams = zod.object({
+  "date": zod.date().optional().describe('Slate date to run (defaults to today)')
+})
+
+export const RefreshMarketResearchXBHResponse = zod.object({
+  "market": zod.string(),
+  "slateDate": zod.coerce.date(),
+  "gamesProcessed": zod.number().int(),
+  "candidatesProcessed": zod.number().int(),
+  "candidatesWritten": zod.number().int(),
+  "blockedCandidates": zod.number().int(),
+  "strongCandidates": zod.number().int(),
+  "positiveCandidates": zod.number().int(),
+  "neutralCandidates": zod.number().int(),
+  "negativeCandidates": zod.number().int(),
+  "processingMs": zod.number().int(),
+  "notes": zod.array(zod.string()),
+  "error": zod.string().nullable()
+}).describe('Result of an Extra Base Hit research engine run.\nRANK_DONT_GATE: produces ordinal research_rank only.\nNo odds, EV, CLV, or implied probability is produced.\nSingles are explicitly excluded from all mechanism paths.\n')
+
+
+/**
+ * Executes the Phase 3C Batter Walk research engine for all lineup candidates
+ * on the given slate date. Walk research is driven by plate discipline and pitcher
+ * command — power metrics (SLG, ISO, barrel%) are explicitly absent.
+ * Mechanisms: PATIENCE_VS_COMMAND, COUNT_CREATION, BULLPEN_WALK_PATH.
+ * Counter-evidence: AGGRESSIVE_HITTER, PITCHER_LOW_WALK_RATE,
+ * FIRST_PITCH_STRIKE_HEAVY, INSUFFICIENT_SAMPLE.
+ *
+ * RANK, DON'T GATE: produces ordinal research_rank only; no odds, EV, CLV, or
+ * implied probability is computed or stored. Idempotent — re-running overwrites
+ * prior results for the same slate date.
+ * @summary Run the Batter Walk research engine for a slate date
+ */
+export const RefreshMarketResearchWALKQueryParams = zod.object({
+  "date": zod.date().optional().describe('Slate date to run (defaults to today)')
+})
+
+export const RefreshMarketResearchWALKResponse = zod.object({
+  "market": zod.string(),
+  "slateDate": zod.coerce.date(),
+  "gamesProcessed": zod.number().int(),
+  "candidatesProcessed": zod.number().int(),
+  "candidatesWritten": zod.number().int(),
+  "blockedCandidates": zod.number().int(),
+  "strongCandidates": zod.number().int(),
+  "positiveCandidates": zod.number().int(),
+  "neutralCandidates": zod.number().int(),
+  "negativeCandidates": zod.number().int(),
+  "processingMs": zod.number().int(),
+  "notes": zod.array(zod.string()),
+  "error": zod.string().nullable()
+}).describe('Result of a Batter Walk research engine run.\nRANK_DONT_GATE: produces ordinal research_rank only.\nNo odds, EV, CLV, or implied probability is produced.\nWalk research is discipline-driven — power metrics are explicitly absent.\n')
+
+
+/**
+ * Executes the Phase 3D Home Run research engine for all lineup candidates
+ * on the given slate date. PARK_ENVIRONMENT is a first-class primary mechanism —
+ * not context-only as in TB/XBH/WALK.
+ * Mechanisms: PULL_AIR, BARREL_POWER, PITCH_SHAPE_MISMATCH, PARK_ENVIRONMENT.
+ * Counter-evidence: LOW_BARREL_RATE, GROUND_BALL_DOMINANT, PITCHER_LOW_HR_RATE,
+ * NEUTRAL_PARK, INSUFFICIENT_SAMPLE.
+ *
+ * RANK, DON'T GATE: produces ordinal research_rank only; no odds, EV, CLV, or
+ * implied probability is computed or stored. Idempotent — re-running overwrites
+ * prior results for the same slate date.
+ * @summary Run the Home Run research engine for a slate date
+ */
+export const RefreshMarketResearchHRQueryParams = zod.object({
+  "date": zod.date().optional().describe('Slate date to run (defaults to today)')
+})
+
+export const RefreshMarketResearchHRResponse = zod.object({
+  "market": zod.string(),
+  "slateDate": zod.coerce.date(),
+  "gamesProcessed": zod.number().int(),
+  "candidatesProcessed": zod.number().int(),
+  "candidatesWritten": zod.number().int(),
+  "blockedCandidates": zod.number().int(),
+  "strongCandidates": zod.number().int(),
+  "positiveCandidates": zod.number().int(),
+  "neutralCandidates": zod.number().int(),
+  "negativeCandidates": zod.number().int(),
+  "processingMs": zod.number().int(),
+  "notes": zod.array(zod.string()),
+  "error": zod.string().nullable()
+}).describe('Result of a Home Run research engine run.\nRANK_DONT_GATE: produces ordinal research_rank only.\nNo odds, EV, CLV, or implied probability is produced.\nPARK_ENVIRONMENT is a first-class primary mechanism — not context-only.\n')
+
+
+/**
+ * Returns immutable pregame feature snapshots for the given filters.
+ * Each snapshot was captured at slate-freeze time and can never be mutated.
+ * Corrections create new rows with a correction_of FK and a required taxonomy reason.
+ *
+ * Process-error taxonomy codes: LATE_SCRATCH, LINEUP_ERROR, DATA_INGEST_FAILURE,
+ * IDENTITY_ERROR, SOURCE_UNAVAILABLE, HUMAN_CORRECTION.
+ *
+ * PROHIBITED: No odds, EV, CLV, implied probability, or sportsbook data is stored.
+ * @summary Query pregame feature snapshot history
+ */
+export const GetAnalystFeatureStoreQueryParams = zod.object({
+  "playerId": zod.coerce.number().int().optional(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional(),
+  "dateFrom": zod.date().optional(),
+  "dateTo": zod.date().optional(),
+  "limit": zod.coerce.number().int().optional()
+})
+
+export const GetAnalystFeatureStoreResponse = zod.object({
+  "snapshots": zod.array(zod.object({
+  "snapshotId": zod.string(),
+  "playerId": zod.number().int(),
+  "playerName": zod.string(),
+  "gamePk": zod.number().int(),
+  "slateDate": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "frozenAt": zod.string(),
+  "researchRank": zod.number().int().nullable(),
+  "researchState": zod.string().nullable(),
+  "primaryMechanism": zod.string().nullable(),
+  "features": zod.object({
+
+}).passthrough(),
+  "correctionOf": zod.string().nullable(),
+  "correctionReason": zod.string().nullable(),
+  "correctionNote": zod.string().nullable(),
+  "isCorrection": zod.boolean(),
+  "createdAt": zod.string()
+}).describe('Immutable pregame feature snapshot for one player-market-game-date.\nNEVER updated after capture. Corrections create new rows with correction_of FK.\ncorrectionTaxonomy codes: LATE_SCRATCH, LINEUP_ERROR, DATA_INGEST_FAILURE,\nIDENTITY_ERROR, SOURCE_UNAVAILABLE, HUMAN_CORRECTION.\nPROHIBITED: No odds, EV, CLV, or sportsbook data.\n')),
+  "total": zod.number().int(),
+  "stats": zod.object({
+  "totalSnapshots": zod.number().int(),
+  "originalSnapshots": zod.number().int(),
+  "correctionSnapshots": zod.number().int(),
+  "snapshotsByMarket": zod.object({
+
+}).passthrough(),
+  "oldestSlateDate": zod.string().nullable(),
+  "newestSlateDate": zod.string().nullable(),
+  "distinctSlateDates": zod.number().int(),
+  "totalOutcomes": zod.number().int(),
+  "outcomesByMarket": zod.object({
+
+}).passthrough()
+}),
+  "filters": zod.object({
+
+}).passthrough(),
+  "correctionTaxonomy": zod.array(zod.string()),
+  "systemNote": zod.string()
+})
+
+
+/**
+ * Captures immutable pregame feature snapshots for all market research candidates
+ * on the given slate date. Run this after all four market engines have completed.
+ * Idempotent — identical feature hashes are skipped without error.
+ * @summary Capture pregame feature snapshots for a slate date
+ */
+export const CaptureFeatureStoreSlateQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
+export const CaptureFeatureStoreSlateResponse = zod.object({
+  "slateDate": zod.string(),
+  "ingestRunId": zod.string(),
+  "markets": zod.array(zod.string()),
+  "candidatesFound": zod.number().int(),
+  "snapshotsWritten": zod.number().int(),
+  "snapshotsSkipped": zod.number().int(),
+  "snapshotErrors": zod.number().int(),
+  "processingMs": zod.number().int(),
+  "notes": zod.array(zod.string()),
+  "error": zod.string().nullable()
+})
+
+
+/**
+ * @summary Backfill feature snapshots from historical market research candidates
+ */
+export const BackfillFeatureStoreQueryParams = zod.object({
+  "dateFrom": zod.date().optional(),
+  "dateTo": zod.date().optional()
+})
+
+export const BackfillFeatureStoreResponse = zod.object({
+  "fromDate": zod.string(),
+  "toDate": zod.string(),
+  "datesProcessed": zod.number().int(),
+  "candidatesFound": zod.number().int(),
+  "snapshotsWritten": zod.number().int(),
+  "snapshotsSkipped": zod.number().int(),
+  "processingMs": zod.number().int(),
+  "notes": zod.array(zod.string()),
+  "error": zod.string().nullable()
+})
+
+
+/**
+ * Creates a new snapshot row that supersedes the original. The original row is NEVER
+ * modified — immutability is preserved. correctionReason MUST be one of the six
+ * process-error taxonomy codes (LATE_SCRATCH, LINEUP_ERROR, DATA_INGEST_FAILURE,
+ * IDENTITY_ERROR, SOURCE_UNAVAILABLE, HUMAN_CORRECTION). Supplying any other value
+ * is rejected with 400.
+ * @summary Create a correction snapshot pointing to an original
+ */
+
+
+
+
+
+export const CorrectFeatureStoreSnapshotBody = zod.object({
+  "snapshotId": zod.string().describe('UUID of the original snapshot to correct.'),
+  "correctionReason": zod.enum(['LATE_SCRATCH', 'LINEUP_ERROR', 'DATA_INGEST_FAILURE', 'IDENTITY_ERROR', 'SOURCE_UNAVAILABLE', 'HUMAN_CORRECTION']).describe('Required taxonomy code — must match one of the six approved codes exactly.'),
+  "correctionNote": zod.string().nullish().describe('Optional free-text explanation of the correction.'),
+  "updatedFeatures": zod.union([zod.object({
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "slateDate": zod.coerce.date(),
+  "playerId": zod.number().int().min(1),
+  "gamePk": zod.number().int().min(1),
+  "candidateId": zod.string().min(1),
+  "researchRank": zod.number().nullable(),
+  "researchState": zod.string().nullable(),
+  "primaryMechanism": zod.string().nullable(),
+  "secondaryMechanism": zod.string().nullable(),
+  "opportunityEvidence": zod.record(zod.string(), zod.unknown()),
+  "starterMatchupEvidence": zod.record(zod.string(), zod.unknown()),
+  "bullpenPathEvidence": zod.record(zod.string(), zod.unknown()),
+  "parkEvidence": zod.record(zod.string(), zod.unknown()),
+  "recentVsSeasonVsCareer": zod.record(zod.string(), zod.unknown()),
+  "counterEvidence": zod.record(zod.string(), zod.unknown()),
+  "hitterFeatures": zod.record(zod.string(), zod.number().nullable()),
+  "pitcherFeatures": zod.record(zod.string(), zod.number().nullable()),
+  "parkFeatures": zod.record(zod.string(), zod.number().nullable())
+}).strict().describe('Complete pregame feature vector. This schema intentionally contains\nbaseball research evidence only. Prohibited betting-derived keys and\nvalues (odds, EV, CLV, implied probability, sportsbook, etc.) are\nrejected recursively by the server before persistence.\n'),zod.null()]).optional().describe('Complete replacement feature vector. If null, the original features are copied into the correction row.')
+}).strict().describe('Request body for POST \/analyst\/feature-store\/correct.\ncorrectionReason must be one of the six process-error taxonomy codes.\nSupplying any other value is rejected with 400. No odds, EV, CLV,\nimplied probability, sportsbook, or other betting-derived data may be\nsupplied. The server recursively validates replacement feature vectors\nbefore creating an immutable correction row.\n')
+
+export const CorrectFeatureStoreSnapshotResponse = zod.object({
+  "newSnapshotId": zod.string(),
+  "originalSnapshotId": zod.string(),
+  "correctionReason": zod.string(),
+  "correctionNote": zod.string().nullable(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * Writes one append-only outcome row to historical_outcomes. No UPDATE or DELETE
+ * is ever issued — each call creates a new row with a distinct outcomeId.
+ * sourceId must reference an existing source_registry entry (e.g. MLB_OFFICIAL).
+ * Do NOT supply odds, EV, CLV, or sportsbook data.
+ * @summary Append an official historical outcome for a player-game-market
+ */
+export const writeFeatureStoreOutcomeBodySinglesMin = 0;
+
+export const writeFeatureStoreOutcomeBodyDoublesMin = 0;
+
+export const writeFeatureStoreOutcomeBodyTriplesMin = 0;
+
+export const writeFeatureStoreOutcomeBodyHomeRunsMin = 0;
+
+export const writeFeatureStoreOutcomeBodyWalksMin = 0;
+
+export const writeFeatureStoreOutcomeBodyPlateAppearancesMin = 0;
+
+export const writeFeatureStoreOutcomeBodyAtBatsMin = 0;
+
+
+
+export const WriteFeatureStoreOutcomeBody = zod.object({
+  "playerId": zod.number().int(),
+  "gamePk": zod.number().int(),
+  "slateDate": zod.coerce.date(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "singles": zod.number().int().min(writeFeatureStoreOutcomeBodySinglesMin).optional(),
+  "doubles": zod.number().int().min(writeFeatureStoreOutcomeBodyDoublesMin).optional(),
+  "triples": zod.number().int().min(writeFeatureStoreOutcomeBodyTriplesMin).optional(),
+  "homeRuns": zod.number().int().min(writeFeatureStoreOutcomeBodyHomeRunsMin).optional(),
+  "walks": zod.number().int().min(writeFeatureStoreOutcomeBodyWalksMin).optional(),
+  "plateAppearances": zod.number().int().min(writeFeatureStoreOutcomeBodyPlateAppearancesMin).optional(),
+  "atBats": zod.number().int().min(writeFeatureStoreOutcomeBodyAtBatsMin).optional(),
+  "sourceId": zod.string().describe('Must reference an existing source_registry entry (e.g. MLB_OFFICIAL).'),
+  "ingestRunId": zod.string().nullish()
+}).strict().describe('Request body for POST \/analyst\/feature-store\/outcome.\nAppends one immutable outcome row to historical_outcomes.\nNo UPDATE or DELETE is issued — each call creates a distinct row.\nThis request accepts only official baseball-stat fields. Arbitrary raw\npayloads and all odds, EV, CLV, implied probability, sportsbook, or\nother betting-derived fields are rejected with 400.\n')
+
+export const WriteFeatureStoreOutcomeResponse = zod.object({
+  "outcomeId": zod.string(),
+  "outcomeValue": zod.number(),
+  "outcomeHit": zod.boolean()
+})
+
+
+/**
+ * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage for all 30 teams
+ */
+export const GetAnalystBullpenRoomQueryParams = zod.object({
+  "date": zod.date().optional(),
+  "team": zod.coerce.string().optional().describe('Filter to a single team by abbreviation (e.g. NYY)')
+})
+
+export const GetAnalystBullpenRoomResponse = zod.object({
+  "date": zod.string(),
+  "requestedTeam": zod.string().nullable(),
+  "staleFreshnessWindowSeconds": zod.number().int(),
+  "teams": zod.array(zod.object({
+  "teamId": zod.number().int(),
+  "abbreviation": zod.string(),
+  "name": zod.string(),
+  "slateDate": zod.string(),
+  "leverageMap": zod.object({
+  "projected9th": zod.number().int().nullable(),
+  "projected8th": zod.number().int().nullable(),
+  "projected7th": zod.number().int().nullable(),
+  "highestLeverageLefty": zod.number().int().nullable(),
+  "longMan": zod.number().int().nullable(),
+  "highestWalkReliever": zod.number().int().nullable(),
+  "lowestWalkReliever": zod.number().int().nullable(),
+  "roleUncertainty": zod.boolean(),
+  "notes": zod.string().nullable(),
+  "computedAt": zod.string().nullable()
+}),
+  "arms": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "name": zod.string(),
+  "throws": zod.string(),
+  "role": zod.string(),
+  "availability": zod.enum(['AVAILABLE', 'LIKELY_AVAILABLE', 'DOUBTFUL', 'OUT', 'UNKNOWN', 'STALE']),
+  "confidence": zod.enum(['HEURISTIC', 'MANAGER_OVERRIDE', 'UNKNOWN']),
+  "d1Pitches": zod.number().int().nullable(),
+  "d2Pitches": zod.number().int().nullable(),
+  "d3Pitches": zod.number().int().nullable(),
+  "consecutiveDays": zod.number().int(),
+  "multiInningYesterday": zod.boolean(),
+  "daysSinceLastUse": zod.number().int().nullable(),
+  "managerOverride": zod.string().nullable(),
+  "managerOverrideNote": zod.string().nullable(),
+  "staleBadge": zod.boolean(),
+  "sourceFreshness": zod.string().nullable(),
+  "computedAt": zod.string().nullable(),
+  "roleHistory": zod.array(zod.object({
+  "changeId": zod.string(),
+  "previousRole": zod.string().nullable(),
+  "newRole": zod.string(),
+  "changeType": zod.string(),
+  "effectiveDate": zod.string(),
+  "source": zod.string(),
+  "notes": zod.string().nullable(),
+  "recordedAt": zod.string()
+}))
+})),
+  "usage": zod.object({
+  "d1": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "name": zod.string(),
+  "pitches": zod.number().int(),
+  "ip": zod.string(),
+  "multiInning": zod.boolean()
+})),
+  "d2": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "name": zod.string(),
+  "pitches": zod.number().int(),
+  "ip": zod.string(),
+  "multiInning": zod.boolean()
+})),
+  "d3": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "name": zod.string(),
+  "pitches": zod.number().int(),
+  "ip": zod.string(),
+  "multiInning": zod.boolean()
+}))
+}),
+  "coveragePercentage": zod.number(),
+  "staleBadge": zod.boolean(),
+  "computedAt": zod.string().nullable()
+})),
+  "summary": zod.object({
+  "teamsWithData": zod.number().int(),
+  "teamsStale": zod.number().int(),
+  "totalArms": zod.number().int(),
+  "armsAvailable": zod.number().int(),
+  "armsLikelyAvailable": zod.number().int(),
+  "armsDoubtful": zod.number().int(),
+  "armsOut": zod.number().int(),
+  "armsUnknown": zod.number().int()
+})
+})
+
+
+/**
+ * @summary Ingest reliever appearances for the last 3 days and recompute availability and leverage maps
+ */
+export const RefreshBullpenQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
+export const RefreshBullpenResponse = zod.object({
+  "source": zod.string(),
+  "slateDate": zod.string(),
+  "gamesProcessed": zod.number().int(),
+  "appearancesNormalized": zod.number().int(),
+  "appearancesRejected": zod.number().int(),
+  "teamsComputed": zod.number().int(),
+  "error": zod.string().nullable()
 })
 
 

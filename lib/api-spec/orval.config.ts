@@ -57,6 +57,12 @@ export default defineConfig({
       prettier: true,
       override: {
         zod: {
+          // The workspace pins Zod 3; "auto" can select Zod 4 syntax based on
+          // Orval's own dependency graph rather than this package's runtime.
+          version: 3,
+          strict: {
+            body: true,
+          },
           coerce: {
             query: ['boolean', 'number', 'string'],
             param: ['boolean', 'number', 'string'],

@@ -21,18 +21,29 @@ import type {
 
 import type {
   AnalystSettings,
+  BackfillFeatureStoreParams,
   BullpenIngestResult,
   BullpenRoom,
+  CaptureFeatureStoreSlateParams,
+  CorrectFeatureStoreSnapshot400,
+  CorrectFeatureStoreSnapshot404,
   DataHealth,
+  FeatureSnapshotCorrectionInput,
+  FeatureStoreBackfillResult,
+  FeatureStoreCaptureResult,
+  FeatureStoreCorrectionResult,
+  FeatureStoreResult,
   GameLab,
   GetAnalystBullpenRoomParams,
+  GetAnalystFeatureStoreParams,
   GetAnalystGameLabParams,
   GetAnalystMarketResearchParams,
   GetAnalystPitcherLabParams,
   GetAnalystPlayerLabParams,
   GetAnalystProjectionsParams,
-  HealthStatus,
   HREngineResult,
+  HealthStatus,
+  HistoricalOutcomeInput,
   IngestResult,
   MarketResearch,
   ProjectionCenter,
@@ -42,8 +53,8 @@ import type {
   RefreshFullUniverseStatcastSplitsParams,
   RefreshMarketResearchHRParams,
   RefreshMarketResearchTBParams,
-  RefreshMarketResearchXBHParams,
   RefreshMarketResearchWALKParams,
+  RefreshMarketResearchXBHParams,
   RefreshMlbOfficialParams,
   ResearchIngestResult,
   ResearchIngestSource,
@@ -51,12 +62,13 @@ import type {
   TBEngineResult,
   TodayDashboard,
   WALKEngineResult,
+  WriteFeatureStoreOutcome400,
+  WriteHistoricalOutcomeResult,
   XBHEngineResult
 } from './api.schemas';
 
-
 import { customFetch } from '../custom-fetch';
-import type { ErrorType } from '../custom-fetch';
+import type { ErrorType , BodyType } from '../custom-fetch';
 
 type AwaitedInput<T> = PromiseLike<T> | T;
 
@@ -1039,375 +1051,1006 @@ export const useRefreshFullUniverseStatcastSplits = <TError = ErrorType<unknown>
       return useMutation(getRefreshFullUniverseStatcastSplitsMutationOptions(options));
     }
 
-
-// ─── Phase 2B: Bullpen Room ──────────────────────────────────────────────────
-
-export const getGetAnalystBullpenRoomUrl = (params?: GetAnalystBullpenRoomParams) => {
+export const getGetAnalystMarketResearchUrl = (params?: GetAnalystMarketResearchParams,) => {
   const normalizedParams = new URLSearchParams();
+
   Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) normalizedParams.append(key, String(value));
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
   });
+
   const stringifiedParams = normalizedParams.toString();
-  return stringifiedParams.length > 0
-    ? `/api/analyst/bullpen-room?${stringifiedParams}`
-    : `/api/analyst/bullpen-room`;
-};
 
-export const getAnalystBullpenRoom = async (
-  params?: GetAnalystBullpenRoomParams,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<BullpenRoom> =>
-  customFetch<BullpenRoom>(getGetAnalystBullpenRoomUrl(params), { ...options, method: 'GET' });
-
-export const getGetAnalystBullpenRoomQueryKey = (params?: GetAnalystBullpenRoomParams) =>
-  [`/api/analyst/bullpen-room`, ...(params ? [params] : [])] as const;
-
-export const getGetAnalystBullpenRoomQueryOptions = <
-  TData = Awaited<ReturnType<typeof getAnalystBullpenRoom>>,
-  TError = ErrorType<unknown>,
->(
-  params?: GetAnalystBullpenRoomParams,
-  options?: {
-    query?: UseQueryOptions<Awaited<ReturnType<typeof getAnalystBullpenRoom>>, TError, TData>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-  const queryKey = queryOptions?.queryKey ?? getGetAnalystBullpenRoomQueryKey(params);
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystBullpenRoom>>> = ({ signal }) =>
-    getAnalystBullpenRoom(params, { signal, ...requestOptions });
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof getAnalystBullpenRoom>>,
-    TError,
-    TData
-  > & { queryKey: QueryKey };
-};
-
-export type GetAnalystBullpenRoomQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystBullpenRoom>>>;
-export type GetAnalystBullpenRoomQueryError = ErrorType<unknown>;
-
-/**
- * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage
- */
-export function useGetAnalystBullpenRoom<
-  TData = Awaited<ReturnType<typeof getAnalystBullpenRoom>>,
-  TError = ErrorType<unknown>,
->(
-  params?: GetAnalystBullpenRoomParams,
-  options?: {
-    query?: UseQueryOptions<Awaited<ReturnType<typeof getAnalystBullpenRoom>>, TError, TData>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetAnalystBullpenRoomQueryOptions(params, options);
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
-  return withQueryKey(query, queryOptions.queryKey);
+  return stringifiedParams.length > 0 ? `/api/analyst/market-research?${stringifiedParams}` : `/api/analyst/market-research`
 }
 
-// ─── Phase 3 – Market Research ───────────────────────────────────────────────
+/**
+ * Returns the market research candidate board for one or all markets on the given date.
+ * The board is populated by the Phase 3A–3D market engines; it is empty until at least
+ * one engine has completed a research pass.
+ *
+ * RANK, DON'T GATE rule: research_rank is an ordinal integer only. No state value
+ * removes a candidate from the board. The prohibitedFields array in the response
+ * documents which fields are permanently absent from this contract.
+ * @summary Get market research candidates for a given date and market
+ */
+export const getAnalystMarketResearch = async (params?: GetAnalystMarketResearchParams, options?: Parameters<typeof customFetch>[1]): Promise<MarketResearch> => {
 
-export const getGetAnalystMarketResearchUrl = (params?: GetAnalystMarketResearchParams) => {
-  const normalizedParams = new URLSearchParams();
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) normalizedParams.append(key, String(value));
-  });
-  const stringifiedParams = normalizedParams.toString();
-  return stringifiedParams.length > 0
-    ? `/api/analyst/market-research?${stringifiedParams}`
-    : `/api/analyst/market-research`;
-};
+  return customFetch<MarketResearch>(getGetAnalystMarketResearchUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystMarketResearchQueryKey = (params?: GetAnalystMarketResearchParams,) => {
+    return [
+    `/api/analyst/market-research`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystMarketResearchQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystMarketResearch>>, TError = ErrorType<unknown>>(params?: GetAnalystMarketResearchParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystMarketResearch>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystMarketResearchQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystMarketResearch>>> = ({ signal }) => getAnalystMarketResearch(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystMarketResearch>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystMarketResearchQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystMarketResearch>>>
+export type GetAnalystMarketResearchQueryError = ErrorType<unknown>
+
 
 /**
  * @summary Get market research candidates for a given date and market
  */
-export const getAnalystMarketResearch = async (
-  params?: GetAnalystMarketResearchParams,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<MarketResearch> =>
-  customFetch<MarketResearch>(getGetAnalystMarketResearchUrl(params), { ...options, method: 'GET' });
 
-export const getGetAnalystMarketResearchQueryKey = (params?: GetAnalystMarketResearchParams) =>
-  [`/api/analyst/market-research`, ...(params ? [params] : [])] as const;
+export function useGetAnalystMarketResearch<TData = Awaited<ReturnType<typeof getAnalystMarketResearch>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystMarketResearchParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystMarketResearch>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
-export const getGetAnalystMarketResearchQueryOptions = <
-  TData = Awaited<ReturnType<typeof getAnalystMarketResearch>>,
-  TError = ErrorType<unknown>,
->(
-  params?: GetAnalystMarketResearchParams,
-  options?: {
-    query?: UseQueryOptions<Awaited<ReturnType<typeof getAnalystMarketResearch>>, TError, TData>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-  const queryKey = queryOptions?.queryKey ?? getGetAnalystMarketResearchQueryKey(params);
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystMarketResearch>>> = ({ signal }) =>
-    getAnalystMarketResearch(params, { signal, ...requestOptions });
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof getAnalystMarketResearch>>,
-    TError,
-    TData
-  > & { queryKey: QueryKey };
-};
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-export type GetAnalystMarketResearchQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystMarketResearch>>>;
-export type GetAnalystMarketResearchQueryError = ErrorType<unknown>;
+  const queryOptions = getGetAnalystMarketResearchQueryOptions(params,options)
 
-/**
- * @summary Get market research candidates for a given date and market
- */
-export function useGetAnalystMarketResearch<
-  TData = Awaited<ReturnType<typeof getAnalystMarketResearch>>,
-  TError = ErrorType<unknown>,
->(
-  params?: GetAnalystMarketResearchParams,
-  options?: {
-    query?: UseQueryOptions<Awaited<ReturnType<typeof getAnalystMarketResearch>>, TError, TData>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetAnalystMarketResearchQueryOptions(params, options);
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & { queryKey: QueryKey };
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
   return withQueryKey(query, queryOptions.queryKey);
 }
 
-export const getRefreshBullpenUrl = (params?: RefreshBullpenParams) => {
+
+
+
+
+
+
+export const getRefreshMarketResearchTBUrl = (params?: RefreshMarketResearchTBParams,) => {
   const normalizedParams = new URLSearchParams();
+
   Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) normalizedParams.append(key, String(value));
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
   });
+
   const stringifiedParams = normalizedParams.toString();
-  return stringifiedParams.length > 0
-    ? `/api/analyst/refresh/bullpen?${stringifiedParams}`
-    : `/api/analyst/refresh/bullpen`;
-};
 
-export const refreshBullpen = async (
-  params?: RefreshBullpenParams,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<BullpenIngestResult> =>
-  customFetch<BullpenIngestResult>(getRefreshBullpenUrl(params), { ...options, method: 'POST' });
-
-export const getRefreshBullpenMutationOptions = <TError = ErrorType<unknown>, TContext = unknown>(
-  options?: {
-    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshBullpen>>, TError, { params?: RefreshBullpenParams }, TContext>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseMutationOptions<Awaited<ReturnType<typeof refreshBullpen>>, TError, { params?: RefreshBullpenParams }, TContext> => {
-  const mutationKey = ['refreshBullpen'];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-  const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshBullpen>>, { params?: RefreshBullpenParams }> = (
-    props,
-  ) => {
-    const { params } = props ?? {};
-    return refreshBullpen(params, requestOptions);
-  };
-  return { mutationFn, ...mutationOptions };
-};
-
-export type RefreshBullpenMutationResult = NonNullable<Awaited<ReturnType<typeof refreshBullpen>>>;
-export type RefreshBullpenMutationError = ErrorType<unknown>;
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/market-research/tb?${stringifiedParams}` : `/api/analyst/refresh/market-research/tb`
+}
 
 /**
- * @summary Ingest reliever appearances and recompute availability and leverage maps
- */
-export const useRefreshBullpen = <TError = ErrorType<unknown>, TContext = unknown>(
-  options?: {
-    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshBullpen>>, TError, { params?: RefreshBullpenParams }, TContext>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseMutationResult<Awaited<ReturnType<typeof refreshBullpen>>, TError, { params?: RefreshBullpenParams }, TContext> =>
-  useMutation(getRefreshBullpenMutationOptions(options));
-
-export const getRefreshMarketResearchTBUrl = (params?: RefreshMarketResearchTBParams) => {
-  const queryParams = params ? Object.entries(params).filter(([, v]) => v !== undefined) : [];
-  const qs = queryParams.length > 0 ? `?${new URLSearchParams(queryParams as [string, string][]).toString()}` : '';
-  return `/api/analyst/refresh/market-research/tb${qs}`;
-};
-
-export const refreshMarketResearchTB = (
-  params?: RefreshMarketResearchTBParams,
-  options?: SecondParameter<typeof customFetch>,
-) =>
-  customFetch<TBEngineResult>(getRefreshMarketResearchTBUrl(params), { ...options, method: 'POST' });
-
-export const getRefreshMarketResearchTBMutationOptions = <TError = ErrorType<unknown>, TContext = unknown>(
-  options?: {
-    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError, { params?: RefreshMarketResearchTBParams }, TContext>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError, { params?: RefreshMarketResearchTBParams }, TContext> => {
-  const mutationKey = ['refreshMarketResearchTB'];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-  const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchTB>>, { params?: RefreshMarketResearchTBParams }> = (
-    props,
-  ) => {
-    const { params } = props ?? {};
-    return refreshMarketResearchTB(params, requestOptions);
-  };
-  return { mutationFn, ...mutationOptions };
-};
-
-export type RefreshMarketResearchTBMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchTB>>>;
-export type RefreshMarketResearchTBMutationError = ErrorType<unknown>;
-
-/**
+ * Executes the Phase 3A Total Bases research engine for all lineup candidates
+ * on the given slate date. Writes ranked candidates into the market_research_candidates
+ * table via the shared Phase 3 contract.
+ *
+ * RANK, DON'T GATE: produces ordinal research_rank only; no odds, EV, CLV, or
+ * implied probability is computed or stored. Idempotent — re-running overwrites
+ * prior results for the same slate date.
  * @summary Run the Total Bases (2+) research engine for a slate date
  */
-export const useRefreshMarketResearchTB = <TError = ErrorType<unknown>, TContext = unknown>(
-  options?: {
-    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError, { params?: RefreshMarketResearchTBParams }, TContext>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseMutationResult<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError, { params?: RefreshMarketResearchTBParams }, TContext> =>
-  useMutation(getRefreshMarketResearchTBMutationOptions(options));
+export const refreshMarketResearchTB = async (params?: RefreshMarketResearchTBParams, options?: Parameters<typeof customFetch>[1]): Promise<TBEngineResult> => {
 
-export const getRefreshMarketResearchWALKUrl = (params?: RefreshMarketResearchWALKParams) => {
-  const queryParams = params ? Object.entries(params).filter(([, v]) => v !== undefined) : [];
-  const qs = queryParams.length > 0 ? `?${new URLSearchParams(queryParams as [string, string][]).toString()}` : '';
-  return `/api/analyst/refresh/market-research/walk${qs}`;
-};
+  return customFetch<TBEngineResult>(getRefreshMarketResearchTBUrl(params),
+  {
+    ...options,
+    method: 'POST'
 
-export const refreshMarketResearchWALK = (
-  params?: RefreshMarketResearchWALKParams,
-  options?: SecondParameter<typeof customFetch>,
-) =>
-  customFetch<WALKEngineResult>(getRefreshMarketResearchWALKUrl(params), { ...options, method: 'POST' });
 
-export const getRefreshMarketResearchWALKMutationOptions = <TError = ErrorType<unknown>, TContext = unknown>(
-  options?: {
-    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, TError, { params?: RefreshMarketResearchWALKParams }, TContext>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, TError, { params?: RefreshMarketResearchWALKParams }, TContext> => {
-  const mutationKey = ['refreshMarketResearchWALK'];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-  const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, { params?: RefreshMarketResearchWALKParams }> = (
-    props,
-  ) => {
-    const { params } = props ?? {};
-    return refreshMarketResearchWALK(params, requestOptions);
-  };
-  return { mutationFn, ...mutationOptions };
-};
+  }
+);}
 
-export type RefreshMarketResearchWALKMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchWALK>>>;
-export type RefreshMarketResearchWALKMutationError = ErrorType<unknown>;
 
-/**
- * @summary Run the Batter Walk research engine for a slate date
+
+
+
+export const getRefreshMarketResearchTBMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError,{params?: RefreshMarketResearchTBParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError,{params?: RefreshMarketResearchTBParams}, TContext> => {
+
+const mutationKey = ['refreshMarketResearchTB'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchTB>>, {params?: RefreshMarketResearchTBParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshMarketResearchTB(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshMarketResearchTBMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchTB>>>
+
+    export type RefreshMarketResearchTBMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run the Total Bases (2+) research engine for a slate date
  */
-export const useRefreshMarketResearchWALK = <TError = ErrorType<unknown>, TContext = unknown>(
-  options?: {
-    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, TError, { params?: RefreshMarketResearchWALKParams }, TContext>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseMutationResult<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, TError, { params?: RefreshMarketResearchWALKParams }, TContext> =>
-  useMutation(getRefreshMarketResearchWALKMutationOptions(options));
+export const useRefreshMarketResearchTB = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchTB>>, TError,{params?: RefreshMarketResearchTBParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshMarketResearchTB>>,
+        TError,
+        {params?: RefreshMarketResearchTBParams},
+        TContext
+      > => {
+      return useMutation(getRefreshMarketResearchTBMutationOptions(options));
+    }
 
-export const getRefreshMarketResearchXBHUrl = (params?: RefreshMarketResearchXBHParams) => {
-  const queryParams = params ? Object.entries(params).filter(([, v]) => v !== undefined) : [];
-  const qs = queryParams.length > 0 ? `?${new URLSearchParams(queryParams as [string, string][]).toString()}` : '';
-  return `/api/analyst/refresh/market-research/xbh${qs}`;
-};
+export const getRefreshMarketResearchXBHUrl = (params?: RefreshMarketResearchXBHParams,) => {
+  const normalizedParams = new URLSearchParams();
 
-export const refreshMarketResearchXBH = (
-  params?: RefreshMarketResearchXBHParams,
-  options?: SecondParameter<typeof customFetch>,
-) =>
-  customFetch<XBHEngineResult>(getRefreshMarketResearchXBHUrl(params), { ...options, method: 'POST' });
+  Object.entries(params || {}).forEach(([key, value]) => {
 
-export const getRefreshMarketResearchXBHMutationOptions = <TError = ErrorType<unknown>, TContext = unknown>(
-  options?: {
-    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError, { params?: RefreshMarketResearchXBHParams }, TContext>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError, { params?: RefreshMarketResearchXBHParams }, TContext> => {
-  const mutationKey = ['refreshMarketResearchXBH'];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-  const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, { params?: RefreshMarketResearchXBHParams }> = (
-    props,
-  ) => {
-    const { params } = props ?? {};
-    return refreshMarketResearchXBH(params, requestOptions);
-  };
-  return { mutationFn, ...mutationOptions };
-};
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
-export type RefreshMarketResearchXBHMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchXBH>>>;
-export type RefreshMarketResearchXBHMutationError = ErrorType<unknown>;
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/market-research/xbh?${stringifiedParams}` : `/api/analyst/refresh/market-research/xbh`
+}
 
 /**
+ * Executes the Phase 3B Extra Base Hit research engine for all lineup candidates
+ * on the given slate date. Singles are explicitly excluded from all mechanism paths.
+ * Mechanisms: DOUBLE_ROUTE, TRIPLE_ROUTE, HOME_RUN_ROUTE, MULTI_PATH.
+ * Counter-evidence: WEAK_EXIT_VELOCITY, LOW_HARD_HIT_RATE, GROUND_BALL_HEAVY,
+ * PLATOON_DISADVANTAGE, INSUFFICIENT_SAMPLE.
+ *
+ * RANK, DON'T GATE: produces ordinal research_rank only; no odds, EV, CLV, or
+ * implied probability is computed or stored. Idempotent — re-running overwrites
+ * prior results for the same slate date.
  * @summary Run the Extra Base Hit research engine for a slate date
  */
-export const useRefreshMarketResearchXBH = <TError = ErrorType<unknown>, TContext = unknown>(
-  options?: {
-    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError, { params?: RefreshMarketResearchXBHParams }, TContext>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseMutationResult<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError, { params?: RefreshMarketResearchXBHParams }, TContext> =>
-  useMutation(getRefreshMarketResearchXBHMutationOptions(options));
+export const refreshMarketResearchXBH = async (params?: RefreshMarketResearchXBHParams, options?: Parameters<typeof customFetch>[1]): Promise<XBHEngineResult> => {
 
-export const getRefreshMarketResearchHRUrl = (params?: RefreshMarketResearchHRParams) => {
-  const queryParams = params ? Object.entries(params).filter(([, v]) => v !== undefined) : [];
-  const qs = queryParams.length > 0 ? `?${new URLSearchParams(queryParams as [string, string][]).toString()}` : '';
-  return `/api/analyst/refresh/market-research/hr${qs}`;
-};
+  return customFetch<XBHEngineResult>(getRefreshMarketResearchXBHUrl(params),
+  {
+    ...options,
+    method: 'POST'
 
-export const refreshMarketResearchHR = (
-  params?: RefreshMarketResearchHRParams,
-  options?: SecondParameter<typeof customFetch>,
-) =>
-  customFetch<HREngineResult>(getRefreshMarketResearchHRUrl(params), { ...options, method: 'POST' });
 
-export const getRefreshMarketResearchHRMutationOptions = <TError = ErrorType<unknown>, TContext = unknown>(
-  options?: {
-    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchHR>>, TError, { params?: RefreshMarketResearchHRParams }, TContext>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchHR>>, TError, { params?: RefreshMarketResearchHRParams }, TContext> => {
-  const mutationKey = ['refreshMarketResearchHR'];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-  const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchHR>>, { params?: RefreshMarketResearchHRParams }> = (
-    props,
-  ) => {
-    const { params } = props ?? {};
-    return refreshMarketResearchHR(params, requestOptions);
-  };
-  return { mutationFn, ...mutationOptions };
-};
+  }
+);}
 
-export type RefreshMarketResearchHRMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchHR>>>;
-export type RefreshMarketResearchHRMutationError = ErrorType<unknown>;
+
+
+
+
+export const getRefreshMarketResearchXBHMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError,{params?: RefreshMarketResearchXBHParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError,{params?: RefreshMarketResearchXBHParams}, TContext> => {
+
+const mutationKey = ['refreshMarketResearchXBH'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, {params?: RefreshMarketResearchXBHParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshMarketResearchXBH(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshMarketResearchXBHMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchXBH>>>
+
+    export type RefreshMarketResearchXBHMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run the Extra Base Hit research engine for a slate date
+ */
+export const useRefreshMarketResearchXBH = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchXBH>>, TError,{params?: RefreshMarketResearchXBHParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshMarketResearchXBH>>,
+        TError,
+        {params?: RefreshMarketResearchXBHParams},
+        TContext
+      > => {
+      return useMutation(getRefreshMarketResearchXBHMutationOptions(options));
+    }
+
+export const getRefreshMarketResearchWALKUrl = (params?: RefreshMarketResearchWALKParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/market-research/walk?${stringifiedParams}` : `/api/analyst/refresh/market-research/walk`
+}
 
 /**
+ * Executes the Phase 3C Batter Walk research engine for all lineup candidates
+ * on the given slate date. Walk research is driven by plate discipline and pitcher
+ * command — power metrics (SLG, ISO, barrel%) are explicitly absent.
+ * Mechanisms: PATIENCE_VS_COMMAND, COUNT_CREATION, BULLPEN_WALK_PATH.
+ * Counter-evidence: AGGRESSIVE_HITTER, PITCHER_LOW_WALK_RATE,
+ * FIRST_PITCH_STRIKE_HEAVY, INSUFFICIENT_SAMPLE.
+ *
+ * RANK, DON'T GATE: produces ordinal research_rank only; no odds, EV, CLV, or
+ * implied probability is computed or stored. Idempotent — re-running overwrites
+ * prior results for the same slate date.
+ * @summary Run the Batter Walk research engine for a slate date
+ */
+export const refreshMarketResearchWALK = async (params?: RefreshMarketResearchWALKParams, options?: Parameters<typeof customFetch>[1]): Promise<WALKEngineResult> => {
+
+  return customFetch<WALKEngineResult>(getRefreshMarketResearchWALKUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshMarketResearchWALKMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, TError,{params?: RefreshMarketResearchWALKParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, TError,{params?: RefreshMarketResearchWALKParams}, TContext> => {
+
+const mutationKey = ['refreshMarketResearchWALK'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, {params?: RefreshMarketResearchWALKParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshMarketResearchWALK(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshMarketResearchWALKMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchWALK>>>
+
+    export type RefreshMarketResearchWALKMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run the Batter Walk research engine for a slate date
+ */
+export const useRefreshMarketResearchWALK = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchWALK>>, TError,{params?: RefreshMarketResearchWALKParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshMarketResearchWALK>>,
+        TError,
+        {params?: RefreshMarketResearchWALKParams},
+        TContext
+      > => {
+      return useMutation(getRefreshMarketResearchWALKMutationOptions(options));
+    }
+
+export const getRefreshMarketResearchHRUrl = (params?: RefreshMarketResearchHRParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/market-research/hr?${stringifiedParams}` : `/api/analyst/refresh/market-research/hr`
+}
+
+/**
+ * Executes the Phase 3D Home Run research engine for all lineup candidates
+ * on the given slate date. PARK_ENVIRONMENT is a first-class primary mechanism —
+ * not context-only as in TB/XBH/WALK.
+ * Mechanisms: PULL_AIR, BARREL_POWER, PITCH_SHAPE_MISMATCH, PARK_ENVIRONMENT.
+ * Counter-evidence: LOW_BARREL_RATE, GROUND_BALL_DOMINANT, PITCHER_LOW_HR_RATE,
+ * NEUTRAL_PARK, INSUFFICIENT_SAMPLE.
+ *
+ * RANK, DON'T GATE: produces ordinal research_rank only; no odds, EV, CLV, or
+ * implied probability is computed or stored. Idempotent — re-running overwrites
+ * prior results for the same slate date.
  * @summary Run the Home Run research engine for a slate date
  */
-export const useRefreshMarketResearchHR = <TError = ErrorType<unknown>, TContext = unknown>(
-  options?: {
-    mutation?: UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchHR>>, TError, { params?: RefreshMarketResearchHRParams }, TContext>;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseMutationResult<Awaited<ReturnType<typeof refreshMarketResearchHR>>, TError, { params?: RefreshMarketResearchHRParams }, TContext> =>
-  useMutation(getRefreshMarketResearchHRMutationOptions(options));
+export const refreshMarketResearchHR = async (params?: RefreshMarketResearchHRParams, options?: Parameters<typeof customFetch>[1]): Promise<HREngineResult> => {
+
+  return customFetch<HREngineResult>(getRefreshMarketResearchHRUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshMarketResearchHRMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchHR>>, TError,{params?: RefreshMarketResearchHRParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchHR>>, TError,{params?: RefreshMarketResearchHRParams}, TContext> => {
+
+const mutationKey = ['refreshMarketResearchHR'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshMarketResearchHR>>, {params?: RefreshMarketResearchHRParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshMarketResearchHR(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshMarketResearchHRMutationResult = NonNullable<Awaited<ReturnType<typeof refreshMarketResearchHR>>>
+
+    export type RefreshMarketResearchHRMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run the Home Run research engine for a slate date
+ */
+export const useRefreshMarketResearchHR = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshMarketResearchHR>>, TError,{params?: RefreshMarketResearchHRParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshMarketResearchHR>>,
+        TError,
+        {params?: RefreshMarketResearchHRParams},
+        TContext
+      > => {
+      return useMutation(getRefreshMarketResearchHRMutationOptions(options));
+    }
+
+export const getGetAnalystFeatureStoreUrl = (params?: GetAnalystFeatureStoreParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/feature-store?${stringifiedParams}` : `/api/analyst/feature-store`
+}
+
+/**
+ * Returns immutable pregame feature snapshots for the given filters.
+ * Each snapshot was captured at slate-freeze time and can never be mutated.
+ * Corrections create new rows with a correction_of FK and a required taxonomy reason.
+ *
+ * Process-error taxonomy codes: LATE_SCRATCH, LINEUP_ERROR, DATA_INGEST_FAILURE,
+ * IDENTITY_ERROR, SOURCE_UNAVAILABLE, HUMAN_CORRECTION.
+ *
+ * PROHIBITED: No odds, EV, CLV, implied probability, or sportsbook data is stored.
+ * @summary Query pregame feature snapshot history
+ */
+export const getAnalystFeatureStore = async (params?: GetAnalystFeatureStoreParams, options?: Parameters<typeof customFetch>[1]): Promise<FeatureStoreResult> => {
+
+  return customFetch<FeatureStoreResult>(getGetAnalystFeatureStoreUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystFeatureStoreQueryKey = (params?: GetAnalystFeatureStoreParams,) => {
+    return [
+    `/api/analyst/feature-store`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystFeatureStoreQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystFeatureStore>>, TError = ErrorType<unknown>>(params?: GetAnalystFeatureStoreParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystFeatureStore>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystFeatureStoreQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystFeatureStore>>> = ({ signal }) => getAnalystFeatureStore(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystFeatureStore>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystFeatureStoreQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystFeatureStore>>>
+export type GetAnalystFeatureStoreQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Query pregame feature snapshot history
+ */
+
+export function useGetAnalystFeatureStore<TData = Awaited<ReturnType<typeof getAnalystFeatureStore>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystFeatureStoreParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystFeatureStore>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystFeatureStoreQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCaptureFeatureStoreSlateUrl = (params?: CaptureFeatureStoreSlateParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/feature-store/capture?${stringifiedParams}` : `/api/analyst/feature-store/capture`
+}
+
+/**
+ * Captures immutable pregame feature snapshots for all market research candidates
+ * on the given slate date. Run this after all four market engines have completed.
+ * Idempotent — identical feature hashes are skipped without error.
+ * @summary Capture pregame feature snapshots for a slate date
+ */
+export const captureFeatureStoreSlate = async (params?: CaptureFeatureStoreSlateParams, options?: Parameters<typeof customFetch>[1]): Promise<FeatureStoreCaptureResult> => {
+
+  return customFetch<FeatureStoreCaptureResult>(getCaptureFeatureStoreSlateUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCaptureFeatureStoreSlateMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof captureFeatureStoreSlate>>, TError,{params?: CaptureFeatureStoreSlateParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof captureFeatureStoreSlate>>, TError,{params?: CaptureFeatureStoreSlateParams}, TContext> => {
+
+const mutationKey = ['captureFeatureStoreSlate'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof captureFeatureStoreSlate>>, {params?: CaptureFeatureStoreSlateParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  captureFeatureStoreSlate(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CaptureFeatureStoreSlateMutationResult = NonNullable<Awaited<ReturnType<typeof captureFeatureStoreSlate>>>
+
+    export type CaptureFeatureStoreSlateMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Capture pregame feature snapshots for a slate date
+ */
+export const useCaptureFeatureStoreSlate = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof captureFeatureStoreSlate>>, TError,{params?: CaptureFeatureStoreSlateParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof captureFeatureStoreSlate>>,
+        TError,
+        {params?: CaptureFeatureStoreSlateParams},
+        TContext
+      > => {
+      return useMutation(getCaptureFeatureStoreSlateMutationOptions(options));
+    }
+
+export const getBackfillFeatureStoreUrl = (params?: BackfillFeatureStoreParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/feature-store/backfill?${stringifiedParams}` : `/api/analyst/feature-store/backfill`
+}
+
+/**
+ * @summary Backfill feature snapshots from historical market research candidates
+ */
+export const backfillFeatureStore = async (params?: BackfillFeatureStoreParams, options?: Parameters<typeof customFetch>[1]): Promise<FeatureStoreBackfillResult> => {
+
+  return customFetch<FeatureStoreBackfillResult>(getBackfillFeatureStoreUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getBackfillFeatureStoreMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof backfillFeatureStore>>, TError,{params?: BackfillFeatureStoreParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof backfillFeatureStore>>, TError,{params?: BackfillFeatureStoreParams}, TContext> => {
+
+const mutationKey = ['backfillFeatureStore'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof backfillFeatureStore>>, {params?: BackfillFeatureStoreParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  backfillFeatureStore(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BackfillFeatureStoreMutationResult = NonNullable<Awaited<ReturnType<typeof backfillFeatureStore>>>
+
+    export type BackfillFeatureStoreMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Backfill feature snapshots from historical market research candidates
+ */
+export const useBackfillFeatureStore = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof backfillFeatureStore>>, TError,{params?: BackfillFeatureStoreParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof backfillFeatureStore>>,
+        TError,
+        {params?: BackfillFeatureStoreParams},
+        TContext
+      > => {
+      return useMutation(getBackfillFeatureStoreMutationOptions(options));
+    }
+
+export const getCorrectFeatureStoreSnapshotUrl = () => {
+
+
+
+
+  return `/api/analyst/feature-store/correct`
+}
+
+/**
+ * Creates a new snapshot row that supersedes the original. The original row is NEVER
+ * modified — immutability is preserved. correctionReason MUST be one of the six
+ * process-error taxonomy codes (LATE_SCRATCH, LINEUP_ERROR, DATA_INGEST_FAILURE,
+ * IDENTITY_ERROR, SOURCE_UNAVAILABLE, HUMAN_CORRECTION). Supplying any other value
+ * is rejected with 400.
+ * @summary Create a correction snapshot pointing to an original
+ */
+export const correctFeatureStoreSnapshot = async (featureSnapshotCorrectionInput: FeatureSnapshotCorrectionInput, options?: Parameters<typeof customFetch>[1]): Promise<FeatureStoreCorrectionResult> => {
+
+  return customFetch<FeatureStoreCorrectionResult>(getCorrectFeatureStoreSnapshotUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(featureSnapshotCorrectionInput)
+  }
+);}
+
+
+
+
+
+export const getCorrectFeatureStoreSnapshotMutationOptions = <TError = ErrorType<CorrectFeatureStoreSnapshot400 | CorrectFeatureStoreSnapshot404>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof correctFeatureStoreSnapshot>>, TError,{data: BodyType<FeatureSnapshotCorrectionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof correctFeatureStoreSnapshot>>, TError,{data: BodyType<FeatureSnapshotCorrectionInput>}, TContext> => {
+
+const mutationKey = ['correctFeatureStoreSnapshot'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof correctFeatureStoreSnapshot>>, {data: BodyType<FeatureSnapshotCorrectionInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  correctFeatureStoreSnapshot(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CorrectFeatureStoreSnapshotMutationResult = NonNullable<Awaited<ReturnType<typeof correctFeatureStoreSnapshot>>>
+    export type CorrectFeatureStoreSnapshotMutationBody = BodyType<FeatureSnapshotCorrectionInput>
+    export type CorrectFeatureStoreSnapshotMutationError = ErrorType<CorrectFeatureStoreSnapshot400 | CorrectFeatureStoreSnapshot404>
+
+    /**
+ * @summary Create a correction snapshot pointing to an original
+ */
+export const useCorrectFeatureStoreSnapshot = <TError = ErrorType<CorrectFeatureStoreSnapshot400 | CorrectFeatureStoreSnapshot404>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof correctFeatureStoreSnapshot>>, TError,{data: BodyType<FeatureSnapshotCorrectionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof correctFeatureStoreSnapshot>>,
+        TError,
+        {data: BodyType<FeatureSnapshotCorrectionInput>},
+        TContext
+      > => {
+      return useMutation(getCorrectFeatureStoreSnapshotMutationOptions(options));
+    }
+
+export const getWriteFeatureStoreOutcomeUrl = () => {
+
+
+
+
+  return `/api/analyst/feature-store/outcome`
+}
+
+/**
+ * Writes one append-only outcome row to historical_outcomes. No UPDATE or DELETE
+ * is ever issued — each call creates a new row with a distinct outcomeId.
+ * sourceId must reference an existing source_registry entry (e.g. MLB_OFFICIAL).
+ * Do NOT supply odds, EV, CLV, or sportsbook data.
+ * @summary Append an official historical outcome for a player-game-market
+ */
+export const writeFeatureStoreOutcome = async (historicalOutcomeInput: HistoricalOutcomeInput, options?: Parameters<typeof customFetch>[1]): Promise<WriteHistoricalOutcomeResult> => {
+
+  return customFetch<WriteHistoricalOutcomeResult>(getWriteFeatureStoreOutcomeUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(historicalOutcomeInput)
+  }
+);}
+
+
+
+
+
+export const getWriteFeatureStoreOutcomeMutationOptions = <TError = ErrorType<WriteFeatureStoreOutcome400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof writeFeatureStoreOutcome>>, TError,{data: BodyType<HistoricalOutcomeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof writeFeatureStoreOutcome>>, TError,{data: BodyType<HistoricalOutcomeInput>}, TContext> => {
+
+const mutationKey = ['writeFeatureStoreOutcome'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof writeFeatureStoreOutcome>>, {data: BodyType<HistoricalOutcomeInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  writeFeatureStoreOutcome(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type WriteFeatureStoreOutcomeMutationResult = NonNullable<Awaited<ReturnType<typeof writeFeatureStoreOutcome>>>
+    export type WriteFeatureStoreOutcomeMutationBody = BodyType<HistoricalOutcomeInput>
+    export type WriteFeatureStoreOutcomeMutationError = ErrorType<WriteFeatureStoreOutcome400>
+
+    /**
+ * @summary Append an official historical outcome for a player-game-market
+ */
+export const useWriteFeatureStoreOutcome = <TError = ErrorType<WriteFeatureStoreOutcome400>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof writeFeatureStoreOutcome>>, TError,{data: BodyType<HistoricalOutcomeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof writeFeatureStoreOutcome>>,
+        TError,
+        {data: BodyType<HistoricalOutcomeInput>},
+        TContext
+      > => {
+      return useMutation(getWriteFeatureStoreOutcomeMutationOptions(options));
+    }
+
+export const getGetAnalystBullpenRoomUrl = (params?: GetAnalystBullpenRoomParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/bullpen-room?${stringifiedParams}` : `/api/analyst/bullpen-room`
+}
+
+/**
+ * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage for all 30 teams
+ */
+export const getAnalystBullpenRoom = async (params?: GetAnalystBullpenRoomParams, options?: Parameters<typeof customFetch>[1]): Promise<BullpenRoom> => {
+
+  return customFetch<BullpenRoom>(getGetAnalystBullpenRoomUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystBullpenRoomQueryKey = (params?: GetAnalystBullpenRoomParams,) => {
+    return [
+    `/api/analyst/bullpen-room`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystBullpenRoomQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystBullpenRoom>>, TError = ErrorType<unknown>>(params?: GetAnalystBullpenRoomParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystBullpenRoom>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystBullpenRoomQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystBullpenRoom>>> = ({ signal }) => getAnalystBullpenRoom(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystBullpenRoom>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystBullpenRoomQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystBullpenRoom>>>
+export type GetAnalystBullpenRoomQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get bullpen availability board, leverage map, and D-1/D-2/D-3 usage for all 30 teams
+ */
+
+export function useGetAnalystBullpenRoom<TData = Awaited<ReturnType<typeof getAnalystBullpenRoom>>, TError = ErrorType<unknown>>(
+ params?: GetAnalystBullpenRoomParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystBullpenRoom>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystBullpenRoomQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRefreshBullpenUrl = (params?: RefreshBullpenParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/bullpen?${stringifiedParams}` : `/api/analyst/refresh/bullpen`
+}
+
+/**
+ * @summary Ingest reliever appearances for the last 3 days and recompute availability and leverage maps
+ */
+export const refreshBullpen = async (params?: RefreshBullpenParams, options?: Parameters<typeof customFetch>[1]): Promise<BullpenIngestResult> => {
+
+  return customFetch<BullpenIngestResult>(getRefreshBullpenUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshBullpenMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshBullpen>>, TError,{params?: RefreshBullpenParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshBullpen>>, TError,{params?: RefreshBullpenParams}, TContext> => {
+
+const mutationKey = ['refreshBullpen'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshBullpen>>, {params?: RefreshBullpenParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshBullpen(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshBullpenMutationResult = NonNullable<Awaited<ReturnType<typeof refreshBullpen>>>
+
+    export type RefreshBullpenMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Ingest reliever appearances for the last 3 days and recompute availability and leverage maps
+ */
+export const useRefreshBullpen = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshBullpen>>, TError,{params?: RefreshBullpenParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshBullpen>>,
+        TError,
+        {params?: RefreshBullpenParams},
+        TContext
+      > => {
+      return useMutation(getRefreshBullpenMutationOptions(options));
+    }
 

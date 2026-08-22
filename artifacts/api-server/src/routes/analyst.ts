@@ -9,12 +9,14 @@ import {
   GetAnalystProjectionsResponse,
   GetAnalystSettingsResponse,
   GetAnalystTodayResponse,
+  CorrectFeatureStoreSnapshotBody,
   RefreshAnalystResearchResponse,
   RefreshBullpenResponse,
   RefreshMarketResearchTBResponse,
   RefreshMarketResearchXBHResponse,
   RefreshMarketResearchWALKResponse,
   RefreshMarketResearchHRResponse,
+  WriteFeatureStoreOutcomeBody,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
@@ -24,14 +26,34 @@ import { runTBEngine } from "../services/tb-engine";
 import { runXBHEngine } from "../services/xbh-engine";
 import { runWALKEngine } from "../services/walk-engine";
 import { runHREngine } from "../services/hr-engine";
+import {
+  backfillHistoricalSnapshots,
+  captureSlateSnapshots,
+  correctSnapshot,
+  FeatureStoreValidationError,
+  queryFeatureStore,
+  writeHistoricalOutcome,
+} from "../services/feature-store";
 
 const router: IRouter = Router();
 const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
 
 function requestedDate(value: unknown) {
-  const date = typeof value === "string" ? value : new Date().toISOString().slice(0, 10);
+  const date = value instanceof Date
+    ? value.toISOString().slice(0, 10)
+    : typeof value === "string"
+      ? value
+      : new Date().toISOString().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must use YYYY-MM-DD");
   return date;
+}
+
+function dateOnly(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function engineResponseDate<T extends { slateDate: Date }>(response: T, slateDate: string) {
+  return { ...response, slateDate };
 }
 
 function requestedWindow(value: unknown) {
@@ -726,9 +748,9 @@ router.post("/analyst/refresh/market-research/tb", async (req, res, next) => {
     // Propagate engine-level failures as HTTP 500 so API clients can distinguish
     // a successful run (201) from a run that produced no usable output.
     if (result.error) {
-      res.status(500).json(RefreshMarketResearchTBResponse.parse(result));
+      res.status(500).json(engineResponseDate(RefreshMarketResearchTBResponse.parse(result), date));
     } else {
-      res.status(201).json(RefreshMarketResearchTBResponse.parse(result));
+      res.status(201).json(engineResponseDate(RefreshMarketResearchTBResponse.parse(result), date));
     }
   } catch (error) {
     next(error);
@@ -740,9 +762,9 @@ router.post("/analyst/refresh/market-research/xbh", async (req, res, next) => {
     const date = requestedDate(req.query.date);
     const result = await runXBHEngine(date);
     if (result.error) {
-      res.status(500).json(RefreshMarketResearchXBHResponse.parse(result));
+      res.status(500).json(engineResponseDate(RefreshMarketResearchXBHResponse.parse(result), date));
     } else {
-      res.status(201).json(RefreshMarketResearchXBHResponse.parse(result));
+      res.status(201).json(engineResponseDate(RefreshMarketResearchXBHResponse.parse(result), date));
     }
   } catch (error) {
     next(error);
@@ -754,9 +776,9 @@ router.post("/analyst/refresh/market-research/walk", async (req, res, next) => {
     const date = requestedDate(req.query.date);
     const result = await runWALKEngine(date);
     if (result.error) {
-      res.status(500).json(RefreshMarketResearchWALKResponse.parse(result));
+      res.status(500).json(engineResponseDate(RefreshMarketResearchWALKResponse.parse(result), date));
     } else {
-      res.status(201).json(RefreshMarketResearchWALKResponse.parse(result));
+      res.status(201).json(engineResponseDate(RefreshMarketResearchWALKResponse.parse(result), date));
     }
   } catch (error) {
     next(error);
@@ -768,9 +790,9 @@ router.post("/analyst/refresh/market-research/hr", async (req, res, next) => {
     const date = requestedDate(req.query.date);
     const result = await runHREngine(date);
     if (result.error) {
-      res.status(500).json(RefreshMarketResearchHRResponse.parse(result));
+      res.status(500).json(engineResponseDate(RefreshMarketResearchHRResponse.parse(result), date));
     } else {
-      res.status(201).json(RefreshMarketResearchHRResponse.parse(result));
+      res.status(201).json(engineResponseDate(RefreshMarketResearchHRResponse.parse(result), date));
     }
   } catch (error) {
     next(error);
@@ -804,6 +826,163 @@ router.post("/analyst/refresh/bullpen", async (req, res, next) => {
       error: result.error ?? null,
     }));
   } catch (error) {
+    next(error);
+  }
+});
+
+// ── Phase 4A – Historical Pregame Feature Store ──────────────────────────────
+
+router.get("/analyst/feature-store", async (req, res, next) => {
+  try {
+    const playerId =
+      req.query.playerId != null ? Number(req.query.playerId) : null;
+    const market =
+      typeof req.query.market === "string" && req.query.market.trim()
+        ? req.query.market.trim().toUpperCase()
+        : null;
+    const dateFrom =
+      typeof req.query.dateFrom === "string" && req.query.dateFrom.trim()
+        ? req.query.dateFrom.trim()
+        : null;
+    const dateTo =
+      typeof req.query.dateTo === "string" && req.query.dateTo.trim()
+        ? req.query.dateTo.trim()
+        : null;
+    const limit =
+      req.query.limit != null ? Math.min(Number(req.query.limit), 500) : 200;
+
+    const result = await queryFeatureStore({ playerId, market, dateFrom, dateTo, limit });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/feature-store/capture", async (req, res, next) => {
+  try {
+    const date = requestedDate(req.query.date);
+    const result = await captureSlateSnapshots(date);
+    if (result.error) {
+      res.status(500).json(result);
+    } else {
+      res.status(201).json(result);
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/feature-store/backfill", async (req, res, next) => {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const dateFrom =
+      typeof req.query.dateFrom === "string" && req.query.dateFrom.trim()
+        ? req.query.dateFrom.trim()
+        : today;
+    const dateTo =
+      typeof req.query.dateTo === "string" && req.query.dateTo.trim()
+        ? req.query.dateTo.trim()
+        : today;
+    const result = await backfillHistoricalSnapshots(dateFrom, dateTo);
+    if (result.error) {
+      res.status(500).json(result);
+    } else {
+      res.status(201).json(result);
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/feature-store/correct", async (req, res, next) => {
+  try {
+    // Corrections become immutable rows. Strict parsing rejects unrecognized
+    // fields (including raw, odds, EV, CLV, and sportsbook payloads) instead
+    // of silently discarding them.
+    const parsed = CorrectFeatureStoreSnapshotBody.strict().safeParse(req.body);
+    if (!parsed.success) {
+      req.log.warn({ issues: parsed.error.issues }, "Rejected invalid feature-store correction payload");
+      res.status(400).json({ error: "Invalid correction payload: only documented feature-store fields are allowed" });
+      return;
+    }
+    const { snapshotId, correctionReason, correctionNote } = parsed.data;
+    const updatedFeatures = parsed.data.updatedFeatures == null
+      ? null
+      : {
+          ...parsed.data.updatedFeatures,
+          slateDate: dateOnly(parsed.data.updatedFeatures.slateDate),
+        };
+
+    const result = await correctSnapshot(
+      snapshotId,
+      correctionReason as import("../services/feature-store").CorrectionReason,
+      correctionNote ?? null,
+      updatedFeatures ?? null,
+    );
+    res.status(201).json(result);
+  } catch (error) {
+    if (error instanceof FeatureStoreValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    if (error instanceof Error && error.message.includes("not found")) {
+      res.status(404).json({ error: error.message });
+    } else {
+      next(error);
+    }
+  }
+});
+
+router.post("/analyst/feature-store/outcome", async (req, res, next) => {
+  try {
+    // Outcomes contain official baseball-stat fields only. Strict parsing
+    // rejects arbitrary raw objects and all undeclared betting-derived fields.
+    const parsed = WriteFeatureStoreOutcomeBody.strict().safeParse(req.body);
+    if (!parsed.success) {
+      req.log.warn({ issues: parsed.error.issues }, "Rejected invalid feature-store outcome payload");
+      res.status(400).json({ error: "Invalid outcome payload: only documented official-stat fields are allowed" });
+      return;
+    }
+    const body = parsed.data;
+    const market = body.market;
+
+    const outcomeId = await writeHistoricalOutcome({
+      playerId: body.playerId,
+      gamePk: body.gamePk,
+      slateDate: dateOnly(body.slateDate),
+      market,
+      singles: body.singles ?? 0,
+      doubles: body.doubles ?? 0,
+      triples: body.triples ?? 0,
+      homeRuns: body.homeRuns ?? 0,
+      walks: body.walks ?? 0,
+      plateAppearances: body.plateAppearances ?? 0,
+      atBats: body.atBats ?? 0,
+      sourceId: body.sourceId,
+      ingestRunId: body.ingestRunId ?? null,
+    });
+
+    // Compute outcome values for the response
+    const s = body.singles ?? 0;
+    const d = body.doubles ?? 0;
+    const t = body.triples ?? 0;
+    const hr = body.homeRuns ?? 0;
+    const w = body.walks ?? 0;
+    const outcomeValue =
+      market === "TB"   ? s + d * 2 + t * 3 + hr * 4 :
+      market === "XBH"  ? d + t + hr :
+      market === "WALK" ? w : hr;
+    const outcomeHit =
+      market === "TB"   ? (s + d * 2 + t * 3 + hr * 4) >= 2 :
+      market === "XBH"  ? (d + t + hr) >= 1 :
+      market === "WALK" ? w >= 1 : hr >= 1;
+
+    res.status(201).json({ outcomeId, outcomeValue, outcomeHit });
+  } catch (error) {
+    if (error instanceof FeatureStoreValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
     next(error);
   }
 });

@@ -15,7 +15,8 @@
     "test:phase-3b": "node --test tests/phase-3b-acceptance.test.mjs",
     "test:phase-3c": "node --test tests/phase-3c-acceptance.test.mjs",
     "test:phase-3d": "node --test tests/phase-3d-acceptance.test.mjs",
-    "test:all": "node --test tests/data-foundation.test.mjs tests/phase-2a-acceptance.test.mjs tests/phase-2b-acceptance.test.mjs tests/phase-3-acceptance.test.mjs tests/phase-3a-acceptance.test.mjs tests/phase-3b-acceptance.test.mjs tests/phase-3c-acceptance.test.mjs tests/phase-3d-acceptance.test.mjs",
+    "test:phase-4a": "node --test tests/phase-4a-acceptance.test.mjs",
+    "test:all": "node --test tests/data-foundation.test.mjs tests/phase-2a-acceptance.test.mjs tests/phase-2b-acceptance.test.mjs tests/phase-3-acceptance.test.mjs tests/phase-3a-acceptance.test.mjs tests/phase-3b-acceptance.test.mjs tests/phase-3c-acceptance.test.mjs tests/phase-3d-acceptance.test.mjs tests/phase-4a-acceptance.test.mjs",
     "report:phase-2a": "node scripts/phase-2a-acceptance-report.mjs"
   },
   "private": true,

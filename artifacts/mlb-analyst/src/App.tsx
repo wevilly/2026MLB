@@ -1,8 +1,8 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR } from '@workspace/api-client-react';
-import type { AnalystSettings, BullpenArm, BullpenRoom, BullpenTeam, DataHealth, HealthIssue, HREngineResult, MarketResearch, MarketResearchCandidate, MarketShortCode, ProjectionCenter, ProjectionRow, ResearchState, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile } from '@workspace/api-client-react';
+import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore } from '@workspace/api-client-react';
+import type { AnalystSettings, BackfillFeatureStoreParams, BullpenArm, BullpenRoom, BullpenTeam, CaptureFeatureStoreSlateParams, DataHealth, FeatureStoreCaptureResult, FeatureStoreResult, HealthIssue, HREngineResult, MarketResearch, MarketResearchCandidate, PregameFeatureSnapshot, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useSearch, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -13,6 +13,7 @@ import NotFound from '@/pages/not-found';
 const queryClient = new QueryClient();
 
 type Tone = 'good' | 'warn' | 'bad' | 'neutral' | 'accent';
+type MarketShortCode = MarketResearchCandidate['market'];
 
 const navGroups: { label: string; items: Array<{ href: string; label: string; icon: typeof Home; future?: boolean }> }[] = [
   {
@@ -1551,6 +1552,345 @@ function HREnginePanel({
   );
 }
 
+// ── Phase 4A – Feature Store Panel ───────────────────────────────────────────
+
+function FeatureStoreCapturePanel({ slateDate }: { slateDate: string }) {
+  const capture = useCaptureFeatureStoreSlate();
+  const result = capture.data as FeatureStoreCaptureResult | undefined;
+
+  return (
+    <Panel className="mb-6 border-accent/30">
+      <div className="p-4 space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <Kicker>Phase 4A – Feature store capture</Kicker>
+            <p className="text-sm text-muted-foreground mt-1">
+              Freeze immutable pregame feature snapshots for all market research candidates on this
+              slate date. Idempotent — identical feature hashes are skipped. Run after all four
+              market engines complete.
+            </p>
+          </div>
+          <button
+            className="button button-dark shrink-0"
+            disabled={capture.isPending}
+            onClick={() => capture.mutate({ params: { date: slateDate } })}
+            data-testid="button-capture-feature-store"
+          >
+            <Database size={14} />
+            {capture.isPending ? 'Capturing…' : 'Capture snapshots'}
+          </button>
+        </div>
+        {capture.isError && (
+          <div className="text-xs text-red-500 font-mono mt-2">Error: {String(capture.error)}</div>
+        )}
+        {result && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-border/40">
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums text-good">{result.snapshotsWritten}</div>
+              <div className="text-xs text-muted-foreground">written</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums">{result.snapshotsSkipped}</div>
+              <div className="text-xs text-muted-foreground">skipped (identical hash)</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums text-bad">{result.snapshotErrors}</div>
+              <div className="text-xs text-muted-foreground">errors</div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl font-bold tabular-nums">{result.processingMs}ms</div>
+              <div className="text-xs text-muted-foreground">processing time</div>
+            </div>
+          </div>
+        )}
+        {result?.markets && result.markets.length > 0 && (
+          <div className="text-xs text-muted-foreground">
+            Markets covered: {result.markets.join(', ')} · {result.candidatesFound} candidates found
+          </div>
+        )}
+        {result?.error && (
+          <div className="text-xs text-red-500 font-mono mt-1">Engine error: {result.error}</div>
+        )}
+        {result?.notes && result.notes.length > 0 && (
+          <ul className="text-xs text-muted-foreground list-disc list-inside">
+            {result.notes.map((note, i) => <li key={i}>{note}</li>)}
+          </ul>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function FeatureStoreBackfillPanel() {
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const backfill = useBackfillFeatureStore();
+  const result = backfill.data;
+
+  return (
+    <Panel className="mb-6 border-border/40">
+      <div className="p-4 space-y-3">
+        <div>
+          <Kicker>Backfill historical snapshots</Kicker>
+          <p className="text-sm text-muted-foreground mt-1">
+            Populate pregame feature snapshots from existing market research candidates for a date
+            range. Idempotent — already-captured snapshots are skipped.
+          </p>
+        </div>
+        <div className="flex gap-2 items-center flex-wrap">
+          <input
+            type="date"
+            className="search-input !h-[35px] !w-auto"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            placeholder="From date"
+          />
+          <input
+            type="date"
+            className="search-input !h-[35px] !w-auto"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            placeholder="To date"
+          />
+          <button
+            className="button button-dark"
+            disabled={backfill.isPending || !fromDate || !toDate}
+            onClick={() => backfill.mutate({ params: { dateFrom: fromDate, dateTo: toDate } })}
+          >
+            <RefreshCw size={14} />
+            {backfill.isPending ? 'Backfilling…' : 'Run backfill'}
+          </button>
+        </div>
+        {result && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-border/40 text-center">
+            <div>
+              <div className="text-xl font-bold tabular-nums">{result.datesProcessed}</div>
+              <div className="text-xs text-muted-foreground">dates processed</div>
+            </div>
+            <div>
+              <div className="text-xl font-bold tabular-nums">{result.candidatesFound}</div>
+              <div className="text-xs text-muted-foreground">candidates found</div>
+            </div>
+            <div>
+              <div className="text-xl font-bold tabular-nums text-good">{result.snapshotsWritten}</div>
+              <div className="text-xs text-muted-foreground">written</div>
+            </div>
+            <div>
+              <div className="text-xl font-bold tabular-nums">{result.snapshotsSkipped}</div>
+              <div className="text-xs text-muted-foreground">skipped</div>
+            </div>
+          </div>
+        )}
+        {result?.error && (
+          <div className="text-xs text-red-500 font-mono mt-1">Error: {result.error}</div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+function FeatureStorePage() {
+  const [slateDate, setSlateDate] = useState(new Date().toISOString().slice(0, 10));
+  const [filterPlayer, setFilterPlayer] = useState('');
+  const [filterMarket, setFilterMarket] = useState<MarketShortCode | ''>('');
+
+  const query = useGetAnalystFeatureStore({
+    dateFrom: slateDate,
+    dateTo: slateDate,
+    ...(filterPlayer ? { playerId: Number(filterPlayer) } : {}),
+    ...(filterMarket ? { market: filterMarket as MarketShortCode } : {}),
+    limit: 200,
+  });
+  const data = query.data as FeatureStoreResult | undefined;
+
+  return (
+    <div className="page-content rise-in">
+      <div className="page-intro">
+        <div>
+          <Kicker>Feature store / Phase 4A</Kicker>
+          <h1>Pregame <span className="slash">//</span> feature store</h1>
+          <p>
+            Immutable pregame feature snapshots frozen at slate-cutoff time. Corrections create new
+            rows — originals are never mutated. Append-only historical outcomes for model training.
+          </p>
+        </div>
+        <button
+          className="button button-dark"
+          onClick={() => query.refetch()}
+          disabled={query.isLoading}
+        >
+          <RefreshCw size={15} /> {query.isLoading ? 'Loading…' : 'Refresh'}
+        </button>
+      </div>
+
+      {/* Date selector */}
+      <div className="flex gap-2 items-center flex-wrap mb-6">
+        <input
+          type="date"
+          className="search-input !h-[35px] !w-auto"
+          value={slateDate}
+          onChange={(e) => setSlateDate(e.target.value)}
+        />
+        <select
+          className="search-input !h-[35px]"
+          value={filterMarket}
+          onChange={(e) => setFilterMarket(e.target.value as MarketShortCode | '')}
+        >
+          <option value="">All markets</option>
+          {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
+            <option key={m} value={m}>{m}</option>
+          ))}
+        </select>
+        <input
+          type="number"
+          className="search-input !h-[35px] !w-[140px]"
+          value={filterPlayer}
+          onChange={(e) => setFilterPlayer(e.target.value.trim())}
+          placeholder="Player ID"
+        />
+      </div>
+
+      {/* Capture and backfill panels */}
+      <FeatureStoreCapturePanel slateDate={slateDate} />
+      <FeatureStoreBackfillPanel />
+
+      {/* Stats */}
+      {data?.stats && (
+        <Panel className="mb-6">
+          <div className="p-4 space-y-3">
+            <Kicker>Store summary</Kicker>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              <div className="text-center">
+                <div className="text-xl font-bold tabular-nums">{data.stats.totalSnapshots}</div>
+                <div className="text-xs text-muted-foreground">total snapshots</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xl font-bold tabular-nums">{data.stats.originalSnapshots}</div>
+                <div className="text-xs text-muted-foreground">originals</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xl font-bold tabular-nums">{data.stats.correctionSnapshots}</div>
+                <div className="text-xs text-muted-foreground">corrections</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xl font-bold tabular-nums">{data.stats.distinctSlateDates}</div>
+                <div className="text-xs text-muted-foreground">slate dates</div>
+              </div>
+              <div className="text-center">
+                <div className="text-xl font-bold tabular-nums">{data.stats.totalOutcomes}</div>
+                <div className="text-xs text-muted-foreground">historical outcomes</div>
+              </div>
+            </div>
+            {/* Per-market breakdown */}
+            <div className="flex gap-4 flex-wrap text-xs text-muted-foreground pt-2 border-t border-border/40">
+              {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
+                <span key={m}>
+                  <strong>{m}</strong> {Number(data.stats.snapshotsByMarket?.[m] ?? 0)} snapshots
+                </span>
+              ))}
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {/* Immutability contract */}
+      <Panel className="mb-6 bg-accent/5 border-accent/20">
+        <div className="p-4">
+          <Kicker>Immutability contract</Kicker>
+          <p className="text-xs font-mono text-muted-foreground mt-1">
+            {data?.systemNote ?? 'IMMUTABILITY CONTRACT: pregame_feature_snapshots rows are NEVER updated. Corrections create new rows with correction_of FK. historical_outcomes is append-only. No odds, EV, CLV, or sportsbook data is stored.'}
+          </p>
+        </div>
+      </Panel>
+
+      {/* Correction taxonomy */}
+      {data?.correctionTaxonomy && (
+        <Panel className="mb-6">
+          <div className="p-4">
+            <Kicker>Process-error taxonomy</Kicker>
+            <div className="flex gap-2 flex-wrap mt-2">
+              {data.correctionTaxonomy.map((code) => (
+                <span key={code} className="text-xs font-mono px-2 py-1 bg-muted rounded">{code}</span>
+              ))}
+            </div>
+          </div>
+        </Panel>
+      )}
+
+      {/* Snapshot list */}
+      {query.isLoading && <p className="text-sm text-muted-foreground">Loading snapshots…</p>}
+      {query.isError && (
+        <div className="text-xs text-red-500 font-mono">Error: {String(query.error)}</div>
+      )}
+      {data && data.snapshots.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No snapshots for {slateDate}
+          {filterMarket ? ` / ${filterMarket}` : ''}. Run the capture step above after market
+          engines complete.
+        </p>
+      )}
+      {data && data.snapshots.length > 0 && (
+        <Panel>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-muted-foreground border-b border-border/40">
+                  <th className="p-3 font-medium">Player</th>
+                  <th className="p-3 font-medium">Market</th>
+                  <th className="p-3 font-medium">Rank</th>
+                  <th className="p-3 font-medium">State</th>
+                  <th className="p-3 font-medium">Primary mechanism</th>
+                  <th className="p-3 font-medium">Frozen at</th>
+                  <th className="p-3 font-medium">Correction</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.snapshots.map((snap: PregameFeatureSnapshot) => (
+                  <tr
+                    key={snap.snapshotId}
+                    className={`border-b border-border/20 hover:bg-muted/30 ${snap.isCorrection ? 'opacity-70' : ''}`}
+                  >
+                    <td className="p-3">
+                      <div className="font-medium">{snap.playerName}</div>
+                      <div className="text-xs text-muted-foreground">#{snap.playerId}</div>
+                    </td>
+                    <td className="p-3">
+                      <span className="font-mono text-xs px-2 py-1 bg-muted rounded">{snap.market}</span>
+                    </td>
+                    <td className="p-3 tabular-nums">{snap.researchRank ?? '—'}</td>
+                    <td className="p-3">
+                      <span className={`text-xs font-mono ${
+                        snap.researchState === 'STRONG' || snap.researchState === 'POSITIVE'
+                          ? 'text-good'
+                          : snap.researchState === 'BLOCKED' || snap.researchState === 'NEGATIVE'
+                          ? 'text-bad'
+                          : ''
+                      }`}>
+                        {snap.researchState ?? '—'}
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs text-muted-foreground">{snap.primaryMechanism ?? '—'}</td>
+                    <td className="p-3 text-xs text-muted-foreground tabular-nums">
+                      {new Date(snap.frozenAt).toLocaleTimeString()}
+                    </td>
+                    <td className="p-3">
+                      {snap.isCorrection && (
+                        <span className="text-xs font-mono px-2 py-1 bg-amber-100 text-amber-800 rounded">
+                          {snap.correctionReason}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+    </div>
+  );
+}
+
 function MarketBoardPage() {
   const [dateParam, setDateParam] = useState('');
   const [marketParam, setMarketParam] = useState<MarketShortCode | ''>('');
@@ -1817,6 +2157,7 @@ function Router() {
           <Route path="/pitcher-lab" component={PitcherLabPage} />
           <Route path="/bullpen-room" component={BullpenRoomPage} />
           <Route path="/market-board" component={MarketBoardPage} />
+          <Route path="/feature-store" component={FeatureStorePage} />
           <Route path="/bettor-intelligence">{() => <FuturePage label="Bettor intelligence" />}</Route>
           <Route path="/model-lab">{() => <FuturePage label="Model lab" />}</Route>
           <Route path="/ai-analyst">{() => <FuturePage label="AI analyst" />}</Route>

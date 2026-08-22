@@ -458,14 +458,14 @@ async function cleanupSlate() {
        WHERE player_id >= 9991300)`,
   );
   // ALL market candidates for our synthetic players
-  await pool.query(`DELETE FROM market_research_candidates WHERE player_id >= 9991300`);
+  await pool.query(`DELETE FROM market_research_candidates WHERE player_id >= 9991300 AND player_id < 9991400`);
 
   await pool.query(
     `DELETE FROM lineup_entries WHERE lineup_snapshot_id IN (
-       SELECT lineup_snapshot_id FROM lineup_snapshots WHERE game_pk >= 9998300)`,
+       SELECT lineup_snapshot_id FROM lineup_snapshots WHERE game_pk >= 9998300 AND game_pk < 9998400)`,
   );
-  await pool.query(`DELETE FROM lineup_snapshots WHERE game_pk >= 9998300`);
-  await pool.query(`DELETE FROM starters WHERE game_pk >= 9998300`);
+  await pool.query(`DELETE FROM lineup_snapshots WHERE game_pk >= 9998300 AND game_pk < 9998400`);
+  await pool.query(`DELETE FROM starters WHERE game_pk >= 9998300 AND game_pk < 9998400`);
 
   await pool.query(
     `DELETE FROM player_research_features WHERE research_snapshot_id IN (
@@ -479,7 +479,7 @@ async function cleanupSlate() {
   );
   await pool.query(`DELETE FROM player_research_snapshots WHERE player_id = ANY($1)`, [pids]);
   await pool.query(`DELETE FROM pitcher_research_snapshots WHERE player_id = ANY($1)`, [allPitcherIds]);
-  await pool.query(`DELETE FROM games WHERE game_pk >= 9998300`);
+  await pool.query(`DELETE FROM games WHERE game_pk >= 9998300 AND game_pk < 9998400`);
 }
 
 // ── Test suite ────────────────────────────────────────────────────────────────

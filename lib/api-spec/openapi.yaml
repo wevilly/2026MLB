@@ -373,6 +373,164 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HREngineResult"
+  /analyst/feature-store:
+    get:
+      operationId: getAnalystFeatureStore
+      tags: [analyst]
+      summary: Query pregame feature snapshot history
+      description: |
+        Returns immutable pregame feature snapshots for the given filters.
+        Each snapshot was captured at slate-freeze time and can never be mutated.
+        Corrections create new rows with a correction_of FK and a required taxonomy reason.
+
+        Process-error taxonomy codes: LATE_SCRATCH, LINEUP_ERROR, DATA_INGEST_FAILURE,
+        IDENTITY_ERROR, SOURCE_UNAVAILABLE, HUMAN_CORRECTION.
+
+        PROHIBITED: No odds, EV, CLV, implied probability, or sportsbook data is stored.
+      parameters:
+        - name: playerId
+          in: query
+          required: false
+          schema: { type: integer }
+        - name: market
+          in: query
+          required: false
+          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+        - name: dateFrom
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Feature store query result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureStoreResult"
+  /analyst/feature-store/capture:
+    post:
+      operationId: captureFeatureStoreSlate
+      tags: [analyst]
+      summary: Capture pregame feature snapshots for a slate date
+      description: |
+        Captures immutable pregame feature snapshots for all market research candidates
+        on the given slate date. Run this after all four market engines have completed.
+        Idempotent — identical feature hashes are skipped without error.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Slate capture completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureStoreCaptureResult"
+  /analyst/feature-store/backfill:
+    post:
+      operationId: backfillFeatureStore
+      tags: [analyst]
+      summary: Backfill feature snapshots from historical market research candidates
+      parameters:
+        - name: dateFrom
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Backfill completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureStoreBackfillResult"
+  /analyst/feature-store/correct:
+    post:
+      operationId: correctFeatureStoreSnapshot
+      tags: [analyst]
+      summary: Create a correction snapshot pointing to an original
+      description: |
+        Creates a new snapshot row that supersedes the original. The original row is NEVER
+        modified — immutability is preserved. correctionReason MUST be one of the six
+        process-error taxonomy codes (LATE_SCRATCH, LINEUP_ERROR, DATA_INGEST_FAILURE,
+        IDENTITY_ERROR, SOURCE_UNAVAILABLE, HUMAN_CORRECTION). Supplying any other value
+        is rejected with 400.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeatureSnapshotCorrectionInput"
+      responses:
+        "201":
+          description: Correction snapshot created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeatureStoreCorrectionResult"
+        "400":
+          description: Invalid correction reason or missing required fields
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
+        "404":
+          description: Original snapshot not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
+  /analyst/feature-store/outcome:
+    post:
+      operationId: writeFeatureStoreOutcome
+      tags: [analyst]
+      summary: Append an official historical outcome for a player-game-market
+      description: |
+        Writes one append-only outcome row to historical_outcomes. No UPDATE or DELETE
+        is ever issued — each call creates a new row with a distinct outcomeId.
+        sourceId must reference an existing source_registry entry (e.g. MLB_OFFICIAL).
+        Do NOT supply odds, EV, CLV, or sportsbook data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HistoricalOutcomeInput"
+      responses:
+        "201":
+          description: Outcome row written
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WriteHistoricalOutcomeResult"
+        "400":
+          description: Missing required fields or invalid market code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                required: [error]
   /analyst/bullpen-room:
     get:
       operationId: getAnalystBullpenRoom
@@ -720,7 +878,22 @@ components:
         staleBadge: { type: boolean }
         sourceFreshness: { type: ["string", "null"] }
         computedAt: { type: ["string", "null"] }
-      required: [playerId, name, throws, role, availability, confidence, d1Pitches, d2Pitches, d3Pitches, consecutiveDays, multiInningYesterday, daysSinceLastUse, managerOverride, managerOverrideNote, staleBadge, sourceFreshness, computedAt]
+        roleHistory:
+          type: array
+          items: { $ref: "#/components/schemas/RoleHistoryEntry" }
+      required: [playerId, name, throws, role, availability, confidence, d1Pitches, d2Pitches, d3Pitches, consecutiveDays, multiInningYesterday, daysSinceLastUse, managerOverride, managerOverrideNote, staleBadge, sourceFreshness, computedAt, roleHistory]
+    RoleHistoryEntry:
+      type: object
+      properties:
+        changeId: { type: string }
+        previousRole: { type: ["string", "null"] }
+        newRole: { type: string }
+        changeType: { type: string }
+        effectiveDate: { type: string }
+        source: { type: string }
+        notes: { type: ["string", "null"] }
+        recordedAt: { type: string }
+      required: [changeId, previousRole, newRole, changeType, effectiveDate, source, notes, recordedAt]
     BullpenUsageEntry:
       type: object
       properties:
@@ -870,6 +1043,202 @@ components:
         notes: { type: array, items: { type: string } }
         error: { type: ["string", "null"] }
       required: [market, slateDate, gamesProcessed, candidatesProcessed, candidatesWritten, blockedCandidates, strongCandidates, positiveCandidates, neutralCandidates, negativeCandidates, processingMs, notes, error]
+    FeatureStoreStats:
+      type: object
+      properties:
+        totalSnapshots: { type: integer }
+        originalSnapshots: { type: integer }
+        correctionSnapshots: { type: integer }
+        snapshotsByMarket: { type: object }
+        oldestSlateDate: { type: ["string", "null"] }
+        newestSlateDate: { type: ["string", "null"] }
+        distinctSlateDates: { type: integer }
+        totalOutcomes: { type: integer }
+        outcomesByMarket: { type: object }
+      required: [totalSnapshots, originalSnapshots, correctionSnapshots, snapshotsByMarket, oldestSlateDate, newestSlateDate, distinctSlateDates, totalOutcomes, outcomesByMarket]
+    PregameFeatureSnapshot:
+      type: object
+      description: |
+        Immutable pregame feature snapshot for one player-market-game-date.
+        NEVER updated after capture. Corrections create new rows with correction_of FK.
+        correctionTaxonomy codes: LATE_SCRATCH, LINEUP_ERROR, DATA_INGEST_FAILURE,
+        IDENTITY_ERROR, SOURCE_UNAVAILABLE, HUMAN_CORRECTION.
+        PROHIBITED: No odds, EV, CLV, or sportsbook data.
+      properties:
+        snapshotId: { type: string }
+        playerId: { type: integer }
+        playerName: { type: string }
+        gamePk: { type: integer }
+        slateDate: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        frozenAt: { type: string }
+        researchRank: { type: ["integer", "null"] }
+        researchState: { type: ["string", "null"] }
+        primaryMechanism: { type: ["string", "null"] }
+        features: { type: object }
+        correctionOf: { type: ["string", "null"] }
+        correctionReason: { type: ["string", "null"] }
+        correctionNote: { type: ["string", "null"] }
+        isCorrection: { type: boolean }
+        createdAt: { type: string }
+      required: [snapshotId, playerId, playerName, gamePk, slateDate, market, frozenAt, researchRank, researchState, primaryMechanism, features, correctionOf, correctionReason, correctionNote, isCorrection, createdAt]
+    FeatureStoreResult:
+      type: object
+      properties:
+        snapshots: { type: array, items: { $ref: "#/components/schemas/PregameFeatureSnapshot" } }
+        total: { type: integer }
+        stats: { $ref: "#/components/schemas/FeatureStoreStats" }
+        filters: { type: object }
+        correctionTaxonomy: { type: array, items: { type: string } }
+        systemNote: { type: string }
+      required: [snapshots, total, stats, filters, correctionTaxonomy, systemNote]
+    FeatureStoreCaptureResult:
+      type: object
+      properties:
+        slateDate: { type: string }
+        ingestRunId: { type: string }
+        markets: { type: array, items: { type: string } }
+        candidatesFound: { type: integer }
+        snapshotsWritten: { type: integer }
+        snapshotsSkipped: { type: integer }
+        snapshotErrors: { type: integer }
+        processingMs: { type: integer }
+        notes: { type: array, items: { type: string } }
+        error: { type: ["string", "null"] }
+      required: [slateDate, ingestRunId, markets, candidatesFound, snapshotsWritten, snapshotsSkipped, snapshotErrors, processingMs, notes, error]
+    FeatureStoreBackfillResult:
+      type: object
+      properties:
+        fromDate: { type: string }
+        toDate: { type: string }
+        datesProcessed: { type: integer }
+        candidatesFound: { type: integer }
+        snapshotsWritten: { type: integer }
+        snapshotsSkipped: { type: integer }
+        processingMs: { type: integer }
+        notes: { type: array, items: { type: string } }
+        error: { type: ["string", "null"] }
+      required: [fromDate, toDate, datesProcessed, candidatesFound, snapshotsWritten, snapshotsSkipped, processingMs, notes, error]
+    FeatureSnapshotCorrectionInput:
+      type: object
+      additionalProperties: false
+      description: |
+        Request body for POST /analyst/feature-store/correct.
+        correctionReason must be one of the six process-error taxonomy codes.
+        Supplying any other value is rejected with 400. No odds, EV, CLV,
+        implied probability, sportsbook, or other betting-derived data may be
+        supplied. The server recursively validates replacement feature vectors
+        before creating an immutable correction row.
+      properties:
+        snapshotId:
+          type: string
+          description: UUID of the original snapshot to correct.
+        correctionReason:
+          type: string
+          enum: [LATE_SCRATCH, LINEUP_ERROR, DATA_INGEST_FAILURE, IDENTITY_ERROR, SOURCE_UNAVAILABLE, HUMAN_CORRECTION]
+          description: Required taxonomy code — must match one of the six approved codes exactly.
+        correctionNote:
+          type: ["string", "null"]
+          description: Optional free-text explanation of the correction.
+        updatedFeatures:
+          anyOf:
+            - $ref: "#/components/schemas/FeatureStoreFeatureVector"
+            - type: "null"
+          description: Complete replacement feature vector. If null, the original features are copied into the correction row.
+      required: [snapshotId, correctionReason]
+    FeatureStoreFeatureVector:
+      type: object
+      additionalProperties: false
+      description: |
+        Complete pregame feature vector. This schema intentionally contains
+        baseball research evidence only. Prohibited betting-derived keys and
+        values (odds, EV, CLV, implied probability, sportsbook, etc.) are
+        rejected recursively by the server before persistence.
+      required:
+        - market
+        - slateDate
+        - playerId
+        - gamePk
+        - candidateId
+        - researchRank
+        - researchState
+        - primaryMechanism
+        - secondaryMechanism
+        - opportunityEvidence
+        - starterMatchupEvidence
+        - bullpenPathEvidence
+        - parkEvidence
+        - recentVsSeasonVsCareer
+        - counterEvidence
+        - hitterFeatures
+        - pitcherFeatures
+        - parkFeatures
+      properties:
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        slateDate: { type: string, format: date }
+        playerId: { type: integer, minimum: 1 }
+        gamePk: { type: integer, minimum: 1 }
+        candidateId: { type: string, minLength: 1 }
+        researchRank: { type: ["number", "null"] }
+        researchState: { type: ["string", "null"] }
+        primaryMechanism: { type: ["string", "null"] }
+        secondaryMechanism: { type: ["string", "null"] }
+        opportunityEvidence: { type: object, additionalProperties: true }
+        starterMatchupEvidence: { type: object, additionalProperties: true }
+        bullpenPathEvidence: { type: object, additionalProperties: true }
+        parkEvidence: { type: object, additionalProperties: true }
+        recentVsSeasonVsCareer: { type: object, additionalProperties: true }
+        counterEvidence: { type: object, additionalProperties: true }
+        hitterFeatures:
+          type: object
+          additionalProperties: { type: ["number", "null"] }
+        pitcherFeatures:
+          type: object
+          additionalProperties: { type: ["number", "null"] }
+        parkFeatures:
+          type: object
+          additionalProperties: { type: ["number", "null"] }
+    HistoricalOutcomeInput:
+      type: object
+      additionalProperties: false
+      description: |
+        Request body for POST /analyst/feature-store/outcome.
+        Appends one immutable outcome row to historical_outcomes.
+        No UPDATE or DELETE is issued — each call creates a distinct row.
+        This request accepts only official baseball-stat fields. Arbitrary raw
+        payloads and all odds, EV, CLV, implied probability, sportsbook, or
+        other betting-derived fields are rejected with 400.
+      properties:
+        playerId: { type: integer }
+        gamePk: { type: integer }
+        slateDate: { type: string, format: date }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        singles: { type: integer, minimum: 0 }
+        doubles: { type: integer, minimum: 0 }
+        triples: { type: integer, minimum: 0 }
+        homeRuns: { type: integer, minimum: 0 }
+        walks: { type: integer, minimum: 0 }
+        plateAppearances: { type: integer, minimum: 0 }
+        atBats: { type: integer, minimum: 0 }
+        sourceId: { type: string, description: "Must reference an existing source_registry entry (e.g. MLB_OFFICIAL)." }
+        ingestRunId: { type: ["string", "null"] }
+      required: [playerId, gamePk, slateDate, market, sourceId]
+    WriteHistoricalOutcomeResult:
+      type: object
+      properties:
+        outcomeId: { type: string }
+        outcomeValue: { type: number }
+        outcomeHit: { type: boolean }
+      required: [outcomeId, outcomeValue, outcomeHit]
+    FeatureStoreCorrectionResult:
+      type: object
+      properties:
+        newSnapshotId: { type: string }
+        originalSnapshotId: { type: string }
+        correctionReason: { type: string }
+        correctionNote: { type: ["string", "null"] }
+        createdAt: { type: string }
+      required: [newSnapshotId, originalSnapshotId, correctionReason, correctionNote, createdAt]
     MarketResearchCandidate:
       type: object
       description: |

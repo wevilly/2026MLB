@@ -155,6 +155,7 @@ export interface ResearchHealth {
 
 export interface DataHealth {
   overall: string;
+  phase2aReady: boolean;
   sources: SourceBadge[];
   issues: HealthIssue[];
   identityCoverage: IdentityCoverage;
@@ -304,6 +305,582 @@ export interface ResearchIngestResult {
   notes: string[];
 }
 
+export interface BullpenLeverageMap {
+  /** @nullable */
+  projected9th: number | null;
+  /** @nullable */
+  projected8th: number | null;
+  /** @nullable */
+  projected7th: number | null;
+  /** @nullable */
+  highestLeverageLefty: number | null;
+  /** @nullable */
+  longMan: number | null;
+  /** @nullable */
+  highestWalkReliever: number | null;
+  /** @nullable */
+  lowestWalkReliever: number | null;
+  roleUncertainty: boolean;
+  /** @nullable */
+  notes: string | null;
+  /** @nullable */
+  computedAt: string | null;
+}
+
+export type BullpenArmAvailability = typeof BullpenArmAvailability[keyof typeof BullpenArmAvailability];
+
+
+export const BullpenArmAvailability = {
+  AVAILABLE: 'AVAILABLE',
+  LIKELY_AVAILABLE: 'LIKELY_AVAILABLE',
+  DOUBTFUL: 'DOUBTFUL',
+  OUT: 'OUT',
+  UNKNOWN: 'UNKNOWN',
+  STALE: 'STALE',
+} as const;
+
+export type BullpenArmConfidence = typeof BullpenArmConfidence[keyof typeof BullpenArmConfidence];
+
+
+export const BullpenArmConfidence = {
+  HEURISTIC: 'HEURISTIC',
+  MANAGER_OVERRIDE: 'MANAGER_OVERRIDE',
+  UNKNOWN: 'UNKNOWN',
+} as const;
+
+export interface RoleHistoryEntry {
+  changeId: string;
+  /** @nullable */
+  previousRole: string | null;
+  newRole: string;
+  changeType: string;
+  effectiveDate: string;
+  source: string;
+  /** @nullable */
+  notes: string | null;
+  recordedAt: string;
+}
+
+export interface BullpenArm {
+  playerId: number;
+  name: string;
+  throws: string;
+  role: string;
+  availability: BullpenArmAvailability;
+  confidence: BullpenArmConfidence;
+  /** @nullable */
+  d1Pitches: number | null;
+  /** @nullable */
+  d2Pitches: number | null;
+  /** @nullable */
+  d3Pitches: number | null;
+  consecutiveDays: number;
+  multiInningYesterday: boolean;
+  /** @nullable */
+  daysSinceLastUse: number | null;
+  /** @nullable */
+  managerOverride: string | null;
+  /** @nullable */
+  managerOverrideNote: string | null;
+  staleBadge: boolean;
+  /** @nullable */
+  sourceFreshness: string | null;
+  /** @nullable */
+  computedAt: string | null;
+  roleHistory: RoleHistoryEntry[];
+}
+
+export interface BullpenUsageEntry {
+  playerId: number;
+  name: string;
+  pitches: number;
+  ip: string;
+  multiInning: boolean;
+}
+
+export interface BullpenUsage {
+  d1: BullpenUsageEntry[];
+  d2: BullpenUsageEntry[];
+  d3: BullpenUsageEntry[];
+}
+
+export interface BullpenTeam {
+  teamId: number;
+  abbreviation: string;
+  name: string;
+  slateDate: string;
+  leverageMap: BullpenLeverageMap;
+  arms: BullpenArm[];
+  usage: BullpenUsage;
+  coveragePercentage: number;
+  staleBadge: boolean;
+  /** @nullable */
+  computedAt: string | null;
+}
+
+export interface BullpenRoomSummary {
+  teamsWithData: number;
+  teamsStale: number;
+  totalArms: number;
+  armsAvailable: number;
+  armsLikelyAvailable: number;
+  armsDoubtful: number;
+  armsOut: number;
+  armsUnknown: number;
+}
+
+export interface BullpenRoom {
+  date: string;
+  /** @nullable */
+  requestedTeam: string | null;
+  staleFreshnessWindowSeconds: number;
+  teams: BullpenTeam[];
+  summary: BullpenRoomSummary;
+}
+
+export interface BullpenIngestResult {
+  source: string;
+  slateDate: string;
+  gamesProcessed: number;
+  appearancesNormalized: number;
+  appearancesRejected: number;
+  teamsComputed: number;
+  /** @nullable */
+  error: string | null;
+}
+
+/**
+ * Result of a Total Bases (2+) research engine run.
+ * RANK_DONT_GATE: produces ordinal research_rank only.
+ * No odds, EV, CLV, or implied probability is produced.
+ */
+export interface TBEngineResult {
+  market: string;
+  slateDate: string;
+  gamesProcessed: number;
+  candidatesProcessed: number;
+  candidatesWritten: number;
+  blockedCandidates: number;
+  strongCandidates: number;
+  positiveCandidates: number;
+  neutralCandidates: number;
+  negativeCandidates: number;
+  processingMs: number;
+  notes: string[];
+  /** @nullable */
+  error: string | null;
+}
+
+/**
+ * Result of an Extra Base Hit research engine run.
+ * RANK_DONT_GATE: produces ordinal research_rank only.
+ * No odds, EV, CLV, or implied probability is produced.
+ * Singles are explicitly excluded from all mechanism paths.
+ */
+export interface XBHEngineResult {
+  market: string;
+  slateDate: string;
+  gamesProcessed: number;
+  candidatesProcessed: number;
+  candidatesWritten: number;
+  blockedCandidates: number;
+  strongCandidates: number;
+  positiveCandidates: number;
+  neutralCandidates: number;
+  negativeCandidates: number;
+  processingMs: number;
+  notes: string[];
+  /** @nullable */
+  error: string | null;
+}
+
+/**
+ * Result of a Batter Walk research engine run.
+ * RANK_DONT_GATE: produces ordinal research_rank only.
+ * No odds, EV, CLV, or implied probability is produced.
+ * Walk research is discipline-driven — power metrics are explicitly absent.
+ */
+export interface WALKEngineResult {
+  market: string;
+  slateDate: string;
+  gamesProcessed: number;
+  candidatesProcessed: number;
+  candidatesWritten: number;
+  blockedCandidates: number;
+  strongCandidates: number;
+  positiveCandidates: number;
+  neutralCandidates: number;
+  negativeCandidates: number;
+  processingMs: number;
+  notes: string[];
+  /** @nullable */
+  error: string | null;
+}
+
+/**
+ * Result of a Home Run research engine run.
+ * RANK_DONT_GATE: produces ordinal research_rank only.
+ * No odds, EV, CLV, or implied probability is produced.
+ * PARK_ENVIRONMENT is a first-class primary mechanism — not context-only.
+ */
+export interface HREngineResult {
+  market: string;
+  slateDate: string;
+  gamesProcessed: number;
+  candidatesProcessed: number;
+  candidatesWritten: number;
+  blockedCandidates: number;
+  strongCandidates: number;
+  positiveCandidates: number;
+  neutralCandidates: number;
+  negativeCandidates: number;
+  processingMs: number;
+  notes: string[];
+  /** @nullable */
+  error: string | null;
+}
+
+export type FeatureStoreStatsSnapshotsByMarket = { [key: string]: unknown };
+
+export type FeatureStoreStatsOutcomesByMarket = { [key: string]: unknown };
+
+export interface FeatureStoreStats {
+  totalSnapshots: number;
+  originalSnapshots: number;
+  correctionSnapshots: number;
+  snapshotsByMarket: FeatureStoreStatsSnapshotsByMarket;
+  /** @nullable */
+  oldestSlateDate: string | null;
+  /** @nullable */
+  newestSlateDate: string | null;
+  distinctSlateDates: number;
+  totalOutcomes: number;
+  outcomesByMarket: FeatureStoreStatsOutcomesByMarket;
+}
+
+export type PregameFeatureSnapshotMarket = typeof PregameFeatureSnapshotMarket[keyof typeof PregameFeatureSnapshotMarket];
+
+
+export const PregameFeatureSnapshotMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type PregameFeatureSnapshotFeatures = { [key: string]: unknown };
+
+/**
+ * Immutable pregame feature snapshot for one player-market-game-date.
+ * NEVER updated after capture. Corrections create new rows with correction_of FK.
+ * correctionTaxonomy codes: LATE_SCRATCH, LINEUP_ERROR, DATA_INGEST_FAILURE,
+ * IDENTITY_ERROR, SOURCE_UNAVAILABLE, HUMAN_CORRECTION.
+ * PROHIBITED: No odds, EV, CLV, or sportsbook data.
+ */
+export interface PregameFeatureSnapshot {
+  snapshotId: string;
+  playerId: number;
+  playerName: string;
+  gamePk: number;
+  slateDate: string;
+  market: PregameFeatureSnapshotMarket;
+  frozenAt: string;
+  /** @nullable */
+  researchRank: number | null;
+  /** @nullable */
+  researchState: string | null;
+  /** @nullable */
+  primaryMechanism: string | null;
+  features: PregameFeatureSnapshotFeatures;
+  /** @nullable */
+  correctionOf: string | null;
+  /** @nullable */
+  correctionReason: string | null;
+  /** @nullable */
+  correctionNote: string | null;
+  isCorrection: boolean;
+  createdAt: string;
+}
+
+export type FeatureStoreResultFilters = { [key: string]: unknown };
+
+export interface FeatureStoreResult {
+  snapshots: PregameFeatureSnapshot[];
+  total: number;
+  stats: FeatureStoreStats;
+  filters: FeatureStoreResultFilters;
+  correctionTaxonomy: string[];
+  systemNote: string;
+}
+
+export interface FeatureStoreCaptureResult {
+  slateDate: string;
+  ingestRunId: string;
+  markets: string[];
+  candidatesFound: number;
+  snapshotsWritten: number;
+  snapshotsSkipped: number;
+  snapshotErrors: number;
+  processingMs: number;
+  notes: string[];
+  /** @nullable */
+  error: string | null;
+}
+
+export interface FeatureStoreBackfillResult {
+  fromDate: string;
+  toDate: string;
+  datesProcessed: number;
+  candidatesFound: number;
+  snapshotsWritten: number;
+  snapshotsSkipped: number;
+  processingMs: number;
+  notes: string[];
+  /** @nullable */
+  error: string | null;
+}
+
+/**
+ * Required taxonomy code — must match one of the six approved codes exactly.
+ */
+export type FeatureSnapshotCorrectionInputCorrectionReason = typeof FeatureSnapshotCorrectionInputCorrectionReason[keyof typeof FeatureSnapshotCorrectionInputCorrectionReason];
+
+
+export const FeatureSnapshotCorrectionInputCorrectionReason = {
+  LATE_SCRATCH: 'LATE_SCRATCH',
+  LINEUP_ERROR: 'LINEUP_ERROR',
+  DATA_INGEST_FAILURE: 'DATA_INGEST_FAILURE',
+  IDENTITY_ERROR: 'IDENTITY_ERROR',
+  SOURCE_UNAVAILABLE: 'SOURCE_UNAVAILABLE',
+  HUMAN_CORRECTION: 'HUMAN_CORRECTION',
+} as const;
+
+export type FeatureStoreFeatureVectorMarket = typeof FeatureStoreFeatureVectorMarket[keyof typeof FeatureStoreFeatureVectorMarket];
+
+
+export const FeatureStoreFeatureVectorMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type FeatureStoreFeatureVectorOpportunityEvidence = { [key: string]: unknown };
+
+export type FeatureStoreFeatureVectorStarterMatchupEvidence = { [key: string]: unknown };
+
+export type FeatureStoreFeatureVectorBullpenPathEvidence = { [key: string]: unknown };
+
+export type FeatureStoreFeatureVectorParkEvidence = { [key: string]: unknown };
+
+export type FeatureStoreFeatureVectorRecentVsSeasonVsCareer = { [key: string]: unknown };
+
+export type FeatureStoreFeatureVectorCounterEvidence = { [key: string]: unknown };
+
+export type FeatureStoreFeatureVectorHitterFeatures = {[key: string]: number | null};
+
+export type FeatureStoreFeatureVectorPitcherFeatures = {[key: string]: number | null};
+
+export type FeatureStoreFeatureVectorParkFeatures = {[key: string]: number | null};
+
+/**
+ * Complete pregame feature vector. This schema intentionally contains
+ * baseball research evidence only. Prohibited betting-derived keys and
+ * values (odds, EV, CLV, implied probability, sportsbook, etc.) are
+ * rejected recursively by the server before persistence.
+ */
+export interface FeatureStoreFeatureVector {
+  market: FeatureStoreFeatureVectorMarket;
+  slateDate: string;
+  /** @minimum 1 */
+  playerId: number;
+  /** @minimum 1 */
+  gamePk: number;
+  /** @minLength 1 */
+  candidateId: string;
+  /** @nullable */
+  researchRank: number | null;
+  /** @nullable */
+  researchState: string | null;
+  /** @nullable */
+  primaryMechanism: string | null;
+  /** @nullable */
+  secondaryMechanism: string | null;
+  opportunityEvidence: FeatureStoreFeatureVectorOpportunityEvidence;
+  starterMatchupEvidence: FeatureStoreFeatureVectorStarterMatchupEvidence;
+  bullpenPathEvidence: FeatureStoreFeatureVectorBullpenPathEvidence;
+  parkEvidence: FeatureStoreFeatureVectorParkEvidence;
+  recentVsSeasonVsCareer: FeatureStoreFeatureVectorRecentVsSeasonVsCareer;
+  counterEvidence: FeatureStoreFeatureVectorCounterEvidence;
+  hitterFeatures: FeatureStoreFeatureVectorHitterFeatures;
+  pitcherFeatures: FeatureStoreFeatureVectorPitcherFeatures;
+  parkFeatures: FeatureStoreFeatureVectorParkFeatures;
+}
+
+/**
+ * Request body for POST /analyst/feature-store/correct.
+ * correctionReason must be one of the six process-error taxonomy codes.
+ * Supplying any other value is rejected with 400. No odds, EV, CLV,
+ * implied probability, sportsbook, or other betting-derived data may be
+ * supplied. The server recursively validates replacement feature vectors
+ * before creating an immutable correction row.
+ */
+export interface FeatureSnapshotCorrectionInput {
+  /** UUID of the original snapshot to correct. */
+  snapshotId: string;
+  /** Required taxonomy code — must match one of the six approved codes exactly. */
+  correctionReason: FeatureSnapshotCorrectionInputCorrectionReason;
+  /**
+     * Optional free-text explanation of the correction.
+     * @nullable
+     */
+  correctionNote?: string | null;
+  /** Complete replacement feature vector. If null, the original features are copied into the correction row. */
+  updatedFeatures?: FeatureStoreFeatureVector | null;
+}
+
+export type HistoricalOutcomeInputMarket = typeof HistoricalOutcomeInputMarket[keyof typeof HistoricalOutcomeInputMarket];
+
+
+export const HistoricalOutcomeInputMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+/**
+ * Request body for POST /analyst/feature-store/outcome.
+ * Appends one immutable outcome row to historical_outcomes.
+ * No UPDATE or DELETE is issued — each call creates a distinct row.
+ * This request accepts only official baseball-stat fields. Arbitrary raw
+ * payloads and all odds, EV, CLV, implied probability, sportsbook, or
+ * other betting-derived fields are rejected with 400.
+ */
+export interface HistoricalOutcomeInput {
+  playerId: number;
+  gamePk: number;
+  slateDate: string;
+  market: HistoricalOutcomeInputMarket;
+  /** @minimum 0 */
+  singles?: number;
+  /** @minimum 0 */
+  doubles?: number;
+  /** @minimum 0 */
+  triples?: number;
+  /** @minimum 0 */
+  homeRuns?: number;
+  /** @minimum 0 */
+  walks?: number;
+  /** @minimum 0 */
+  plateAppearances?: number;
+  /** @minimum 0 */
+  atBats?: number;
+  /** Must reference an existing source_registry entry (e.g. MLB_OFFICIAL). */
+  sourceId: string;
+  /** @nullable */
+  ingestRunId?: string | null;
+}
+
+export interface WriteHistoricalOutcomeResult {
+  outcomeId: string;
+  outcomeValue: number;
+  outcomeHit: boolean;
+}
+
+export interface FeatureStoreCorrectionResult {
+  newSnapshotId: string;
+  originalSnapshotId: string;
+  correctionReason: string;
+  /** @nullable */
+  correctionNote: string | null;
+  createdAt: string;
+}
+
+export type MarketResearchCandidateMarket = typeof MarketResearchCandidateMarket[keyof typeof MarketResearchCandidateMarket];
+
+
+export const MarketResearchCandidateMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type MarketResearchCandidateResearchState = typeof MarketResearchCandidateResearchState[keyof typeof MarketResearchCandidateResearchState];
+
+
+export const MarketResearchCandidateResearchState = {
+  STRONG: 'STRONG',
+  POSITIVE: 'POSITIVE',
+  NEUTRAL: 'NEUTRAL',
+  NEGATIVE: 'NEGATIVE',
+  BLOCKED: 'BLOCKED',
+} as const;
+
+export type MarketResearchCandidateOpportunityEvidence = { [key: string]: unknown };
+
+export type MarketResearchCandidateStarterMatchupEvidence = { [key: string]: unknown };
+
+export type MarketResearchCandidateBullpenPathEvidence = { [key: string]: unknown };
+
+export type MarketResearchCandidateParkEvidence = { [key: string]: unknown };
+
+export type MarketResearchCandidateRecentVsSeasonVsCareer = { [key: string]: unknown };
+
+export type MarketResearchCandidateCounterEvidence = { [key: string]: unknown };
+
+/**
+ * One research candidate for a player-market-slate_date-game combination.
+ * RANK_DONT_GATE: research_rank is ordinal only; it implies no threshold, gate, or probability.
+ * Ties share the same integer rank and are never collapsed.
+ * Prohibited fields absent from this schema: ev, clv, odds, impliedProbability, vigJuice,
+ * edgePercent, kellyFraction, expectedValue.
+ */
+export interface MarketResearchCandidate {
+  candidateId: string;
+  slateDate: string;
+  gamePk: number;
+  playerId: number;
+  playerName: string;
+  market: MarketResearchCandidateMarket;
+  /** @nullable */
+  researchRank: number | null;
+  researchState: MarketResearchCandidateResearchState;
+  /** @nullable */
+  primaryMechanism: string | null;
+  /** @nullable */
+  secondaryMechanism: string | null;
+  opportunityEvidence: MarketResearchCandidateOpportunityEvidence;
+  starterMatchupEvidence: MarketResearchCandidateStarterMatchupEvidence;
+  bullpenPathEvidence: MarketResearchCandidateBullpenPathEvidence;
+  parkEvidence: MarketResearchCandidateParkEvidence;
+  recentVsSeasonVsCareer: MarketResearchCandidateRecentVsSeasonVsCareer;
+  counterEvidence: MarketResearchCandidateCounterEvidence;
+  /** @nullable */
+  missingStaleEvidence: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Market research board for a given date/market/game.
+ * Populated by Phase 3A–3D engines. Empty until at least one engine has run.
+ * The prohibitedFields array documents which analytics are permanently absent from this contract.
+ */
+export interface MarketResearch {
+  date: string;
+  /** @nullable */
+  market: string | null;
+  /** @nullable */
+  gameId: string | null;
+  rankSemantics: string;
+  prohibitedFields: string[];
+  candidates: MarketResearchCandidate[];
+  candidateCount: number;
+  systemNote: string;
+}
+
 export type GetAnalystProjectionsParams = {
 date?: string;
 };
@@ -367,254 +944,104 @@ export type RefreshFullUniverseStatcastSplitsParams = {
 date?: string;
 };
 
-export type BullpenArmAvailability = 'AVAILABLE' | 'LIKELY_AVAILABLE' | 'DOUBTFUL' | 'OUT' | 'UNKNOWN' | 'STALE';
-export type BullpenConfidence = 'HEURISTIC' | 'MANAGER_OVERRIDE' | 'UNKNOWN';
-
-export interface RoleHistoryEntry {
-  changeId: string;
-  previousRole: string | null;
-  newRole: string;
-  changeType: string;
-  effectiveDate: string;
-  source: string;
-  notes: string | null;
-  recordedAt: string;
-}
-
-export interface BullpenLeverageMap {
-  projected9th: number | null;
-  projected8th: number | null;
-  projected7th: number | null;
-  highestLeverageLefty: number | null;
-  longMan: number | null;
-  highestWalkReliever: number | null;
-  lowestWalkReliever: number | null;
-  roleUncertainty: boolean;
-  notes: string | null;
-  computedAt: string | null;
-}
-
-export interface BullpenArm {
-  playerId: number;
-  name: string;
-  throws: string;
-  role: string;
-  availability: BullpenArmAvailability;
-  confidence: BullpenConfidence;
-  d1Pitches: number | null;
-  d2Pitches: number | null;
-  d3Pitches: number | null;
-  consecutiveDays: number;
-  multiInningYesterday: boolean;
-  daysSinceLastUse: number | null;
-  managerOverride: string | null;
-  managerOverrideNote: string | null;
-  staleBadge: boolean;
-  sourceFreshness: string | null;
-  computedAt: string | null;
-  /** Append-only role-change event history, oldest-first. Empty until first game-feed ingest. */
-  roleHistory: RoleHistoryEntry[];
-}
-
-export interface BullpenUsageEntry {
-  playerId: number;
-  name: string;
-  pitches: number;
-  ip: string;
-  multiInning: boolean;
-}
-
-export interface BullpenTeam {
-  teamId: number;
-  abbreviation: string;
-  name: string;
-  slateDate: string;
-  leverageMap: BullpenLeverageMap;
-  arms: BullpenArm[];
-  usage: { d1: BullpenUsageEntry[]; d2: BullpenUsageEntry[]; d3: BullpenUsageEntry[] };
-  coveragePercentage: number;
-  staleBadge: boolean;
-  computedAt: string | null;
-}
-
-export interface BullpenRoom {
-  date: string;
-  requestedTeam: string | null;
-  staleFreshnessWindowSeconds: number;
-  teams: BullpenTeam[];
-  summary: {
-    teamsWithData: number;
-    teamsStale: number;
-    totalArms: number;
-    armsAvailable: number;
-    armsLikelyAvailable: number;
-    armsDoubtful: number;
-    armsOut: number;
-    armsUnknown: number;
-  };
-}
-
-// ─── Phase 3 – Shared Market Research Contract ───────────────────────────────
-
-/** Short-code identifiers for the four independent hitter markets. */
-export type MarketShortCode = 'TB' | 'XBH' | 'WALK' | 'HR';
-
-/**
- * Research state taxonomy.
- * RANK_DONT_GATE rule: no state removes a candidate from the board.
- * BLOCKED means evidence is structurally absent or contradictory.
- * Ties share the same researchRank integer and are never collapsed.
- */
-export type ResearchState = 'STRONG' | 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE' | 'BLOCKED';
-
-/**
- * One research candidate for a player-market-slate_date-game combination.
- *
- * Prohibited fields — permanently absent from this type and all derived outputs:
- * ev, clv, odds, impliedProbability, vigJuice, edgePercent, kellyFraction, expectedValue.
- */
-export interface MarketResearchCandidate {
-  candidateId: string;
-  slateDate: string;
-  gamePk: number;
-  playerId: number;
-  playerName: string;
-  market: MarketShortCode;
-  /** Ordinal rank; 1 = highest-ranked for this market+date. Ties share the same value. */
-  researchRank: number | null;
-  researchState: ResearchState;
-  primaryMechanism: string | null;
-  secondaryMechanism: string | null;
-  opportunityEvidence: Record<string, unknown>;
-  starterMatchupEvidence: Record<string, unknown>;
-  bullpenPathEvidence: Record<string, unknown>;
-  parkEvidence: Record<string, unknown>;
-  recentVsSeasonVsCareer: Record<string, unknown>;
-  counterEvidence: Record<string, unknown>;
-  missingStaleEvidence: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * Market research board response.
- * Populated by Phase 3A–3D engines; empty until at least one engine has run.
- */
-export interface MarketResearch {
-  date: string;
-  market: string | null;
-  gameId: string | null;
-  /** RANK_DONT_GATE semantics statement embedded in every response. */
-  rankSemantics: string;
-  /** Permanently absent analytics fields — documented for contract clarity. */
-  prohibitedFields: string[];
-  candidates: MarketResearchCandidate[];
-  candidateCount: number;
-  systemNote: string;
-}
-
 export type GetAnalystMarketResearchParams = {
-  date?: string;
-  market?: MarketShortCode;
-  gameId?: string;
+date?: string;
+/**
+ * Filter to one market (TB=2+Total Bases, XBH=Extra Base Hit, WALK=Batter Walk, HR=Home Run)
+ */
+market?: GetAnalystMarketResearchMarket;
+/**
+ * Filter to a specific game by game_pk
+ */
+gameId?: string;
 };
 
-export interface TBEngineResult {
-  market: string;
-  slateDate: string;
-  gamesProcessed: number;
-  candidatesProcessed: number;
-  candidatesWritten: number;
-  blockedCandidates: number;
-  strongCandidates: number;
-  positiveCandidates: number;
-  neutralCandidates: number;
-  negativeCandidates: number;
-  processingMs: number;
-  notes: string[];
-  error: string | null;
-}
+export type GetAnalystMarketResearchMarket = typeof GetAnalystMarketResearchMarket[keyof typeof GetAnalystMarketResearchMarket];
+
+
+export const GetAnalystMarketResearchMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
 
 export type RefreshMarketResearchTBParams = {
-  date?: string;
+/**
+ * Slate date to run (defaults to today)
+ */
+date?: string;
 };
-
-export interface XBHEngineResult {
-  market: string;
-  slateDate: string;
-  gamesProcessed: number;
-  candidatesProcessed: number;
-  candidatesWritten: number;
-  blockedCandidates: number;
-  strongCandidates: number;
-  positiveCandidates: number;
-  neutralCandidates: number;
-  negativeCandidates: number;
-  processingMs: number;
-  notes: string[];
-  error: string | null;
-}
 
 export type RefreshMarketResearchXBHParams = {
-  date?: string;
+/**
+ * Slate date to run (defaults to today)
+ */
+date?: string;
 };
-
-export interface WALKEngineResult {
-  market: string;
-  slateDate: string;
-  gamesProcessed: number;
-  candidatesProcessed: number;
-  candidatesWritten: number;
-  blockedCandidates: number;
-  strongCandidates: number;
-  positiveCandidates: number;
-  neutralCandidates: number;
-  negativeCandidates: number;
-  processingMs: number;
-  notes: string[];
-  error: string | null;
-}
 
 export type RefreshMarketResearchWALKParams = {
-  date?: string;
+/**
+ * Slate date to run (defaults to today)
+ */
+date?: string;
 };
-
-export interface HREngineResult {
-  market: string;
-  slateDate: string;
-  gamesProcessed: number;
-  candidatesProcessed: number;
-  candidatesWritten: number;
-  blockedCandidates: number;
-  strongCandidates: number;
-  positiveCandidates: number;
-  neutralCandidates: number;
-  negativeCandidates: number;
-  processingMs: number;
-  notes: string[];
-  error: string | null;
-}
 
 export type RefreshMarketResearchHRParams = {
-  date?: string;
+/**
+ * Slate date to run (defaults to today)
+ */
+date?: string;
 };
 
-export interface BullpenIngestResult {
-  source: string;
-  slateDate: string;
-  gamesProcessed: number;
-  appearancesNormalized: number;
-  appearancesRejected: number;
-  teamsComputed: number;
-  error: string | null;
-}
+export type GetAnalystFeatureStoreParams = {
+playerId?: number;
+market?: GetAnalystFeatureStoreMarket;
+dateFrom?: string;
+dateTo?: string;
+limit?: number;
+};
+
+export type GetAnalystFeatureStoreMarket = typeof GetAnalystFeatureStoreMarket[keyof typeof GetAnalystFeatureStoreMarket];
+
+
+export const GetAnalystFeatureStoreMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type CaptureFeatureStoreSlateParams = {
+date?: string;
+};
+
+export type BackfillFeatureStoreParams = {
+dateFrom?: string;
+dateTo?: string;
+};
+
+export type CorrectFeatureStoreSnapshot400 = {
+  error: string;
+};
+
+export type CorrectFeatureStoreSnapshot404 = {
+  error: string;
+};
+
+export type WriteFeatureStoreOutcome400 = {
+  error: string;
+};
 
 export type GetAnalystBullpenRoomParams = {
-  date?: string;
-  team?: string;
+date?: string;
+/**
+ * Filter to a single team by abbreviation (e.g. NYY)
+ */
+team?: string;
 };
 
 export type RefreshBullpenParams = {
-  date?: string;
+date?: string;
 };
 

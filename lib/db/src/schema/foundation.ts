@@ -1,4 +1,6 @@
+import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   date,
@@ -939,6 +941,133 @@ export const marketResearchProvenance = pgTable("market_research_provenance", {
  *
  * Do not add odds, price, EV, CLV, or implied-probability columns to this table.
  */
+// ─── Phase 4A – Historical Pregame Feature Store ─────────────────────────────
+
+/**
+ * Taxonomy of process-error reasons for snapshot corrections.
+ * Required whenever a snapshot is corrected (correction_of IS NOT NULL).
+ *
+ * LATE_SCRATCH       — player was scratched after pregame-freeze
+ * LINEUP_ERROR       — incorrect lineup entry was frozen
+ * DATA_INGEST_FAILURE — upstream source data was corrupt or missing at freeze time
+ * IDENTITY_ERROR     — wrong player ID was used in the snapshot
+ * SOURCE_UNAVAILABLE — a required source was unavailable at freeze time
+ * HUMAN_CORRECTION   — operator-initiated correction with explicit note
+ */
+export const snapshotCorrectionReasonEnum = pgEnum("snapshot_correction_reason", [
+  "LATE_SCRATCH",
+  "LINEUP_ERROR",
+  "DATA_INGEST_FAILURE",
+  "IDENTITY_ERROR",
+  "SOURCE_UNAVAILABLE",
+  "HUMAN_CORRECTION",
+]);
+
+/**
+ * One row per player-market-game-date, frozen at pregame-freeze time.
+ *
+ * Immutability contract: NO UPDATE is ever issued to this table.
+ * Corrections create a new row pointing to the original via correction_of.
+ * correction_reason is required (not null) when correction_of is not null.
+ *
+ * The feature vector in `features` is the complete set of research metrics
+ * available at freeze time for the given market. Each market has independent
+ * feature columns; no merged hitter score is stored.
+ */
+export const pregameFeatureSnapshots = pgTable("pregame_feature_snapshots", {
+  snapshotId: uuid("snapshot_id").primaryKey().defaultRandom(),
+  playerId: integer("player_id").notNull().references(() => players.playerId),
+  gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
+  slateDate: date("slate_date").notNull(),
+  market: marketTypeEnum("market").notNull(),
+  frozenAt: timestamp("frozen_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Complete feature vector for this market at freeze time (JSONB). */
+  features: jsonb("features").notNull().default({}),
+  /** SHA-256 of the features JSON — used for idempotency checking. */
+  featureHash: text("feature_hash").notNull(),
+  /** Ordinal rank from the market research engine at freeze time. */
+  researchRank: integer("research_rank"),
+  /** Research state from the market research engine at freeze time. */
+  researchState: text("research_state"),
+  /** Primary evidence mechanism name from the market research engine. */
+  primaryMechanism: text("primary_mechanism"),
+  ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+  /** Self-referential FK to the snapshot this row corrects. NULL for original (non-correction) rows. */
+  correctionOf: uuid("correction_of").references((): AnyPgColumn => pregameFeatureSnapshots.snapshotId),
+  /** Required when correction_of IS NOT NULL; must be a valid taxonomy code. */
+  correctionReason: snapshotCorrectionReasonEnum("correction_reason"),
+  correctionNote: text("correction_note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  /**
+   * Partial unique index: ensures at-most-one original (non-correction) row
+   * per (player_id, game_pk, market, feature_hash) combination.
+   * Correction rows (correction_of IS NOT NULL) are excluded so the same hash
+   * can be used in a correction without conflicting with the original.
+   */
+  originalUniqueHashIdx: uniqueIndex("pfs_original_unique_hash_idx")
+    .on(table.playerId, table.gamePk, table.market, table.featureHash)
+    .where(sql`correction_of IS NULL`),
+}));
+
+/**
+ * Per-source provenance for each pregame feature snapshot.
+ * Documents which sources contributed metrics to the feature vector.
+ */
+export const featureSnapshotProvenance = pgTable("feature_snapshot_provenance", {
+  provenanceId: uuid("provenance_id").primaryKey().defaultRandom(),
+  snapshotId: uuid("snapshot_id").notNull().references(() => pregameFeatureSnapshots.snapshotId, { onDelete: "cascade" }),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  metricFamilies: text("metric_families").array().notNull().default([]),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }),
+  ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Official settled results per player-game-market. Append-only.
+ *
+ * Each row is the authoritative outcome for a player-game-market pair.
+ * No UPDATE or DELETE is ever issued to this table.
+ * Multiple rows for the same (player_id, game_pk, market) are theoretically
+ * possible under concurrent writes but are treated as idempotent via
+ * application-layer deduplication.
+ *
+ * market threshold rules (for outcome_hit):
+ *   TOTAL_BASES_2_PLUS — total_bases >= 2
+ *   EXTRA_BASE_HIT     — (doubles + triples + home_runs) >= 1
+ *   BATTER_WALK        — walks >= 1
+ *   HOME_RUN           — home_runs >= 1
+ *
+ * Do not add odds, price, EV, CLV, or implied-probability columns.
+ */
+export const historicalOutcomes = pgTable("historical_outcomes", {
+  outcomeId: uuid("outcome_id").primaryKey().defaultRandom(),
+  playerId: integer("player_id").notNull().references(() => players.playerId),
+  gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
+  slateDate: date("slate_date").notNull(),
+  market: marketTypeEnum("market").notNull(),
+  /** Raw outcome value (TB count, XBH count, walk count, or HR count). */
+  outcomeValue: numeric("outcome_value").notNull(),
+  /** Did the player achieve the market threshold? */
+  outcomeHit: boolean("outcome_hit").notNull(),
+  plateAppearances: integer("plate_appearances"),
+  atBats: integer("at_bats"),
+  singles: integer("singles"),
+  doubles: integer("doubles"),
+  triples: integer("triples"),
+  homeRuns: integer("home_runs"),
+  walks: integer("walks"),
+  settledAt: timestamp("settled_at", { withTimezone: true }).notNull().defaultNow(),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+  raw: jsonb("raw").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ─── End Phase 4A ─────────────────────────────────────────────────────────────
+
 export const marketSettlementOutcomes = pgTable(
   "market_settlement_outcomes",
   {
