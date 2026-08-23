@@ -284,6 +284,102 @@ export interface ResearchLab {
   notices: string[];
 }
 
+export interface BatterPitcherMetrics {
+  /** @nullable */
+  avg: number | null;
+  /** @nullable */
+  slg: number | null;
+  /** @nullable */
+  xslg: number | null;
+  xbh: number;
+  homeRuns: number;
+  walks: number;
+  /** @nullable */
+  hardHitPercent: number | null;
+  /** @nullable */
+  barrelPercent: number | null;
+}
+
+export type BatterPitcherArsenalStatus = typeof BatterPitcherArsenalStatus[keyof typeof BatterPitcherArsenalStatus];
+
+
+export const BatterPitcherArsenalStatus = {
+  AVAILABLE: 'AVAILABLE',
+  INSUFFICIENT_SAMPLE: 'INSUFFICIENT_SAMPLE',
+  NOT_FOUND: 'NOT_FOUND',
+} as const;
+
+export interface BatterPitcherArsenal {
+  status: BatterPitcherArsenalStatus;
+  summary: string;
+  /** @nullable */
+  weightedXslg: number | null;
+  pitchTypes: number;
+}
+
+export type BatterPitcherEvidenceStatus = typeof BatterPitcherEvidenceStatus[keyof typeof BatterPitcherEvidenceStatus];
+
+
+export const BatterPitcherEvidenceStatus = {
+  AVAILABLE: 'AVAILABLE',
+  INSUFFICIENT_SAMPLE: 'INSUFFICIENT_SAMPLE',
+  NOT_FOUND: 'NOT_FOUND',
+} as const;
+
+export type BatterPitcherEvidenceSampleBand = typeof BatterPitcherEvidenceSampleBand[keyof typeof BatterPitcherEvidenceSampleBand];
+
+
+export const BatterPitcherEvidenceSampleBand = {
+  ANECDOTE: 'ANECDOTE',
+  WEAK_CONTEXT: 'WEAK_CONTEXT',
+  SECONDARY_CONTEXT: 'SECONDARY_CONTEXT',
+  MEANINGFUL_SUPPORT: 'MEANINGFUL_SUPPORT',
+} as const;
+
+/**
+ * Named-pair history is canonical-ID-only and subordinate to current aggregate and arsenal evidence. It never emits odds, probabilities, or recommendations.
+ */
+export interface BatterPitcherEvidence {
+  status: BatterPitcherEvidenceStatus;
+  source: string;
+  coverageStatus: string;
+  batterId: number;
+  pitcherId: number;
+  effectiveTo: string;
+  sampleBand: BatterPitcherEvidenceSampleBand;
+  pa: number;
+  metrics: BatterPitcherMetrics;
+  ageDays: number;
+  decayWeight: number;
+  shrinkageWeight: number;
+  marketSignal: number;
+  rankAdjustment: number;
+  arsenal: BatterPitcherArsenal;
+  note: string;
+}
+
+export type BatterPitcherRefreshResultsItemStatus = typeof BatterPitcherRefreshResultsItemStatus[keyof typeof BatterPitcherRefreshResultsItemStatus];
+
+
+export const BatterPitcherRefreshResultsItemStatus = {
+  SUCCESS: 'SUCCESS',
+  FAILED: 'FAILED',
+} as const;
+
+export type BatterPitcherRefreshResultsItem = {
+  batterId: number;
+  pitcherId: number;
+  status: BatterPitcherRefreshResultsItemStatus;
+};
+
+export interface BatterPitcherRefresh {
+  effectiveDate: string;
+  pairsRequested: number;
+  pairsRefreshed: number;
+  failures: number;
+  results: BatterPitcherRefreshResultsItem[];
+}
+
 export interface ParkResearch {
   venue: string;
   span: string;
@@ -1233,6 +1329,7 @@ export interface MarketResearchCandidate {
   parkEvidence: MarketResearchCandidateParkEvidence;
   recentVsSeasonVsCareer: MarketResearchCandidateRecentVsSeasonVsCareer;
   counterEvidence: MarketResearchCandidateCounterEvidence;
+  bvpEvidence: BatterPitcherEvidence | null;
   /** @nullable */
   missingStaleEvidence: string | null;
   /** Whether the player identity has been resolved for the slate. */
@@ -2263,6 +2360,33 @@ export const GetAnalystPitcherLabWindow = {
   ROLLING_30: 'ROLLING_30',
   ROLLING_60: 'ROLLING_60',
 } as const;
+
+export type GetAnalystBatterPitcherParams = {
+/**
+ * @minimum 1
+ */
+batterId: number;
+/**
+ * @minimum 1
+ */
+pitcherId: number;
+market?: GetAnalystBatterPitcherMarket;
+date?: string;
+};
+
+export type GetAnalystBatterPitcherMarket = typeof GetAnalystBatterPitcherMarket[keyof typeof GetAnalystBatterPitcherMarket];
+
+
+export const GetAnalystBatterPitcherMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type RefreshAnalystBatterPitcherParams = {
+date?: string;
+};
 
 export type GetAnalystGameLabParams = {
 date?: string;

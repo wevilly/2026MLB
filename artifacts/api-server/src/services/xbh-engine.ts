@@ -35,6 +35,7 @@
  */
 
 import { pool } from "@workspace/db";
+import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 
 // ── Source ID ─────────────────────────────────────────────────────────────────
 
@@ -548,6 +549,7 @@ function buildStarterMatchupEvidence(c: XBHCandidate): object {
   const side = resolveBatterSide(c.hitterBats, c.starterThrows);
   return {
     starterIdentityKnown: c.starterPlayerId !== null,
+    starterPlayerId: c.starterPlayerId,
     starterState: c.starterState,
     starterThrows: c.starterThrows,
     hitterBats: c.hitterBats,
@@ -890,12 +892,15 @@ export async function runXBHEngine(slateDate: string): Promise<XBHEngineResult> 
         player.battingOrder, player.bats, starter.throws,
         hitterPA, pitcherBF,
       );
-      const evidenceScore = computeEvidenceScore(
+      const baseEvidenceScore = computeEvidenceScore(
         hitterFeatures, pitcherFeatures,
         player.battingOrder, player.bats, starter.throws, counterEvidence,
       );
+      const bvp = starter.playerId === null ? null : await getBatterPitcherEvidence(player.playerId, starter.playerId, slateDate, "XBH");
+      const evidenceScore = baseEvidenceScore + (bvp?.rankAdjustment ?? 0);
+      // BvP is a bounded competition tiebreaker, not a research-state promotion/fade.
       const researchState = assignResearchState(
-        starter.playerId !== null, player.battingOrder !== null, evidenceScore,
+        starter.playerId !== null, player.battingOrder !== null, baseEvidenceScore,
       );
 
       candidates.push({

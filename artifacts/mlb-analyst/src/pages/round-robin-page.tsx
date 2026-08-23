@@ -342,7 +342,7 @@ export default function RoundRobinPage() {
               <div className="table-wrap">
                 <table className="data-table" data-testid="round-robin-candidate-table">
                   <thead>
-                    <tr><th>Player</th><th>Game</th><th>Leg</th><th>Research</th><th>Why / availability</th><th className="number">Action</th></tr>
+                    <tr><th>Player</th><th>Game</th><th>Leg</th><th>Research</th><th>Why / availability</th><th>Named matchup</th><th className="number">Action</th></tr>
                   </thead>
                   <tbody>
                     {filteredCandidates.map((candidate) => {
@@ -361,6 +361,16 @@ export default function RoundRobinPage() {
                             {candidate.missingStaleEvidence && <small className="round-robin-missing"> · {candidate.missingStaleEvidence}</small>}
                             {selectionBlockLabel && <small className="round-robin-missing"> · {selectionBlockLabel}</small>}
                           </td>
+                           <td className="text-xs" data-testid={`bvp-round-robin-${candidate.playerId}-${candidate.market}`}>
+                             {candidate.bvpEvidence ? (
+                               <>
+                                 <Badge tone={candidate.bvpEvidence.status === 'AVAILABLE' ? 'neutral' : 'warn'}>
+                                   BvP · {candidate.bvpEvidence.sampleBand.replaceAll('_', ' ')}
+                                 </Badge>
+                                 <small className="round-robin-missing"> {candidate.bvpEvidence.pa} PA · {candidate.bvpEvidence.arsenal.status === 'AVAILABLE' ? 'arsenal compared' : 'arsenal limited'}</small>
+                               </>
+                             ) : <span>NOT FOUND</span>}
+                           </td>
                           <td className="number">
                             <button
                               className="button button-quiet round-robin-add"

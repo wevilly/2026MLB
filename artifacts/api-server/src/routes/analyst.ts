@@ -12,6 +12,8 @@ import {
   GetAnalystTodayResponse,
   CorrectFeatureStoreSnapshotBody,
   RefreshAnalystResearchResponse,
+  GetAnalystBatterPitcherResponse,
+  RefreshAnalystBatterPitcherResponse,
   RefreshBullpenResponse,
   RefreshMarketResearchTBResponse,
   RefreshMarketResearchXBHResponse,
@@ -65,6 +67,7 @@ import {
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
 import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFallback, researchHealth } from "../services/research-foundation";
+import { getBatterPitcherEvidence, refreshBatterPitcherSlate, type BvpMarket } from "../services/batter-pitcher-research";
 import { getBullpenRoom, refreshBullpen } from "../services/bullpen-foundation";
 import { runTBEngine } from "../services/tb-engine";
 import { runXBHEngine } from "../services/xbh-engine";
@@ -616,6 +619,24 @@ router.get("/analyst/pitcher-lab", async (req, res, next) => {
   }
 });
 
+router.get("/analyst/batter-pitcher", async (req, res, next) => {
+  try {
+    const batterId = requestedPlayerId(req.query.batterId);
+    const pitcherId = requestedPlayerId(req.query.pitcherId);
+    if (!batterId || !pitcherId) {
+      res.status(400).json({ error: "batterId and pitcherId must be resolved canonical MLB player IDs." });
+      return;
+    }
+    const requestedMarket = typeof req.query.market === "string" ? req.query.market.toUpperCase() : "TB";
+    const market = ["TB", "XBH", "WALK", "HR"].includes(requestedMarket) ? requestedMarket as BvpMarket : "TB";
+    res.json(GetAnalystBatterPitcherResponse.parse(
+      await getBatterPitcherEvidence(batterId, pitcherId, requestedDate(req.query.date), market),
+    ));
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get("/analyst/game-lab", async (req, res, next) => {
   try {
     const date = requestedDate(req.query.date);
@@ -838,6 +859,16 @@ router.post("/analyst/refresh/research/splits-full", async (req, res, next) => {
   }
 });
 
+router.post("/analyst/refresh/batter-pitcher", async (req, res, next) => {
+  try {
+    res.status(201).json(
+      RefreshAnalystBatterPitcherResponse.parse(await refreshBatterPitcherSlate(requestedDate(req.query.date))),
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
 // ─── Phase 3 – Market Research Contract ──────────────────────────────────────
 
 /**
@@ -950,7 +981,7 @@ router.get("/analyst/market-research", async (req, res, next) => {
       recent_vs_season_vs_career: Record<string, unknown>;
       counter_evidence: Record<string, unknown>;
       missing_stale_evidence: string | null;
-      identity_resolved: boolean;
+       identity_resolved: boolean;
       created_at: string;
       updated_at: string;
     }>(
@@ -969,7 +1000,7 @@ router.get("/analyst/market-research", async (req, res, next) => {
                   AND pe.effective_date = mrc.slate_date
                   AND pe.requires_identity_review
               ) AS identity_resolved,
-              mrc.created_at::text, mrc.updated_at::text
+               mrc.created_at::text, mrc.updated_at::text
        FROM market_research_candidates mrc
        LEFT JOIN players p ON p.player_id = mrc.player_id
        WHERE ${conditions.join(" AND ")}
@@ -977,13 +1008,19 @@ router.get("/analyst/market-research", async (req, res, next) => {
       sqlParams,
     );
 
-    const candidates = candidateResult.rows.map((row) => {
+    const candidates = await Promise.all(candidateResult.rows.map(async (row) => {
       const eligibility = getMarketResearchSelectionEligibility({
         researchState: row.research_state,
         missingStaleEvidence: row.missing_stale_evidence,
         identityResolved: row.identity_resolved,
       });
 
+      const starterId = typeof row.starter_matchup_evidence?.starterPlayerId === "number"
+        ? row.starter_matchup_evidence.starterPlayerId
+        : null;
+      const bvpEvidence = starterId
+        ? await getBatterPitcherEvidence(row.player_id, starterId, date, MARKET_DB_TO_SHORTCODE[row.market] as BvpMarket)
+        : null;
       return {
         candidateId: row.candidate_id,
         slateDate: row.slate_date,
@@ -1003,13 +1040,14 @@ router.get("/analyst/market-research", async (req, res, next) => {
         parkEvidence: stripProhibitedKeys(row.park_evidence ?? {}),
         recentVsSeasonVsCareer: stripProhibitedKeys(row.recent_vs_season_vs_career ?? {}),
         counterEvidence: stripProhibitedKeys(row.counter_evidence ?? {}),
+        bvpEvidence,
         missingStaleEvidence: row.missing_stale_evidence,
         identityResolved: row.identity_resolved,
         ...eligibility,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       };
-    });
+    }));
 
     res.json(GetAnalystMarketResearchResponse.parse({
       date,

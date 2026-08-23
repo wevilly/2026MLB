@@ -38,6 +38,8 @@ import type {
   AutomateAnalystSettlement201,
   AutomateAnalystSettlementParams,
   BackfillFeatureStoreParams,
+  BatterPitcherEvidence,
+  BatterPitcherRefresh,
   BettorEvaluation,
   BettorPickIngestInput,
   BettorPickIngestResult,
@@ -72,6 +74,7 @@ import type {
   GetAnalystAiResearchNotesParams,
   GetAnalystAiSourcingRegisterParams,
   GetAnalystAuditEventsParams,
+  GetAnalystBatterPitcherParams,
   GetAnalystBettorEvaluationParams,
   GetAnalystBettorPicksParams,
   GetAnalystBullpenRoomParams,
@@ -109,6 +112,7 @@ import type {
   OrchestrationRunList,
   PostmortemList,
   ProjectionCenter,
+  RefreshAnalystBatterPitcherParams,
   RefreshAnalystDailyMarketBoard400,
   RefreshAnalystDailyMarketBoardParams,
   RefreshAnalystResearchParams,
@@ -1379,6 +1383,168 @@ export function useGetAnalystPitcherLab<TData = Awaited<ReturnType<typeof getAna
 
 
 
+
+export const getGetAnalystBatterPitcherUrl = (params: GetAnalystBatterPitcherParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/batter-pitcher?${stringifiedParams}` : `/api/analyst/batter-pitcher`
+}
+
+/**
+ * @summary Get canonical-ID named batter-versus-pitcher evidence as bounded secondary context
+ */
+export const getAnalystBatterPitcher = async (params: GetAnalystBatterPitcherParams, options?: Parameters<typeof customFetch>[1]): Promise<BatterPitcherEvidence> => {
+
+  return customFetch<BatterPitcherEvidence>(getGetAnalystBatterPitcherUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystBatterPitcherQueryKey = (params?: GetAnalystBatterPitcherParams,) => {
+    return [
+    `/api/analyst/batter-pitcher`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystBatterPitcherQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystBatterPitcher>>, TError = ErrorType<unknown>>(params: GetAnalystBatterPitcherParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystBatterPitcher>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystBatterPitcherQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystBatterPitcher>>> = ({ signal }) => getAnalystBatterPitcher(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystBatterPitcher>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystBatterPitcherQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystBatterPitcher>>>
+export type GetAnalystBatterPitcherQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get canonical-ID named batter-versus-pitcher evidence as bounded secondary context
+ */
+
+export function useGetAnalystBatterPitcher<TData = Awaited<ReturnType<typeof getAnalystBatterPitcher>>, TError = ErrorType<unknown>>(
+ params: GetAnalystBatterPitcherParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystBatterPitcher>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystBatterPitcherQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRefreshAnalystBatterPitcherUrl = (params?: RefreshAnalystBatterPitcherParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/batter-pitcher?${stringifiedParams}` : `/api/analyst/refresh/batter-pitcher`
+}
+
+/**
+ * @summary Refresh current official-slate canonical batter-versus-pitcher evidence
+ */
+export const refreshAnalystBatterPitcher = async (params?: RefreshAnalystBatterPitcherParams, options?: Parameters<typeof customFetch>[1]): Promise<BatterPitcherRefresh> => {
+
+  return customFetch<BatterPitcherRefresh>(getRefreshAnalystBatterPitcherUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshAnalystBatterPitcherMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshAnalystBatterPitcher>>, TError,{params?: RefreshAnalystBatterPitcherParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshAnalystBatterPitcher>>, TError,{params?: RefreshAnalystBatterPitcherParams}, TContext> => {
+
+const mutationKey = ['refreshAnalystBatterPitcher'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshAnalystBatterPitcher>>, {params?: RefreshAnalystBatterPitcherParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshAnalystBatterPitcher(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshAnalystBatterPitcherMutationResult = NonNullable<Awaited<ReturnType<typeof refreshAnalystBatterPitcher>>>
+
+    export type RefreshAnalystBatterPitcherMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Refresh current official-slate canonical batter-versus-pitcher evidence
+ */
+export const useRefreshAnalystBatterPitcher = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshAnalystBatterPitcher>>, TError,{params?: RefreshAnalystBatterPitcherParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshAnalystBatterPitcher>>,
+        TError,
+        {params?: RefreshAnalystBatterPitcherParams},
+        TContext
+      > => {
+      return useMutation(getRefreshAnalystBatterPitcherMutationOptions(options));
+    }
 
 export const getGetAnalystGameLabUrl = (params?: GetAnalystGameLabParams,) => {
   const normalizedParams = new URLSearchParams();

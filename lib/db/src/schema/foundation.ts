@@ -757,6 +757,106 @@ export const pitchArsenalFeatures = pgTable("pitch_arsenal_features", {
   snapshotPitchIdx: uniqueIndex("pitch_arsenal_snapshot_pitch_idx").on(table.researchSnapshotId, table.pitchType),
 }));
 
+// ─── Batter vs Pitcher research ───────────────────────────────────────────────
+// Statcast rows remain event-level and are always attached through MLBAM canonical
+// player IDs. Pair snapshots are create-only interpretations of those events.
+export const batterPitcherEvents = pgTable("batter_pitcher_events", {
+  eventId: uuid("event_id").primaryKey().defaultRandom(),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  sourceEventKey: text("source_event_key").notNull(),
+  rawPayloadId: uuid("raw_payload_id").references(() => rawPayloads.rawPayloadId),
+  batterId: integer("batter_id").notNull().references(() => players.playerId),
+  pitcherId: integer("pitcher_id").notNull().references(() => players.playerId),
+  gamePk: bigint("game_pk", { mode: "number" }),
+  gameDate: date("game_date").notNull(),
+  atBatNumber: integer("at_bat_number"),
+  pitchNumber: integer("pitch_number"),
+  isTerminalPlateAppearance: boolean("is_terminal_plate_appearance").notNull().default(false),
+  eventType: text("event_type"),
+  pitchType: text("pitch_type"),
+  releaseSpeed: numeric("release_speed"),
+  horizontalMovement: numeric("horizontal_movement"),
+  verticalMovement: numeric("vertical_movement"),
+  launchSpeed: numeric("launch_speed"),
+  launchAngle: numeric("launch_angle"),
+  estimatedBa: numeric("estimated_ba"),
+  estimatedSlg: numeric("estimated_slg"),
+  raw: jsonb("raw").notNull().default({}),
+  contentChecksum: text("content_checksum").notNull().default(""),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  sourceEventRevisionIdx: uniqueIndex("batter_pitcher_source_event_revision_idx").on(table.sourceId, table.sourceEventKey, table.contentChecksum),
+  pairDateIdx: index("batter_pitcher_pair_date_idx").on(table.batterId, table.pitcherId, table.gameDate),
+}));
+
+export const batterPitcherSnapshots = pgTable("batter_pitcher_snapshots", {
+  snapshotId: uuid("snapshot_id").primaryKey().defaultRandom(),
+  batterId: integer("batter_id").notNull().references(() => players.playerId),
+  pitcherId: integer("pitcher_id").notNull().references(() => players.playerId),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+  rawPayloadId: uuid("raw_payload_id").references(() => rawPayloads.rawPayloadId),
+  effectiveFrom: date("effective_from").notNull(),
+  effectiveTo: date("effective_to").notNull(),
+  seasons: integer("seasons").array().notNull().default([]),
+  pa: integer("pa").notNull(),
+  ab: integer("ab").notNull(),
+  hits: integer("hits").notNull(),
+  totalBases: integer("total_bases").notNull(),
+  xbh: integer("xbh").notNull(),
+  homeRuns: integer("home_runs").notNull(),
+  walks: integer("walks").notNull(),
+  strikeouts: integer("strikeouts").notNull(),
+  avg: numeric("avg"),
+  slg: numeric("slg"),
+  xslg: numeric("xslg"),
+  woba: numeric("woba"),
+  xwoba: numeric("xwoba"),
+  hardHitPercent: numeric("hard_hit_percent"),
+  barrelPercent: numeric("barrel_percent"),
+  sampleBand: text("sample_band").notNull(),
+  ageDays: integer("age_days").notNull(),
+  decayWeight: numeric("decay_weight").notNull(),
+  shrinkageWeight: numeric("shrinkage_weight").notNull(),
+  contentChecksum: text("content_checksum").notNull(),
+  provenance: jsonb("provenance").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pairAsOfIdx: uniqueIndex("batter_pitcher_pair_asof_idx").on(table.batterId, table.pitcherId, table.effectiveTo, table.contentChecksum),
+  pairLookupIdx: index("batter_pitcher_snapshot_lookup_idx").on(table.batterId, table.pitcherId, table.effectiveTo),
+}));
+
+export const batterPitchTypeSnapshots = pgTable("batter_pitch_type_snapshots", {
+  snapshotId: uuid("snapshot_id").primaryKey().defaultRandom(),
+  batterId: integer("batter_id").notNull().references(() => players.playerId),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+  rawPayloadId: uuid("raw_payload_id").references(() => rawPayloads.rawPayloadId),
+  effectiveFrom: date("effective_from").notNull(),
+  effectiveTo: date("effective_to").notNull(),
+  contentChecksum: text("content_checksum").notNull(),
+  provenance: jsonb("provenance").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const batterPitchTypeFeatures = pgTable("batter_pitch_type_features", {
+  featureId: uuid("feature_id").primaryKey().defaultRandom(),
+  snapshotId: uuid("snapshot_id").notNull().references(() => batterPitchTypeSnapshots.snapshotId, { onDelete: "cascade" }),
+  pitchType: text("pitch_type").notNull(),
+  pitches: integer("pitches").notNull(),
+  plateAppearances: integer("plate_appearances").notNull(),
+  avg: numeric("avg"),
+  slg: numeric("slg"),
+  xslg: numeric("xslg"),
+  xwoba: numeric("xwoba"),
+  whiffPercent: numeric("whiff_percent"),
+  hardHitPercent: numeric("hard_hit_percent"),
+  sampleStatus: researchSampleStatusEnum("sample_status").notNull().default("NOT_FOUND"),
+  provenance: jsonb("provenance").notNull().default({}),
+}, (table) => ({
+  batterPitchTypeSnapshotIdx: uniqueIndex("batter_pitch_type_snapshot_pitch_idx").on(table.snapshotId, table.pitchType),
+}));
+
 export const parkResearchSnapshots = pgTable("park_research_snapshots", {
   parkResearchSnapshotId: uuid("park_research_snapshot_id").primaryKey().defaultRandom(),
   venueId: integer("venue_id").notNull().references(() => venues.venueId),

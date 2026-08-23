@@ -36,6 +36,7 @@
  */
 
 import { pool } from "@workspace/db";
+import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 
 // ── Source / market constants ─────────────────────────────────────────────────
 
@@ -568,6 +569,7 @@ function buildStarterMatchupEvidence(c: WALKCandidate): object {
   const side = resolveBatterSide(c.hitterBats, c.starterThrows);
   return {
     starterIdentityKnown: c.starterPlayerId !== null,
+    starterPlayerId: c.starterPlayerId,
     starterState: c.starterState,
     starterThrows: c.starterThrows,
     hitterBats: c.hitterBats,
@@ -911,12 +913,15 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
         player.bats, starter.throws,
         hitterPA, pitcherBF,
       );
-      const evidenceScore = computeEvidenceScore(
+      const baseEvidenceScore = computeEvidenceScore(
         hitterFeatures, pitcherFeatures, bullpen,
         player.battingOrder, player.bats, starter.throws, counterEvidence,
       );
+      const bvp = starter.playerId === null ? null : await getBatterPitcherEvidence(player.playerId, starter.playerId, slateDate, "WALK");
+      const evidenceScore = baseEvidenceScore + (bvp?.rankAdjustment ?? 0);
+      // Keep BvP out of research-state and selection eligibility boundaries.
       const researchState = assignResearchState(
-        starter.playerId !== null, player.battingOrder !== null, evidenceScore,
+        starter.playerId !== null, player.battingOrder !== null, baseEvidenceScore,
       );
 
       candidates.push({

@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { BatterPitcherEvidence } from './batterPitcherEvidence';
 import type { MarketResearchCandidateBullpenPathEvidence } from './marketResearchCandidateBullpenPathEvidence';
 import type { MarketResearchCandidateCounterEvidence } from './marketResearchCandidateCounterEvidence';
 import type { MarketResearchCandidateMarket } from './marketResearchCandidateMarket';
@@ -42,6 +43,7 @@ export interface MarketResearchCandidate {
   parkEvidence: MarketResearchCandidateParkEvidence;
   recentVsSeasonVsCareer: MarketResearchCandidateRecentVsSeasonVsCareer;
   counterEvidence: MarketResearchCandidateCounterEvidence;
+  bvpEvidence: BatterPitcherEvidence | null;
   /** @nullable */
   missingStaleEvidence: string | null;
   /** Whether the player identity has been resolved for the slate. */

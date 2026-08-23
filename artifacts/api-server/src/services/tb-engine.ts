@@ -27,6 +27,7 @@
  */
 
 import { pool } from "@workspace/db";
+import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 
 // ── Source ID ─────────────────────────────────────────────────────────────────
 
@@ -524,6 +525,7 @@ function buildStarterMatchupEvidence(c: TBCandidate): object {
   const side = resolveBatterSide(c.hitterBats, c.starterThrows);
   return {
     starterIdentityKnown: c.starterPlayerId !== null,
+    starterPlayerId: c.starterPlayerId,
     starterState: c.starterState,
     starterThrows: c.starterThrows,
     hitterBats: c.hitterBats,
@@ -865,11 +867,15 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
         player.battingOrder, player.bats, starter.throws,
         hitterPA, pitcherBF,
       );
-      const evidenceScore = computeEvidenceScore(
+      const baseEvidenceScore = computeEvidenceScore(
         hitterFeatures, pitcherFeatures,
         player.battingOrder, player.bats, starter.throws, counterEvidence,
       );
-      const researchState = assignResearchState(starter.playerId !== null, player.battingOrder !== null, evidenceScore);
+      const bvp = starter.playerId === null ? null : await getBatterPitcherEvidence(player.playerId, starter.playerId, slateDate, "TB");
+      const evidenceScore = baseEvidenceScore + (bvp?.rankAdjustment ?? 0);
+      // Named matchup evidence orders otherwise-qualified candidates only; it must never
+      // change the persisted research state or downstream selection eligibility.
+      const researchState = assignResearchState(starter.playerId !== null, player.battingOrder !== null, baseEvidenceScore);
 
       candidates.push({
         playerId: player.playerId, playerName: player.playerName, gamePk: player.gamePk,

@@ -39,6 +39,7 @@
  */
 
 import { pool } from "@workspace/db";
+import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 
 // ── Source / market constants ─────────────────────────────────────────────────
 
@@ -705,6 +706,7 @@ function buildStarterMatchupEvidence(c: HRCandidate): object {
     : null;
   return {
     starterIdentityKnown: c.starterPlayerId !== null,
+    starterPlayerId: c.starterPlayerId,
     starterState: c.starterState,
     starterThrows: c.starterThrows,
     hitterBats: c.hitterBats,
@@ -1086,12 +1088,15 @@ export async function runHREngine(slateDate: string): Promise<HREngineResult> {
       const counterEvidence = checkCounterEvidence(
         hitterFeatures, pitcherFeatures, parkFeatures, hitterPA, pitcherBF,
       );
-      const evidenceScore = computeEvidenceScore(
+      const baseEvidenceScore = computeEvidenceScore(
         hitterFeatures, pitcherFeatures, parkFeatures, bullpen,
         player.battingOrder, player.bats, starter.throws, counterEvidence,
       );
+      const bvp = starter.playerId === null ? null : await getBatterPitcherEvidence(player.playerId, starter.playerId, slateDate, "HR");
+      const evidenceScore = baseEvidenceScore + (bvp?.rankAdjustment ?? 0);
+      // The BvP adjustment can order a tie, but cannot promote or fade research state.
       const researchState = assignResearchState(
-        starter.playerId !== null, player.battingOrder !== null, evidenceScore,
+        starter.playerId !== null, player.battingOrder !== null, baseEvidenceScore,
       );
 
       candidates.push({

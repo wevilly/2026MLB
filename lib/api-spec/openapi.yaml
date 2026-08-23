@@ -271,6 +271,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResearchLab"
+  /analyst/batter-pitcher:
+    get:
+      operationId: getAnalystBatterPitcher
+      tags: [analyst]
+      summary: Get canonical-ID named batter-versus-pitcher evidence as bounded secondary context
+      parameters:
+        - name: batterId
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: pitcherId
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - name: market
+          in: query
+          required: false
+          schema: { type: string, enum: [TB, XBH, WALK, HR], default: TB }
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Named-pair evidence, including visible unavailable and thin-sample states
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatterPitcherEvidence"
+  /analyst/refresh/batter-pitcher:
+    post:
+      operationId: refreshAnalystBatterPitcher
+      tags: [analyst]
+      summary: Refresh current official-slate canonical batter-versus-pitcher evidence
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Named-pair source refresh completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatterPitcherRefresh"
   /analyst/game-lab:
     get:
       operationId: getAnalystGameLab
@@ -1729,6 +1775,64 @@ components:
         profile: { anyOf: [{ $ref: "#/components/schemas/ResearchProfile" }, { type: "null" }] }
         notices: { type: array, items: { type: string } }
       required: [sourceStatus, searchResults, profile, notices]
+    BatterPitcherMetrics:
+      type: object
+      properties:
+        avg: { type: ["number", "null"] }
+        slg: { type: ["number", "null"] }
+        xslg: { type: ["number", "null"] }
+        xbh: { type: integer }
+        homeRuns: { type: integer }
+        walks: { type: integer }
+        hardHitPercent: { type: ["number", "null"] }
+        barrelPercent: { type: ["number", "null"] }
+      required: [avg, slg, xslg, xbh, homeRuns, walks, hardHitPercent, barrelPercent]
+    BatterPitcherArsenal:
+      type: object
+      properties:
+        status: { type: string, enum: [AVAILABLE, INSUFFICIENT_SAMPLE, NOT_FOUND] }
+        summary: { type: string }
+        weightedXslg: { type: ["number", "null"] }
+        pitchTypes: { type: integer }
+      required: [status, summary, weightedXslg, pitchTypes]
+    BatterPitcherEvidence:
+      type: object
+      description: Named-pair history is canonical-ID-only and subordinate to current aggregate and arsenal evidence. It never emits odds, probabilities, or recommendations.
+      properties:
+        status: { type: string, enum: [AVAILABLE, INSUFFICIENT_SAMPLE, NOT_FOUND] }
+        source: { type: string }
+        coverageStatus: { type: string }
+        batterId: { type: integer }
+        pitcherId: { type: integer }
+        effectiveTo: { type: string, format: date }
+        sampleBand: { type: string, enum: [ANECDOTE, WEAK_CONTEXT, SECONDARY_CONTEXT, MEANINGFUL_SUPPORT] }
+        pa: { type: integer }
+        metrics: { $ref: "#/components/schemas/BatterPitcherMetrics" }
+        ageDays: { type: integer }
+        decayWeight: { type: number }
+        shrinkageWeight: { type: number }
+        marketSignal: { type: number }
+        rankAdjustment: { type: number }
+        arsenal: { $ref: "#/components/schemas/BatterPitcherArsenal" }
+        note: { type: string }
+      required: [status, source, coverageStatus, batterId, pitcherId, effectiveTo, sampleBand, pa, metrics, ageDays, decayWeight, shrinkageWeight, marketSignal, rankAdjustment, arsenal, note]
+    BatterPitcherRefresh:
+      type: object
+      properties:
+        effectiveDate: { type: string, format: date }
+        pairsRequested: { type: integer }
+        pairsRefreshed: { type: integer }
+        failures: { type: integer }
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              batterId: { type: integer }
+              pitcherId: { type: integer }
+              status: { type: string, enum: [SUCCESS, FAILED] }
+            required: [batterId, pitcherId, status]
+      required: [effectiveDate, pairsRequested, pairsRefreshed, failures, results]
     ParkResearch:
       type: object
       properties:
@@ -2373,6 +2477,8 @@ components:
         parkEvidence: { type: object }
         recentVsSeasonVsCareer: { type: object }
         counterEvidence: { type: object }
+        bvpEvidence:
+          anyOf: [{ $ref: "#/components/schemas/BatterPitcherEvidence" }, { type: "null" }]
         missingStaleEvidence: { type: ["string", "null"] }
         identityResolved:
           type: boolean
@@ -2386,7 +2492,7 @@ components:
           description: The reason this row cannot be selected, when applicable.
         createdAt: { type: string }
         updatedAt: { type: string }
-      required: [candidateId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, secondaryMechanism, opportunityEvidence, starterMatchupEvidence, bullpenPathEvidence, parkEvidence, recentVsSeasonVsCareer, counterEvidence, missingStaleEvidence, identityResolved, selectable, selectionBlockReason, createdAt, updatedAt]
+      required: [candidateId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, secondaryMechanism, opportunityEvidence, starterMatchupEvidence, bullpenPathEvidence, parkEvidence, recentVsSeasonVsCareer, counterEvidence, bvpEvidence, missingStaleEvidence, identityResolved, selectable, selectionBlockReason, createdAt, updatedAt]
     MarketResearch:
       type: object
       description: |

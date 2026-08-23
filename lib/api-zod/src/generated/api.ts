@@ -490,6 +490,74 @@ export const GetAnalystPitcherLabResponse = zod.object({
 
 
 /**
+ * @summary Get canonical-ID named batter-versus-pitcher evidence as bounded secondary context
+ */
+
+
+export const getAnalystBatterPitcherQueryMarketDefault = `TB`;
+
+export const GetAnalystBatterPitcherQueryParams = zod.object({
+  "batterId": zod.coerce.number().int().min(1),
+  "pitcherId": zod.coerce.number().int().min(1),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).default(getAnalystBatterPitcherQueryMarketDefault),
+  "date": zod.date().optional()
+})
+
+export const GetAnalystBatterPitcherResponse = zod.object({
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
+  "source": zod.string(),
+  "coverageStatus": zod.string(),
+  "batterId": zod.number().int(),
+  "pitcherId": zod.number().int(),
+  "effectiveTo": zod.coerce.date(),
+  "sampleBand": zod.enum(['ANECDOTE', 'WEAK_CONTEXT', 'SECONDARY_CONTEXT', 'MEANINGFUL_SUPPORT']),
+  "pa": zod.number().int(),
+  "metrics": zod.object({
+  "avg": zod.number().nullable(),
+  "slg": zod.number().nullable(),
+  "xslg": zod.number().nullable(),
+  "xbh": zod.number().int(),
+  "homeRuns": zod.number().int(),
+  "walks": zod.number().int(),
+  "hardHitPercent": zod.number().nullable(),
+  "barrelPercent": zod.number().nullable()
+}),
+  "ageDays": zod.number().int(),
+  "decayWeight": zod.number(),
+  "shrinkageWeight": zod.number(),
+  "marketSignal": zod.number(),
+  "rankAdjustment": zod.number(),
+  "arsenal": zod.object({
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
+  "summary": zod.string(),
+  "weightedXslg": zod.number().nullable(),
+  "pitchTypes": zod.number().int()
+}),
+  "note": zod.string()
+}).describe('Named-pair history is canonical-ID-only and subordinate to current aggregate and arsenal evidence. It never emits odds, probabilities, or recommendations.')
+
+
+/**
+ * @summary Refresh current official-slate canonical batter-versus-pitcher evidence
+ */
+export const RefreshAnalystBatterPitcherQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
+export const RefreshAnalystBatterPitcherResponse = zod.object({
+  "effectiveDate": zod.coerce.date(),
+  "pairsRequested": zod.number().int(),
+  "pairsRefreshed": zod.number().int(),
+  "failures": zod.number().int(),
+  "results": zod.array(zod.object({
+  "batterId": zod.number().int(),
+  "pitcherId": zod.number().int(),
+  "status": zod.enum(['SUCCESS', 'FAILED'])
+}))
+})
+
+
+/**
  * @summary Get research-ready game and park context without a matchup score
  */
 export const GetAnalystGameLabQueryParams = zod.object({
@@ -696,6 +764,38 @@ export const GetAnalystMarketResearchResponse = zod.object({
   "counterEvidence": zod.object({
 
 }).passthrough(),
+  "bvpEvidence": zod.union([zod.object({
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
+  "source": zod.string(),
+  "coverageStatus": zod.string(),
+  "batterId": zod.number().int(),
+  "pitcherId": zod.number().int(),
+  "effectiveTo": zod.coerce.date(),
+  "sampleBand": zod.enum(['ANECDOTE', 'WEAK_CONTEXT', 'SECONDARY_CONTEXT', 'MEANINGFUL_SUPPORT']),
+  "pa": zod.number().int(),
+  "metrics": zod.object({
+  "avg": zod.number().nullable(),
+  "slg": zod.number().nullable(),
+  "xslg": zod.number().nullable(),
+  "xbh": zod.number().int(),
+  "homeRuns": zod.number().int(),
+  "walks": zod.number().int(),
+  "hardHitPercent": zod.number().nullable(),
+  "barrelPercent": zod.number().nullable()
+}),
+  "ageDays": zod.number().int(),
+  "decayWeight": zod.number(),
+  "shrinkageWeight": zod.number(),
+  "marketSignal": zod.number(),
+  "rankAdjustment": zod.number(),
+  "arsenal": zod.object({
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
+  "summary": zod.string(),
+  "weightedXslg": zod.number().nullable(),
+  "pitchTypes": zod.number().int()
+}),
+  "note": zod.string()
+}).describe('Named-pair history is canonical-ID-only and subordinate to current aggregate and arsenal evidence. It never emits odds, probabilities, or recommendations.'),zod.null()]),
   "missingStaleEvidence": zod.string().nullable(),
   "identityResolved": zod.boolean().describe('Whether the player identity has been resolved for the slate.'),
   "selectable": zod.boolean().describe('Whether this audit row can be added as a Round Robin leg.'),
