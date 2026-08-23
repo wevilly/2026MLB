@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   useGetAnalystDataHealth,
   useGetAnalystMarketResearch,
@@ -64,6 +64,14 @@ const MARKET_LABELS: Record<ResearchMarket, string> = {
   HR: '1+ Home Run',
 };
 
+const SELECTION_BLOCK_LABELS: Record<NonNullable<MarketResearchCandidate['selectionBlockReason']>, string> = {
+  BLOCKED: 'BLOCKED',
+  NEGATIVE: 'NEGATIVE',
+  STALE: 'STALE EVIDENCE',
+  UNRESOLVED_IDENTITY: 'IDENTITY UNRESOLVED',
+  INCOMPLETE_EVIDENCE: 'INCOMPLETE EVIDENCE',
+};
+
 function currentEasternDate() {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York',
@@ -117,8 +125,49 @@ export default function RoundRobinPage() {
   const healthQuery = useGetAnalystDataHealth();
   const activeBoard = BOARDS.find((board) => board.id === activeBoardId) ?? BOARDS[0];
   const candidates = researchQuery.data?.candidates ?? [];
-  const tray = trays[activeBoardId];
   const games = slateQuery.data?.games ?? [];
+  const candidatesById = useMemo(
+    () => new Map(candidates.map((candidate) => [candidate.candidateId, candidate])),
+    [candidates],
+  );
+  const tray = useMemo(
+    () => trays[activeBoardId]
+      .map((leg) => candidatesById.get(leg.candidateId))
+      .filter((leg): leg is MarketResearchCandidate => Boolean(leg?.selectable)),
+    [activeBoardId, candidatesById, trays],
+  );
+  const selectableCandidateCount = useMemo(
+    () => candidates.filter((candidate) => candidate.selectable).length,
+    [candidates],
+  );
+
+  useEffect(() => {
+    setTrays((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      for (const boardId of Object.keys(current) as BoardId[]) {
+        const currentTray = current[boardId];
+        const refreshedTray = currentTray
+          .map((leg) => candidatesById.get(leg.candidateId))
+          .filter((leg): leg is MarketResearchCandidate => Boolean(leg?.selectable));
+
+        if (refreshedTray.length !== currentTray.length
+          || refreshedTray.some((leg, index) => leg.candidateId !== currentTray[index]?.candidateId)) {
+          next[boardId] = refreshedTray;
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [candidatesById]);
+
+  useEffect(() => {
+    if (pendingCandidate && !candidatesById.get(pendingCandidate.candidateId)?.selectable) {
+      setPendingCandidate(null);
+    }
+  }, [candidatesById, pendingCandidate]);
 
   const gamesById = useMemo(
     () => new Map(games.map((game) => [game.id, game])),
@@ -157,18 +206,20 @@ export default function RoundRobinPage() {
   };
 
   const addCandidate = (candidate: MarketResearchCandidate) => {
-    if (tray.some((leg) => leg.playerId === candidate.playerId && leg.market === candidate.market)) return;
+    const currentCandidate = candidatesById.get(candidate.candidateId);
+    if (!currentCandidate?.selectable) return;
+    if (tray.some((leg) => leg.playerId === currentCandidate.playerId && leg.market === currentCandidate.market)) return;
 
     const mixedSamePlayer = activeBoard.exposureOptIn
-      && ['XBH', 'WALK'].includes(candidate.market)
-      && tray.some((leg) => leg.playerId === candidate.playerId && leg.market !== candidate.market && ['XBH', 'WALK'].includes(leg.market));
+      && ['XBH', 'WALK'].includes(currentCandidate.market)
+      && tray.some((leg) => leg.playerId === currentCandidate.playerId && leg.market !== currentCandidate.market && ['XBH', 'WALK'].includes(leg.market));
 
     if (mixedSamePlayer) {
-      setPendingCandidate(candidate);
+      setPendingCandidate(currentCandidate);
       return;
     }
 
-    updateActiveTray((current) => [...current, candidate]);
+    updateActiveTray((current) => [...current, currentCandidate]);
   };
 
   const switchBoard = (boardId: BoardId) => {
@@ -219,7 +270,7 @@ export default function RoundRobinPage() {
         </div>
         <div>
           <span>Usable records</span>
-          <strong>{candidates.length.toLocaleString()}</strong>
+          <strong>{selectableCandidateCount.toLocaleString()}</strong>
         </div>
       </div>
 
@@ -257,7 +308,7 @@ export default function RoundRobinPage() {
           )}
 
           <Panel className="round-robin-candidates">
-            <SectionHeading eyebrow="Eligible player research" title="Add a leg" detail="Only rows returned by the active research contract are selectable." />
+            <SectionHeading eyebrow="Player research" title="Add a leg" detail="All research stays visible for audit. Only rows with complete, current evidence can be selected." />
             <div className="round-robin-filters">
               <label className="round-robin-search">
                 <Search size={14} />
@@ -296,6 +347,9 @@ export default function RoundRobinPage() {
                   <tbody>
                     {filteredCandidates.map((candidate) => {
                       const alreadyAdded = tray.some((leg) => leg.playerId === candidate.playerId && leg.market === candidate.market);
+                      const selectionBlockLabel = candidate.selectable
+                        ? null
+                        : SELECTION_BLOCK_LABELS[candidate.selectionBlockReason!];
                       return (
                         <tr key={candidate.candidateId} data-testid={`row-round-robin-${candidate.playerId}-${candidate.market}`}>
                           <td><strong>{candidate.playerName}</strong></td>
@@ -305,10 +359,17 @@ export default function RoundRobinPage() {
                           <td className="text-xs">
                             <span>{candidate.primaryMechanism?.replaceAll('_', ' ') ?? 'NOT FOUND'}</span>
                             {candidate.missingStaleEvidence && <small className="round-robin-missing"> · {candidate.missingStaleEvidence}</small>}
+                            {selectionBlockLabel && <small className="round-robin-missing"> · {selectionBlockLabel}</small>}
                           </td>
                           <td className="number">
-                            <button className="button button-quiet round-robin-add" onClick={() => addCandidate(candidate)} disabled={alreadyAdded} data-testid={`button-add-leg-${candidate.playerId}-${candidate.market}`}>
-                              <Plus size={13} /> {alreadyAdded ? 'Added' : 'Add'}
+                            <button
+                              className="button button-quiet round-robin-add"
+                              onClick={() => addCandidate(candidate)}
+                              disabled={alreadyAdded || !candidate.selectable}
+                              title={selectionBlockLabel ? `Not selectable: ${selectionBlockLabel}` : undefined}
+                              data-testid={`button-add-leg-${candidate.playerId}-${candidate.market}`}
+                            >
+                              <Plus size={13} /> {alreadyAdded ? 'Added' : candidate.selectable ? 'Add' : 'Unavailable'}
                             </button>
                           </td>
                         </tr>
@@ -397,7 +458,12 @@ export default function RoundRobinPage() {
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setPendingCandidate(null)}>Keep separate</AlertDialogCancel>
             <AlertDialogAction onClick={() => {
-              if (pendingCandidate) updateActiveTray((current) => [...current, pendingCandidate]);
+              const currentCandidate = pendingCandidate
+                ? candidatesById.get(pendingCandidate.candidateId)
+                : undefined;
+              if (currentCandidate?.selectable) {
+                updateActiveTray((current) => [...current, currentCandidate]);
+              }
               setPendingCandidate(null);
             }}>Allow exposure</AlertDialogAction>
           </AlertDialogFooter>

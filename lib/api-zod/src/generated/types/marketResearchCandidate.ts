@@ -12,6 +12,7 @@ import type { MarketResearchCandidateOpportunityEvidence } from './marketResearc
 import type { MarketResearchCandidateParkEvidence } from './marketResearchCandidateParkEvidence';
 import type { MarketResearchCandidateRecentVsSeasonVsCareer } from './marketResearchCandidateRecentVsSeasonVsCareer';
 import type { MarketResearchCandidateResearchState } from './marketResearchCandidateResearchState';
+import type { MarketResearchCandidateSelectionBlockReason } from './marketResearchCandidateSelectionBlockReason';
 import type { MarketResearchCandidateStarterMatchupEvidence } from './marketResearchCandidateStarterMatchupEvidence';
 
 /**
@@ -43,6 +44,15 @@ export interface MarketResearchCandidate {
   counterEvidence: MarketResearchCandidateCounterEvidence;
   /** @nullable */
   missingStaleEvidence: string | null;
+  /** Whether the player identity has been resolved for the slate. */
+  identityResolved: boolean;
+  /** Whether this audit row can be added as a Round Robin leg. */
+  selectable: boolean;
+  /**
+     * The reason this row cannot be selected, when applicable.
+     * @nullable
+     */
+  selectionBlockReason: MarketResearchCandidateSelectionBlockReason;
   createdAt: string;
   updatedAt: string;
 }

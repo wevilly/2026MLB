@@ -60,6 +60,7 @@ import {
   DecideAnalystAiSourcingClaimResponse,
   GetAnalystAiResearchNotesQueryParams,
   GetAnalystAiResearchNotesResponse,
+  getMarketResearchSelectionEligibility,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
@@ -949,6 +950,7 @@ router.get("/analyst/market-research", async (req, res, next) => {
       recent_vs_season_vs_career: Record<string, unknown>;
       counter_evidence: Record<string, unknown>;
       missing_stale_evidence: string | null;
+      identity_resolved: boolean;
       created_at: string;
       updated_at: string;
     }>(
@@ -960,6 +962,13 @@ router.get("/analyst/market-research", async (req, res, next) => {
               mrc.bullpen_path_evidence, mrc.park_evidence,
               mrc.recent_vs_season_vs_career, mrc.counter_evidence,
               mrc.missing_stale_evidence,
+              NOT EXISTS (
+                SELECT 1
+                FROM player_eligibility pe
+                WHERE pe.player_id = mrc.player_id
+                  AND pe.effective_date = mrc.slate_date
+                  AND pe.requires_identity_review
+              ) AS identity_resolved,
               mrc.created_at::text, mrc.updated_at::text
        FROM market_research_candidates mrc
        LEFT JOIN players p ON p.player_id = mrc.player_id
@@ -968,29 +977,39 @@ router.get("/analyst/market-research", async (req, res, next) => {
       sqlParams,
     );
 
-    const candidates = candidateResult.rows.map((row) => ({
-      candidateId: row.candidate_id,
-      slateDate: row.slate_date,
-      gamePk: Number(row.game_pk),
-      playerId: row.player_id,
-      playerName: row.player_name,
-      market: MARKET_DB_TO_SHORTCODE[row.market] ?? row.market,
-      researchRank: row.research_rank,
-      researchState: row.research_state,
-      primaryMechanism: row.primary_mechanism,
-      secondaryMechanism: row.secondary_mechanism,
-      // Defensive sanitization: strip any prohibited keys from JSONB payloads
-      // before they leave the API layer. Engines must also never write them.
-      opportunityEvidence: stripProhibitedKeys(row.opportunity_evidence ?? {}),
-      starterMatchupEvidence: stripProhibitedKeys(row.starter_matchup_evidence ?? {}),
-      bullpenPathEvidence: stripProhibitedKeys(row.bullpen_path_evidence ?? {}),
-      parkEvidence: stripProhibitedKeys(row.park_evidence ?? {}),
-      recentVsSeasonVsCareer: stripProhibitedKeys(row.recent_vs_season_vs_career ?? {}),
-      counterEvidence: stripProhibitedKeys(row.counter_evidence ?? {}),
-      missingStaleEvidence: row.missing_stale_evidence,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    const candidates = candidateResult.rows.map((row) => {
+      const eligibility = getMarketResearchSelectionEligibility({
+        researchState: row.research_state,
+        missingStaleEvidence: row.missing_stale_evidence,
+        identityResolved: row.identity_resolved,
+      });
+
+      return {
+        candidateId: row.candidate_id,
+        slateDate: row.slate_date,
+        gamePk: Number(row.game_pk),
+        playerId: row.player_id,
+        playerName: row.player_name,
+        market: MARKET_DB_TO_SHORTCODE[row.market] ?? row.market,
+        researchRank: row.research_rank,
+        researchState: row.research_state,
+        primaryMechanism: row.primary_mechanism,
+        secondaryMechanism: row.secondary_mechanism,
+        // Defensive sanitization: strip any prohibited keys from JSONB payloads
+        // before they leave the API layer. Engines must also never write them.
+        opportunityEvidence: stripProhibitedKeys(row.opportunity_evidence ?? {}),
+        starterMatchupEvidence: stripProhibitedKeys(row.starter_matchup_evidence ?? {}),
+        bullpenPathEvidence: stripProhibitedKeys(row.bullpen_path_evidence ?? {}),
+        parkEvidence: stripProhibitedKeys(row.park_evidence ?? {}),
+        recentVsSeasonVsCareer: stripProhibitedKeys(row.recent_vs_season_vs_career ?? {}),
+        counterEvidence: stripProhibitedKeys(row.counter_evidence ?? {}),
+        missingStaleEvidence: row.missing_stale_evidence,
+        identityResolved: row.identity_resolved,
+        ...eligibility,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    });
 
     res.json(GetAnalystMarketResearchResponse.parse({
       date,
@@ -1000,7 +1019,8 @@ router.get("/analyst/market-research", async (req, res, next) => {
       prohibitedFields: PROHIBITED_FIELDS,
       candidates,
       candidateCount: candidates.length,
-      systemNote: "Market engines 3A–3D populate this board. Candidates appear here once at least one engine has completed a research pass for this date.",
+      selectableCandidateCount: candidates.filter((candidate) => candidate.selectable).length,
+      systemNote: "Market engines 3A–3D populate this board. All candidates remain visible for audit; only rows with resolved identity and complete current evidence are selectable in Round Robin.",
     }));
   } catch (error) {
     next(error);

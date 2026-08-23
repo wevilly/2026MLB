@@ -2374,9 +2374,19 @@ components:
         recentVsSeasonVsCareer: { type: object }
         counterEvidence: { type: object }
         missingStaleEvidence: { type: ["string", "null"] }
+        identityResolved:
+          type: boolean
+          description: Whether the player identity has been resolved for the slate.
+        selectable:
+          type: boolean
+          description: Whether this audit row can be added as a Round Robin leg.
+        selectionBlockReason:
+          type: ["string", "null"]
+          enum: [BLOCKED, NEGATIVE, STALE, UNRESOLVED_IDENTITY, INCOMPLETE_EVIDENCE, null]
+          description: The reason this row cannot be selected, when applicable.
         createdAt: { type: string }
         updatedAt: { type: string }
-      required: [candidateId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, secondaryMechanism, opportunityEvidence, starterMatchupEvidence, bullpenPathEvidence, parkEvidence, recentVsSeasonVsCareer, counterEvidence, missingStaleEvidence, createdAt, updatedAt]
+      required: [candidateId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, secondaryMechanism, opportunityEvidence, starterMatchupEvidence, bullpenPathEvidence, parkEvidence, recentVsSeasonVsCareer, counterEvidence, missingStaleEvidence, identityResolved, selectable, selectionBlockReason, createdAt, updatedAt]
     MarketResearch:
       type: object
       description: |
@@ -2391,8 +2401,12 @@ components:
         prohibitedFields: { type: array, items: { type: string } }
         candidates: { type: array, items: { $ref: "#/components/schemas/MarketResearchCandidate" } }
         candidateCount: { type: integer }
+        selectableCandidateCount:
+          type: integer
+          minimum: 0
+          description: Count of returned candidates that meet the shared Round Robin selection predicate.
         systemNote: { type: string }
-      required: [date, market, gameId, rankSemantics, prohibitedFields, candidates, candidateCount, systemNote]
+      required: [date, market, gameId, rankSemantics, prohibitedFields, candidates, candidateCount, selectableCandidateCount, systemNote]
     DailyMarketBoardEntry:
       type: object
       additionalProperties: false

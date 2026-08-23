@@ -12,6 +12,8 @@
  *  A8  DB schema enforces market enum — invalid market value is rejected
  *  A9  DB schema enforces research_state enum — invalid state is rejected
  *  A10 Candidates table unique constraint prevents duplicate player-market-game rows
+ *  A11 Round Robin eligibility keeps audit rows visible while excluding blocked,
+ *      negative, stale, unresolved-identity, and incomplete-evidence candidates
  */
 
 import assert from "node:assert/strict";
@@ -55,17 +57,20 @@ async function ensureGame(gamePk, gameDate) {
   return { gamePk, awayId, homeId };
 }
 
-async function insertCandidate({ gamePk, playerId, market, researchRank, researchState, slateDate }) {
+async function insertCandidate({
+  gamePk, playerId, market, researchRank, researchState, slateDate, missingStaleEvidence = null,
+}) {
   const result = await pool.query(
     `INSERT INTO market_research_candidates
-       (slate_date, game_pk, player_id, market, research_rank, research_state)
-     VALUES ($1, $2, $3, $4, $5, $6)
+       (slate_date, game_pk, player_id, market, research_rank, research_state, missing_stale_evidence)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (slate_date, market, player_id, game_pk) DO UPDATE SET
        research_rank = EXCLUDED.research_rank,
        research_state = EXCLUDED.research_state,
+       missing_stale_evidence = EXCLUDED.missing_stale_evidence,
        updated_at = now()
      RETURNING candidate_id`,
-    [slateDate ?? today, gamePk, playerId, market, researchRank, researchState],
+    [slateDate ?? today, gamePk, playerId, market, researchRank, researchState, missingStaleEvidence],
   );
   return result.rows[0].candidate_id;
 }
@@ -370,6 +375,105 @@ test("A10: Unique constraint prevents duplicate player-market-slate_date-game ro
   );
 
   await cleanupCandidates(testPlayerId);
+});
+
+test("A11: Round Robin eligibility excludes incomplete research without hiding it from audit", async () => {
+  const testGamePk = 799990051;
+  const fixturePlayers = {
+    selectableTb: 9999941,
+    blockedTb: 9999942,
+    negativeTb: 9999943,
+    staleXbh: 9999944,
+    incompleteWalk: 9999945,
+    unresolvedHr: 9999946,
+    selectableXbh: 9999947,
+    selectableWalk: 9999948,
+    selectableHr: 9999949,
+  };
+  const gameResult = await ensureGame(testGamePk, today);
+  if (!gameResult) return;
+
+  for (const [name, playerId] of Object.entries(fixturePlayers)) {
+    await ensurePlayer(playerId, `Round Robin ${name}`);
+  }
+
+  const rows = [
+    [fixturePlayers.selectableTb, "TOTAL_BASES_2_PLUS", "NEUTRAL", null],
+    [fixturePlayers.blockedTb, "TOTAL_BASES_2_PLUS", "BLOCKED", null],
+    [fixturePlayers.negativeTb, "TOTAL_BASES_2_PLUS", "NEGATIVE", null],
+    [fixturePlayers.staleXbh, "EXTRA_BASE_HIT", "POSITIVE", "Starter research is stale"],
+    [fixturePlayers.incompleteWalk, "BATTER_WALK", "POSITIVE", "Park factors unavailable"],
+    [fixturePlayers.unresolvedHr, "HOME_RUN", "POSITIVE", null],
+    [fixturePlayers.selectableXbh, "EXTRA_BASE_HIT", "POSITIVE", null],
+    [fixturePlayers.selectableWalk, "BATTER_WALK", "POSITIVE", null],
+    [fixturePlayers.selectableHr, "HOME_RUN", "POSITIVE", null],
+  ];
+  for (let index = 0; index < rows.length; index += 1) {
+    const [playerId, market, researchState, missingStaleEvidence] = rows[index];
+    await insertCandidate({
+      gamePk: testGamePk,
+      playerId,
+      market,
+      researchRank: index + 1,
+      researchState,
+      missingStaleEvidence,
+    });
+  }
+
+  const sourceResult = await pool.query(`SELECT source_id FROM source_registry ORDER BY source_id LIMIT 1`);
+  assert.ok(sourceResult.rowCount, "A seeded source is required for the identity-review fixture");
+  const sourceId = sourceResult.rows[0].source_id;
+  await pool.query(
+    `INSERT INTO player_eligibility (
+       player_id, source_id, external_player_id, status, effective_date, confidence,
+       requires_identity_review, quarantined_from_current_research
+     ) VALUES ($1, $2, $3, 'UNKNOWN', $4, 'REVIEW_REQUIRED', true, true)
+     ON CONFLICT (source_id, external_player_id, effective_date) DO UPDATE SET
+       player_id = EXCLUDED.player_id,
+       requires_identity_review = true,
+       quarantined_from_current_research = true`,
+    [fixturePlayers.unresolvedHr, sourceId, `round-robin-${fixturePlayers.unresolvedHr}`, today],
+  );
+
+  try {
+    const res = await fetch(`${BASE}/api/analyst/market-research?date=${today}&gameId=${testGamePk}`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(
+      body.selectableCandidateCount,
+      body.candidates.filter((candidate) => candidate.selectable).length,
+      "selectableCandidateCount must reflect the shared selection predicate",
+    );
+
+    const candidates = new Map(body.candidates.map((candidate) => [candidate.playerId, candidate]));
+    const expected = [
+      [fixturePlayers.selectableTb, true, null],
+      [fixturePlayers.blockedTb, false, "BLOCKED"],
+      [fixturePlayers.negativeTb, false, "NEGATIVE"],
+      [fixturePlayers.staleXbh, false, "STALE"],
+      [fixturePlayers.incompleteWalk, false, "INCOMPLETE_EVIDENCE"],
+      [fixturePlayers.unresolvedHr, false, "UNRESOLVED_IDENTITY"],
+      [fixturePlayers.selectableXbh, true, null],
+      [fixturePlayers.selectableWalk, true, null],
+      [fixturePlayers.selectableHr, true, null],
+    ];
+
+    for (const [playerId, selectable, selectionBlockReason] of expected) {
+      const candidate = candidates.get(playerId);
+      assert.ok(candidate, `Candidate ${playerId} must remain visible for audit`);
+      assert.equal(candidate.selectable, selectable, `Unexpected selectable state for ${playerId}`);
+      assert.equal(candidate.selectionBlockReason, selectionBlockReason, `Unexpected block reason for ${playerId}`);
+    }
+  } finally {
+    await pool.query(
+      `DELETE FROM player_eligibility
+       WHERE player_id = $1 AND source_id = $2 AND external_player_id = $3 AND effective_date = $4`,
+      [fixturePlayers.unresolvedHr, sourceId, `round-robin-${fixturePlayers.unresolvedHr}`, today],
+    );
+    for (const playerId of Object.values(fixturePlayers)) {
+      await cleanupCandidates(playerId);
+    }
+  }
 });
 
 // Cleanup pool on exit

@@ -22,5 +22,10 @@ export interface MarketResearch {
   prohibitedFields: string[];
   candidates: MarketResearchCandidate[];
   candidateCount: number;
+  /**
+     * Count of returned candidates that meet the shared Round Robin selection predicate.
+     * @minimum 0
+     */
+  selectableCandidateCount: number;
   systemNote: string;
 }

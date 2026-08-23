@@ -1192,6 +1192,21 @@ export type MarketResearchCandidateRecentVsSeasonVsCareer = { [key: string]: unk
 export type MarketResearchCandidateCounterEvidence = { [key: string]: unknown };
 
 /**
+ * The reason this row cannot be selected, when applicable.
+ * @nullable
+ */
+export type MarketResearchCandidateSelectionBlockReason = typeof MarketResearchCandidateSelectionBlockReason[keyof typeof MarketResearchCandidateSelectionBlockReason] | null;
+
+
+export const MarketResearchCandidateSelectionBlockReason = {
+  BLOCKED: 'BLOCKED',
+  NEGATIVE: 'NEGATIVE',
+  STALE: 'STALE',
+  UNRESOLVED_IDENTITY: 'UNRESOLVED_IDENTITY',
+  INCOMPLETE_EVIDENCE: 'INCOMPLETE_EVIDENCE',
+} as const;
+
+/**
  * One research candidate for a player-market-slate_date-game combination.
  * RANK_DONT_GATE: research_rank is ordinal only; it implies no threshold, gate, or probability.
  * Ties share the same integer rank and are never collapsed.
@@ -1220,6 +1235,15 @@ export interface MarketResearchCandidate {
   counterEvidence: MarketResearchCandidateCounterEvidence;
   /** @nullable */
   missingStaleEvidence: string | null;
+  /** Whether the player identity has been resolved for the slate. */
+  identityResolved: boolean;
+  /** Whether this audit row can be added as a Round Robin leg. */
+  selectable: boolean;
+  /**
+     * The reason this row cannot be selected, when applicable.
+     * @nullable
+     */
+  selectionBlockReason: MarketResearchCandidateSelectionBlockReason;
   createdAt: string;
   updatedAt: string;
 }
@@ -1239,6 +1263,11 @@ export interface MarketResearch {
   prohibitedFields: string[];
   candidates: MarketResearchCandidate[];
   candidateCount: number;
+  /**
+     * Count of returned candidates that meet the shared Round Robin selection predicate.
+     * @minimum 0
+     */
+  selectableCandidateCount: number;
   systemNote: string;
 }
 

@@ -182,6 +182,7 @@ export * from './marketResearchCandidateOpportunityEvidence';
 export * from './marketResearchCandidateParkEvidence';
 export * from './marketResearchCandidateRecentVsSeasonVsCareer';
 export * from './marketResearchCandidateResearchState';
+export * from './marketResearchCandidateSelectionBlockReason';
 export * from './marketResearchCandidateStarterMatchupEvidence';
 export * from './modelTrainingResult';
 export * from './modelTrainingResultMarket';

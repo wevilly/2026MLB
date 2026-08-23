@@ -657,6 +657,10 @@ export const GetAnalystMarketResearchQueryParams = zod.object({
   "gameId": zod.coerce.string().optional().describe('Filter to a specific game by game_pk')
 })
 
+export const getAnalystMarketResearchResponseSelectableCandidateCountMin = 0;
+
+
+
 export const GetAnalystMarketResearchResponse = zod.object({
   "date": zod.coerce.date(),
   "market": zod.string().nullable(),
@@ -693,10 +697,14 @@ export const GetAnalystMarketResearchResponse = zod.object({
 
 }).passthrough(),
   "missingStaleEvidence": zod.string().nullable(),
+  "identityResolved": zod.boolean().describe('Whether the player identity has been resolved for the slate.'),
+  "selectable": zod.boolean().describe('Whether this audit row can be added as a Round Robin leg.'),
+  "selectionBlockReason": zod.union([zod.literal('BLOCKED'),zod.literal('NEGATIVE'),zod.literal('STALE'),zod.literal('UNRESOLVED_IDENTITY'),zod.literal('INCOMPLETE_EVIDENCE'),zod.literal(null)]).nullable().describe('The reason this row cannot be selected, when applicable.'),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 }).describe('One research candidate for a player-market-slate_date-game combination.\nRANK_DONT_GATE: research_rank is ordinal only; it implies no threshold, gate, or probability.\nTies share the same integer rank and are never collapsed.\nProhibited fields absent from this schema: ev, clv, odds, impliedProbability, vigJuice,\nedgePercent, kellyFraction, expectedValue.\n')),
   "candidateCount": zod.number().int(),
+  "selectableCandidateCount": zod.number().int().min(getAnalystMarketResearchResponseSelectableCandidateCountMin).describe('Count of returned candidates that meet the shared Round Robin selection predicate.'),
   "systemNote": zod.string()
 }).describe('Market research board for a given date\/market\/game.\nPopulated by Phase 3A–3D engines. Empty until at least one engine has run.\nThe prohibitedFields array documents which analytics are permanently absent from this contract.\n')
 
