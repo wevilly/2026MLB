@@ -38,6 +38,25 @@ function asArray(value: unknown): JsonObject[] {
   return Array.isArray(value) ? value.map(asObject) : [];
 }
 
+/**
+ * Normalise a handedness code to L, R, S, or null.
+ *
+ * Null and the empty string are not interchangeable here. players.throws and
+ * players.bats feed the platoon layer, and an empty string is not null: it
+ * reads as a recorded value, resolveBatterSide returns null for a switch
+ * hitter, isPlatoonDisfavored returns false, and every split metric quietly
+ * falls back to the unsplit season line with nothing reporting it. Park and
+ * weather then sit on top of a platoon layer that is not running.
+ *
+ * Anything absent, blank, or not one of the three MLB codes becomes null, which
+ * is a value the rest of the system can recognise as unknown.
+ */
+export function handednessCode(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const code = String(value).trim().toUpperCase();
+  return code === "L" || code === "R" || code === "S" ? code : null;
+}
+
 function parseDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error("date must use YYYY-MM-DD");
@@ -484,15 +503,30 @@ async function upsertOfficialPlayer(entry: JsonObject, teamId: number, effective
     `INSERT INTO players (player_id, full_name, first_name, last_name, bats, throws, primary_position, birth_date, current_team_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (player_id) DO UPDATE SET full_name = EXCLUDED.full_name, first_name = EXCLUDED.first_name,
-       last_name = EXCLUDED.last_name, bats = EXCLUDED.bats, throws = EXCLUDED.throws,
+       last_name = EXCLUDED.last_name,
+       -- Handedness is preserved when this payload does not carry it. The
+       -- conflict clause used to be unconditional, so any call whose person
+       -- object lacked batSide or pitchHand destroyed a known value. Same guard
+       -- as reliever_profiles.throws in bullpen-foundation.
+       bats = CASE
+         WHEN EXCLUDED.bats IS NOT NULL AND EXCLUDED.bats <> '' THEN EXCLUDED.bats
+         ELSE players.bats
+       END,
+       throws = CASE
+         WHEN EXCLUDED.throws IS NOT NULL AND EXCLUDED.throws <> '' THEN EXCLUDED.throws
+         ELSE players.throws
+       END,
        primary_position = EXCLUDED.primary_position, current_team_id = EXCLUDED.current_team_id, updated_at = now()`,
     [
       playerId,
       String(person.fullName ?? "Unknown player"),
       String(person.firstName ?? ""),
       String(person.lastName ?? ""),
-      String(batSide.code ?? ""),
-      String(pitchHand.code ?? ""),
+      // NULL, not an empty string. An empty string is not null: it reads as a
+      // known handedness downstream and resolves a switch hitter to no side at
+      // all, silently. Unknown has to stay distinguishable.
+      handednessCode(batSide.code),
+      handednessCode(pitchHand.code),
       String(position.abbreviation ?? ""),
       person.birthDate ? String(person.birthDate) : null,
       teamId,
@@ -950,15 +984,26 @@ export async function ingestFantasyPros(requestedDate: string) {
             `INSERT INTO players (player_id, full_name, first_name, last_name, bats, throws, primary_position, birth_date)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              ON CONFLICT (player_id) DO UPDATE SET full_name = EXCLUDED.full_name, first_name = EXCLUDED.first_name,
-               last_name = EXCLUDED.last_name, bats = EXCLUDED.bats, throws = EXCLUDED.throws,
+               last_name = EXCLUDED.last_name,
+               -- Same guard as the official upsert above. The projections
+               -- directory frequently carries no handedness at all, and it must
+               -- not be able to erase what the official feed established.
+               bats = CASE
+                 WHEN EXCLUDED.bats IS NOT NULL AND EXCLUDED.bats <> '' THEN EXCLUDED.bats
+                 ELSE players.bats
+               END,
+               throws = CASE
+                 WHEN EXCLUDED.throws IS NOT NULL AND EXCLUDED.throws <> '' THEN EXCLUDED.throws
+                 ELSE players.throws
+               END,
                primary_position = EXCLUDED.primary_position, birth_date = EXCLUDED.birth_date, updated_at = now()`,
             [
               resolvedPlayerId,
               String(metadata.player_name ?? row.name ?? "Unknown player"),
               String(metadata.first_name ?? ""),
               String(metadata.last_name ?? ""),
-              String(metadata.bat_hand ?? ""),
-              String(metadata.throw_hand ?? ""),
+              handednessCode(metadata.bat_hand),
+              handednessCode(metadata.throw_hand),
               String(metadata.primary_position ?? ""),
               metadata.birthdate ? String(metadata.birthdate) : null,
             ],

@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { test } from "node:test";
+
+/**
+ * The whole analyst route surface as one string.
+ *
+ * These assertions are about the route surface, not about which file holds it.
+ * Task 5.2 split the 2,405-line routes/analyst.ts into domain modules and left
+ * this file reading a path that is now only a mount barrel, so every assertion
+ * against it silently stopped being checked. This test was in no script, so
+ * nothing reported that. Reading the directory keeps the assertions true across
+ * any future re-split.
+ */
+async function analystRoutes() {
+  const dir = "artifacts/api-server/src/routes/analyst";
+  const names = (await readdir(dir)).filter((name) => name.endsWith(".ts"));
+  const modules = await Promise.all(names.map((name) => readFile(`${dir}/${name}`, "utf8")));
+  return [await readFile("artifacts/api-server/src/routes/analyst.ts", "utf8"), ...modules].join("\n");
+}
 
 test("daily orchestration catches up after startup and claims before execution", async () => {
   const source = await readFile("artifacts/api-server/src/services/orchestration.ts", "utf8");
@@ -20,14 +37,18 @@ test("daily orchestration catches up after startup and claims before execution",
 
 test("selected-date readiness and operator controls remain wired through contract and UI", async () => {
   const [routes, spec, app, server, roundRobin] = await Promise.all([
-    readFile("artifacts/api-server/src/routes/analyst.ts", "utf8"),
+    analystRoutes(),
     readFile("lib/api-spec/openapi.yaml", "utf8"),
     readFile("artifacts/mlb-analyst/src/App.tsx", "utf8"),
     readFile("artifacts/api-server/src/app.ts", "utf8"),
     readFile("artifacts/mlb-analyst/src/pages/round-robin-page.tsx", "utf8"),
   ]);
   assert.match(routes, /selectedDate: date/);
-  assert.match(routes, /phase2aReady: officialEmptySlate \|\| phaseTwoReady/);
+  // The slate source moved from the official MLB schedule to FantasyPros, and
+  // the officialEmptySlate concept was removed with it, so phase2aReady now
+  // reads the baseline directly. That was a deliberate change; this assertion
+  // simply never ran to notice it, because the file was in no test script.
+  assert.match(routes, /phase2aReady: baselineReady/);
   assert.match(routes, /readinessDiagnostics/);
   assert.match(routes, /router\.get\("\/analyst\/ai\/operator-session"/);
   assert.match(routes, /operations_operator_approval/);

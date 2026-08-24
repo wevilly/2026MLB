@@ -1848,7 +1848,22 @@ components:
         handednessCoveredPlayers: { type: number }
         parkRequiredVenues: { type: number }
         parkVenueCoverageGaps: { type: number }
-      required: [playerProfiles, pitcherProfiles, arsenalProfiles, parkProfiles, identityQuarantines, insufficientSamples, missingArsenal, missingHandednessSplits, metricDefinitionConflicts, staleWindows, eligibleHitterProfiles, eligiblePitcherProfiles, hitterProfilesMissingEvidence, pitcherProfilesMissingEvidence, noMlbSample, sourceThresholdOrUnavailable, identityOrEligibilityGaps, roleGaps, handednessCoverageScope, handednessIngestStatus, handednessTargetPlayers, handednessCoveredPlayers, parkRequiredVenues, parkVenueCoverageGaps]
+        # Audit S1. The platoon layer reads players.bats for the hitter and
+        # players.throws for the pitcher. Both were being overwritten with an
+        # empty string, which is not null: it reads as a recorded value, so a
+        # switch hitter resolves to no side and every split metric falls back
+        # to the unsplit season line with nothing reporting it. These counters
+        # are how that becomes visible, and they are the population rate the
+        # remediation plan asked for and could not answer from code.
+        handednessPopulationScope: { type: string, enum: [TODAY_LINEUP_HITTERS_AND_SLATE_STARTERS] }
+        lineupHitters: { type: number }
+        lineupHittersMissingBats: { type: number }
+        slateStarters: { type: number }
+        slateStartersMissingThrows: { type: number }
+        playersTotal: { type: number }
+        playersMissingThrows: { type: number }
+        playersMissingBats: { type: number }
+      required: [playerProfiles, pitcherProfiles, arsenalProfiles, parkProfiles, identityQuarantines, insufficientSamples, missingArsenal, missingHandednessSplits, metricDefinitionConflicts, staleWindows, eligibleHitterProfiles, eligiblePitcherProfiles, hitterProfilesMissingEvidence, pitcherProfilesMissingEvidence, noMlbSample, sourceThresholdOrUnavailable, identityOrEligibilityGaps, roleGaps, handednessCoverageScope, handednessIngestStatus, handednessTargetPlayers, handednessCoveredPlayers, parkRequiredVenues, parkVenueCoverageGaps, handednessPopulationScope, lineupHitters, lineupHittersMissingBats, slateStarters, slateStartersMissingThrows, playersTotal, playersMissingThrows, playersMissingBats]
     ResearchMetric:
       type: object
       properties:

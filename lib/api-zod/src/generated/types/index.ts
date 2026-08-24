@@ -257,6 +257,7 @@ export * from './refreshOfficialSettlementParams';
 export * from './researchHealth';
 export * from './researchHealthHandednessCoverageScope';
 export * from './researchHealthHandednessIngestStatus';
+export * from './researchHealthHandednessPopulationScope';
 export * from './researchIdentity';
 export * from './researchIngestResult';
 export * from './researchIngestSource';

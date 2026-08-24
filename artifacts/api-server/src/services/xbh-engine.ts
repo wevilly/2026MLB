@@ -379,6 +379,14 @@ function checkCounterEvidence(
   const counters: string[] = [];
   const side = resolveBatterSide(bats, pitcherThrows);
 
+  // Audit S12. The platoon side could not be resolved, so every split metric
+  // below silently falls back to the unsplit season line. Disclosed as counter
+  // evidence, never in missing_stale_evidence: that field is a blocking gate,
+  // and an unknown handedness is a caveat on the reading, not a veto on the
+  // candidate. Pairs with S1, which is what makes the underlying value
+  // trustworthy in the first place.
+  if (side === null) counters.push("PLATOON_SIDE_UNRESOLVED");
+
   // Soft contact profile → singles/weak outs, not XBH
   const avgEv = n(hitter, "avg_ev");
   if (avgEv !== null && avgEv < WEAK_EV_THRESHOLD) counters.push("WEAK_EXIT_VELOCITY");

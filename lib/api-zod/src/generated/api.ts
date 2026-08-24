@@ -201,7 +201,15 @@ export const GetAnalystDataHealthResponse = zod.object({
   "handednessTargetPlayers": zod.number(),
   "handednessCoveredPlayers": zod.number(),
   "parkRequiredVenues": zod.number(),
-  "parkVenueCoverageGaps": zod.number()
+  "parkVenueCoverageGaps": zod.number(),
+  "handednessPopulationScope": zod.enum(['TODAY_LINEUP_HITTERS_AND_SLATE_STARTERS']),
+  "lineupHitters": zod.number(),
+  "lineupHittersMissingBats": zod.number(),
+  "slateStarters": zod.number(),
+  "slateStartersMissingThrows": zod.number(),
+  "playersTotal": zod.number(),
+  "playersMissingThrows": zod.number(),
+  "playersMissingBats": zod.number()
 }),
   "lastRun": zod.string(),
   "readiness": zod.object({

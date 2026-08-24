@@ -1,8 +1,26 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
+
+/**
+ * The whole analyst route surface as one string.
+ *
+ * These assertions are about the route surface, not about which file happens to
+ * hold it. Task 5.2 split the 2,405-line routes/analyst.ts into domain modules
+ * and left this file reading a path that is now only a mount barrel, so every
+ * assertion below silently stopped being checked. This test was in no script,
+ * so nothing reported it. Reading the directory keeps the assertions true
+ * across any future re-split.
+ */
+const ANALYST_ROUTES = (() => {
+  const dir = new URL("../artifacts/api-server/src/routes/analyst/", import.meta.url);
+  const modules = readdirSync(dir)
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => readFileSync(new URL(name, dir), "utf8"));
+  return [read("artifacts/api-server/src/routes/analyst.ts"), ...modules].join("\n");
+})();
 
 test("BvP foundation is canonical-ID event history with immutable effective-date snapshots", () => {
   const schema = read("lib/db/src/schema/foundation.ts");
@@ -60,7 +78,7 @@ test("market engines and Round Robin expose BvP only as bounded research context
   const roundRobin = read("artifacts/mlb-analyst/src/pages/round-robin-page.tsx");
   assert.ok(roundRobin.includes("BvP ·"));
   assert.ok(roundRobin.includes("arsenal compared"));
-  const route = read("artifacts/api-server/src/routes/analyst.ts");
+  const route = ANALYST_ROUTES;
   assert.ok(route.includes('router.get("/analyst/batter-pitcher"'));
   assert.ok(route.includes("RefreshAnalystBatterPitcherResponse"));
   assert.ok(route.includes("starter_matchup_evidence?.starterPlayerId"), "market BvP must use the starter persisted with candidate evidence");
