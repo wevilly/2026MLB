@@ -984,13 +984,18 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "sharedMechanism": zod.string(),
   "geometry": zod.string().nullable(),
   "runnerUpComparison": zod.string().nullable(),
-  "rejectedAlternatives": zod.array(zod.string())
+  "rejectedAlternatives": zod.array(zod.string()),
+  "bullpenPathComplete": zod.boolean().describe('Whether both legs carry a complete, fresh, distinct projected\n7th\/8th\/9th bullpen path. A ranking input and a disclosure, never a\nveto: an incomplete path no longer removes a candidate from\nselection.\n'),
+  "bullpenCaveat": zod.string().nullable(),
+  "tieBroken": zod.boolean().describe('True when this construction was chosen from an exactly tied set.'),
+  "tiedWith": zod.array(zod.string()).describe('The constructions this one tied with on evidence, before the tiebreak.')
 }),zod.null()]),
   "availabilityStatus": zod.string(),
   "availabilityDetail": zod.string().nullable(),
   "unavailableReason": zod.string().nullable(),
   "noPairCauses": zod.array(zod.string()),
-  "rejectedAlternatives": zod.array(zod.string())
+  "rejectedAlternatives": zod.array(zod.string()),
+  "bullpenDisclosures": zod.array(zod.string()).describe('Bullpen states on this side that are not a complete fresh path.\nStated so the operator sees them; they never remove a candidate\nfrom selection.\n')
 }),
   "home": zod.object({
   "side": zod.enum(['AWAY', 'HOME']),
@@ -1073,13 +1078,18 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "sharedMechanism": zod.string(),
   "geometry": zod.string().nullable(),
   "runnerUpComparison": zod.string().nullable(),
-  "rejectedAlternatives": zod.array(zod.string())
+  "rejectedAlternatives": zod.array(zod.string()),
+  "bullpenPathComplete": zod.boolean().describe('Whether both legs carry a complete, fresh, distinct projected\n7th\/8th\/9th bullpen path. A ranking input and a disclosure, never a\nveto: an incomplete path no longer removes a candidate from\nselection.\n'),
+  "bullpenCaveat": zod.string().nullable(),
+  "tieBroken": zod.boolean().describe('True when this construction was chosen from an exactly tied set.'),
+  "tiedWith": zod.array(zod.string()).describe('The constructions this one tied with on evidence, before the tiebreak.')
 }),zod.null()]),
   "availabilityStatus": zod.string(),
   "availabilityDetail": zod.string().nullable(),
   "unavailableReason": zod.string().nullable(),
   "noPairCauses": zod.array(zod.string()),
-  "rejectedAlternatives": zod.array(zod.string())
+  "rejectedAlternatives": zod.array(zod.string()),
+  "bullpenDisclosures": zod.array(zod.string()).describe('Bullpen states on this side that are not a complete fresh path.\nStated so the operator sees them; they never remove a candidate\nfrom selection.\n')
 }),
   "selectedSide": zod.union([zod.literal('AWAY'),zod.literal('HOME'),zod.literal(null)]).nullable(),
   "selectedConstruction": zod.union([zod.object({
@@ -1157,7 +1167,11 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "sharedMechanism": zod.string(),
   "geometry": zod.string().nullable(),
   "runnerUpComparison": zod.string().nullable(),
-  "rejectedAlternatives": zod.array(zod.string())
+  "rejectedAlternatives": zod.array(zod.string()),
+  "bullpenPathComplete": zod.boolean().describe('Whether both legs carry a complete, fresh, distinct projected\n7th\/8th\/9th bullpen path. A ranking input and a disclosure, never a\nveto: an incomplete path no longer removes a candidate from\nselection.\n'),
+  "bullpenCaveat": zod.string().nullable(),
+  "tieBroken": zod.boolean().describe('True when this construction was chosen from an exactly tied set.'),
+  "tiedWith": zod.array(zod.string()).describe('The constructions this one tied with on evidence, before the tiebreak.')
 }),zod.null()]),
   "comparisonStatus": zod.enum(['SELECTED', 'NO_COMPARISON', 'VALID_TIE']),
   "comparisonReason": zod.string(),

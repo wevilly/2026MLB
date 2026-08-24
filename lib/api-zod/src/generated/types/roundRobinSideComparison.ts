@@ -25,4 +25,10 @@ export interface RoundRobinSideComparison {
   unavailableReason: string | null;
   noPairCauses: string[];
   rejectedAlternatives: string[];
+  /**
+     * Bullpen states on this side that are not a complete fresh path.
+     * Stated so the operator sees them; they never remove a candidate
+     * from selection.
+     */
+  bullpenDisclosures: string[];
 }

@@ -95,6 +95,12 @@ interface BullpenSummary extends BullpenRolePath {
   availableHighLeverage: number;
   avgXSLGAllowed: N;
   metricArmCount: number;
+  /**
+   * Fraction of the projected role path that carried an xslg_allowed research
+   * row. The average is computed over whatever arms have the metric, so the
+   * consumer needs the denominator to know how much of the path it describes.
+   */
+  metricCoverage: number;
 }
 
 interface TBCandidate {
@@ -315,7 +321,13 @@ async function getParkFeatures(venueId: number): Promise<FeatureMap> {
 async function getBullpenSummary(teamId: number, slateDate: string): Promise<BullpenSummary> {
   const path = await getBullpenRolePath(teamId, slateDate);
   if (path.status !== "CURRENT") {
-    return { ...path, availableHighLeverage: path.rolePath.length, avgXSLGAllowed: null, metricArmCount: 0 };
+    return {
+      ...path,
+      availableHighLeverage: path.rolePath.length,
+      avgXSLGAllowed: null,
+      metricArmCount: 0,
+      metricCoverage: 0,
+    };
   }
   const armIds = path.armIds;
 
@@ -340,11 +352,22 @@ async function getBullpenSummary(teamId: number, slateDate: string): Promise<Bul
       [armIds],
     );
     metricArmCount = Number(xslg.rows[0]?.metric_arm_count ?? 0);
-    avgXSLGAllowed = metricArmCount === armIds.length && xslg.rows[0]?.avg_xslg != null
+    // Average over the arms that actually have the metric, and report the
+    // denominator alongside it. Requiring metricArmCount to equal armIds.length
+    // meant one arm missing an xslg_allowed research row discarded the other
+    // two, which is a third-order gap deleting second-order evidence.
+    avgXSLGAllowed = metricArmCount > 0 && xslg.rows[0]?.avg_xslg != null
       ? Number(xslg.rows[0].avg_xslg)
       : null;
   }
-  return { ...path, availableHighLeverage: path.rolePath.length, avgXSLGAllowed, metricArmCount };
+  return {
+    ...path,
+    availableHighLeverage: path.rolePath.length,
+    avgXSLGAllowed,
+    metricArmCount,
+    /** Fraction of the projected role path that carried the metric. */
+    metricCoverage: armIds.length ? metricArmCount / armIds.length : 0,
+  };
 }
 
 // ── Classification logic ──────────────────────────────────────────────────────
@@ -553,6 +576,10 @@ function buildBullpenPathEvidence(c: TBCandidate): object {
     rolePathArmCount: c.bullpen.availableHighLeverage,
     metricArmCount: c.bullpen.metricArmCount,
     metricCoverageComplete: c.bullpen.metricArmCount === c.bullpen.armIds.length,
+    // The denominator behind rolePathAvgXSLGAllowed. The average is taken over
+    // the arms that have the metric, so the consumer is told how much of the
+    // projected path it actually describes.
+    metricCoverage: Number(c.bullpen.metricCoverage.toFixed(4)),
     rolePathAvgXSLGAllowed: c.bullpen.avgXSLGAllowed,
     reliefPathFavorable: c.bullpen.avgXSLGAllowed !== null && c.bullpen.avgXSLGAllowed >= STRONG_RELIEF_XSLG_CEILING,
     note: c.bullpen.reason,
@@ -876,7 +903,9 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
       if (bullpen.status !== "CURRENT") {
         missingData.push(`Bullpen path ${bullpen.status.toLowerCase()}: ${bullpen.reason}`);
       } else if (bullpen.metricArmCount !== bullpen.armIds.length) {
-        missingData.push(`Bullpen role-path xSLG research incomplete (${bullpen.metricArmCount}/${bullpen.armIds.length} arms)`);
+        // Reported as partial coverage, not as absent evidence: the average
+        // over the arms that do have the metric is still used.
+        missingData.push(`Bullpen role-path xSLG research partial (${bullpen.metricArmCount}/${bullpen.armIds.length} arms)`);
       }
 
       const { primary: mechanism, secondary: secondaryMechanism } = classifyMechanism(

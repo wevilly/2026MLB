@@ -2765,7 +2765,22 @@ components:
         geometry: { type: ["string", "null"] }
         runnerUpComparison: { type: ["string", "null"] }
         rejectedAlternatives: { type: array, items: { type: string } }
-      required: [constructionType, constructionLabel, side, legs, stateTotal, rankTotal, evidenceSummary, legCases, sharedMechanism, geometry, runnerUpComparison, rejectedAlternatives]
+        bullpenPathComplete:
+          type: boolean
+          description: |
+            Whether both legs carry a complete, fresh, distinct projected
+            7th/8th/9th bullpen path. A ranking input and a disclosure, never a
+            veto: an incomplete path no longer removes a candidate from
+            selection.
+        bullpenCaveat: { type: ["string", "null"] }
+        tieBroken:
+          type: boolean
+          description: True when this construction was chosen from an exactly tied set.
+        tiedWith:
+          type: array
+          description: The constructions this one tied with on evidence, before the tiebreak.
+          items: { type: string }
+      required: [constructionType, constructionLabel, side, legs, stateTotal, rankTotal, evidenceSummary, legCases, sharedMechanism, geometry, runnerUpComparison, rejectedAlternatives, bullpenPathComplete, bullpenCaveat, tieBroken, tiedWith]
     RoundRobinSideComparison:
       type: object
       properties:
@@ -2782,7 +2797,14 @@ components:
         unavailableReason: { type: ["string", "null"] }
         noPairCauses: { type: array, items: { type: string } }
         rejectedAlternatives: { type: array, items: { type: string } }
-      required: [side, team, evaluatedEligibleHitters, evaluatedIneligibleHitters, consideredConstructionTypes, bestConstruction, availabilityStatus, availabilityDetail, unavailableReason, noPairCauses, rejectedAlternatives]
+        bullpenDisclosures:
+          type: array
+          description: |
+            Bullpen states on this side that are not a complete fresh path.
+            Stated so the operator sees them; they never remove a candidate
+            from selection.
+          items: { type: string }
+      required: [side, team, evaluatedEligibleHitters, evaluatedIneligibleHitters, consideredConstructionTypes, bestConstruction, availabilityStatus, availabilityDetail, unavailableReason, noPairCauses, rejectedAlternatives, bullpenDisclosures]
     RoundRobinGameComparison:
       type: object
       properties:
