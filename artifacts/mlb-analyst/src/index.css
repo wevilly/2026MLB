@@ -816,6 +816,25 @@ button:active:not(:disabled), a:active {
 .round-robin-notice { border-left: 3px solid hsl(28 72% 52%); }
 .round-robin-notice strong, .round-robin-empty strong { color: hsl(var(--foreground)); font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em; }
 .round-robin-notice p, .round-robin-empty p { margin: 3px 0 0; }
+.round-robin-comparisons { overflow: hidden; }
+.round-robin-comparison-list { display: grid; gap: 12px; padding: 0 21px 21px; }
+.round-robin-game-comparison { border: 1px solid hsl(var(--border)); background: hsl(var(--background) / .35); }
+.round-robin-game-comparison > header, .round-robin-side-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 12px; border-bottom: 1px solid hsl(var(--border)); }
+.round-robin-game-comparison h3 { margin: 2px 0 0; color: hsl(var(--foreground)); font-family: var(--font-serif); font-size: 17px; }
+.round-robin-side-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: hsl(var(--border)); }
+.round-robin-side-card { min-width: 0; padding-bottom: 11px; background: hsl(var(--card)); }
+.round-robin-side-card.selected { box-shadow: inset 3px 0 hsl(var(--accent)); }
+.round-robin-side-card > header { padding: 10px 12px; }
+.round-robin-side-card > header strong { display: block; max-width: 250px; color: hsl(var(--foreground)); font-size: 12px; line-height: 1.35; }
+.round-robin-side-count, .round-robin-comparison-summary, .round-robin-comparison-reason { margin: 9px 12px 0; color: hsl(var(--muted-foreground)); font-family: var(--font-mono); font-size: 9px; line-height: 1.5; }
+.round-robin-comparison-legs { display: grid; gap: 7px; margin: 10px 12px 0; padding: 0; list-style: none; }
+.round-robin-comparison-legs li { padding: 9px; border: 1px solid hsl(var(--border)); background: hsl(var(--background) / .45); }
+.round-robin-comparison-legs li > div { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
+.round-robin-comparison-legs li > div strong { color: hsl(var(--foreground)); font-size: 11px; }
+.round-robin-comparison-legs li > div span, .round-robin-comparison-legs p, .round-robin-comparison-legs small { color: hsl(var(--muted-foreground)); font-family: var(--font-mono); font-size: 8px; line-height: 1.5; }
+.round-robin-comparison-legs p { margin: 5px 0 2px; }
+.round-robin-comparison-reason { margin: 0; padding: 10px 12px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--muted) / .28); }
+.round-robin-comparison-reason strong { color: hsl(var(--foreground)); }
 .round-robin-candidates { overflow: hidden; }
 .round-robin-filters { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(130px, .5fr) minmax(150px, .6fr); gap: 8px; padding: 0 21px 18px; }
 .round-robin-filters select, .round-robin-search { min-width: 0; height: 35px; border: 1px solid hsl(var(--border)); background: hsl(var(--input) / .3); color: hsl(var(--foreground)); font-family: var(--font-mono); font-size: 10px; }
@@ -860,6 +879,8 @@ button:active:not(:disabled), a:active {
   .round-robin-filters { grid-template-columns: 1fr; padding-left: 14px; padding-right: 14px; }
   .round-robin-rulebar, .round-robin-tray-body { padding-left: 14px; padding-right: 14px; }
   .round-robin-empty { margin-left: 14px; margin-right: 14px; }
+  .round-robin-comparison-list { padding-left: 14px; padding-right: 14px; }
+  .round-robin-side-grid { grid-template-columns: 1fr; }
   .round-robin-combination-summary { align-items: flex-start; flex-direction: column; }
   .round-robin-combination-summary span { text-align: left; }
 }

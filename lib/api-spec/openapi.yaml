@@ -441,6 +441,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MarketResearch"
+  /analyst/round-robin/comparison:
+    get:
+      operationId: getAnalystRoundRobinComparison
+      tags: [analyst]
+      summary: Compare away and home Round Robin constructions for every game
+      description: |
+        Evaluates both teams' eligible projected or posted hitters before choosing
+        a legal research construction. The comparison is source-backed only and
+        permanently excludes odds, price, EV, CLV, vig, and probabilities.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: board
+          in: query
+          required: true
+          schema: { type: string, enum: [RR1, RR2, RR3, RR4, RR5] }
+      responses:
+        "200":
+          description: Both-team game construction comparison
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoundRobinComparison"
   /analyst/refresh/market-research/tb:
     post:
       operationId: refreshMarketResearchTB
@@ -2513,6 +2538,73 @@ components:
           description: Count of returned candidates that meet the shared Round Robin selection predicate.
         systemNote: { type: string }
       required: [date, market, gameId, rankSemantics, prohibitedFields, candidates, candidateCount, selectableCandidateCount, systemNote]
+    RoundRobinLeg:
+      type: object
+      description: A candidate evaluated in a game-level Round Robin construction. Research fields are audit context, never betting values.
+      properties:
+        candidateId: { type: string }
+        playerId: { type: integer }
+        playerName: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        researchRank: { type: ["integer", "null"] }
+        researchState: { type: string, enum: [STRONG, POSITIVE, NEUTRAL, NEGATIVE, BLOCKED] }
+        lineupState: { type: string, enum: [POSTED, PROJECTED, UNKNOWN] }
+        starterState: { type: string }
+        bvpEvidence: { anyOf: [{ $ref: "#/components/schemas/BatterPitcherEvidence" }, { type: "null" }] }
+        arsenalStatus: { type: string }
+        evidenceFreshness: { type: string, enum: [CURRENT, STALE, INCOMPLETE] }
+        primaryMechanism: { type: ["string", "null"] }
+        opportunityEvidence: { type: object }
+        starterMatchupEvidence: { type: object }
+        bullpenPathEvidence: { type: object }
+        parkEvidence: { type: object }
+        counterEvidence: { type: object }
+        selectable: { type: boolean }
+        selectionBlockReason: { type: ["string", "null"] }
+      required: [candidateId, playerId, playerName, market, researchRank, researchState, lineupState, starterState, bvpEvidence, arsenalStatus, evidenceFreshness, primaryMechanism, opportunityEvidence, starterMatchupEvidence, bullpenPathEvidence, parkEvidence, counterEvidence, selectable, selectionBlockReason]
+    RoundRobinConstruction:
+      type: object
+      properties:
+        constructionType: { type: string, enum: [TB_TB, TB_WALK, XBH_WALK, HR_HR] }
+        constructionLabel: { type: string }
+        side: { type: string, enum: [AWAY, HOME] }
+        legs: { type: array, items: { $ref: "#/components/schemas/RoundRobinLeg" }, minItems: 2, maxItems: 2 }
+        stateTotal: { type: integer }
+        rankTotal: { type: integer }
+        evidenceSummary: { type: string }
+      required: [constructionType, constructionLabel, side, legs, stateTotal, rankTotal, evidenceSummary]
+    RoundRobinSideComparison:
+      type: object
+      properties:
+        side: { type: string, enum: [AWAY, HOME] }
+        team: { type: string }
+        evaluatedEligibleHitters: { type: integer, minimum: 0 }
+        evaluatedIneligibleHitters: { type: integer, minimum: 0 }
+        consideredConstructionTypes:
+          type: array
+          items: { type: string, enum: [TB_TB, TB_WALK, XBH_WALK, HR_HR] }
+        bestConstruction: { anyOf: [{ $ref: "#/components/schemas/RoundRobinConstruction" }, { type: "null" }] }
+        unavailableReason: { type: ["string", "null"] }
+      required: [side, team, evaluatedEligibleHitters, evaluatedIneligibleHitters, consideredConstructionTypes, bestConstruction, unavailableReason]
+    RoundRobinGameComparison:
+      type: object
+      properties:
+        gamePk: { type: integer }
+        away: { $ref: "#/components/schemas/RoundRobinSideComparison" }
+        home: { $ref: "#/components/schemas/RoundRobinSideComparison" }
+        selectedSide: { type: ["string", "null"], enum: [AWAY, HOME, null] }
+        selectedConstruction: { anyOf: [{ $ref: "#/components/schemas/RoundRobinConstruction" }, { type: "null" }] }
+        comparisonReason: { type: string }
+      required: [gamePk, away, home, selectedSide, selectedConstruction, comparisonReason]
+    RoundRobinComparison:
+      type: object
+      description: Both teams are evaluated before a game construction is selected. It contains no odds, prices, EV, CLV, vig, or probabilities.
+      properties:
+        date: { type: string, format: date }
+        board: { type: string, enum: [RR1, RR2, RR3, RR4, RR5] }
+        games: { type: array, items: { $ref: "#/components/schemas/RoundRobinGameComparison" } }
+        prohibitedFields: { type: array, items: { type: string } }
+      required: [date, board, games, prohibitedFields]
     DailyMarketBoardEntry:
       type: object
       additionalProperties: false

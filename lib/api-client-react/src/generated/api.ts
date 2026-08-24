@@ -93,6 +93,7 @@ import type {
   GetAnalystPlayerLabParams,
   GetAnalystPostmortemsParams,
   GetAnalystProjectionsParams,
+  GetAnalystRoundRobinComparisonParams,
   GetAnalystSettlementsParams,
   GetAnalystTodayParams,
   HREngineResult,
@@ -130,6 +131,7 @@ import type {
   ResearchIngestSource,
   ResearchLab,
   ResearchNoteList,
+  RoundRobinComparison,
   SettleOfficialGame400,
   SettlementList,
   SlateExport,
@@ -2021,6 +2023,93 @@ export function useGetAnalystMarketResearch<TData = Awaited<ReturnType<typeof ge
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAnalystMarketResearchQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetAnalystRoundRobinComparisonUrl = (params: GetAnalystRoundRobinComparisonParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/round-robin/comparison?${stringifiedParams}` : `/api/analyst/round-robin/comparison`
+}
+
+/**
+ * Evaluates both teams' eligible projected or posted hitters before choosing
+ * a legal research construction. The comparison is source-backed only and
+ * permanently excludes odds, price, EV, CLV, vig, and probabilities.
+ * @summary Compare away and home Round Robin constructions for every game
+ */
+export const getAnalystRoundRobinComparison = async (params: GetAnalystRoundRobinComparisonParams, options?: Parameters<typeof customFetch>[1]): Promise<RoundRobinComparison> => {
+
+  return customFetch<RoundRobinComparison>(getGetAnalystRoundRobinComparisonUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAnalystRoundRobinComparisonQueryKey = (params?: GetAnalystRoundRobinComparisonParams,) => {
+    return [
+    `/api/analyst/round-robin/comparison`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetAnalystRoundRobinComparisonQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystRoundRobinComparison>>, TError = ErrorType<unknown>>(params: GetAnalystRoundRobinComparisonParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystRoundRobinComparison>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystRoundRobinComparisonQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystRoundRobinComparison>>> = ({ signal }) => getAnalystRoundRobinComparison(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAnalystRoundRobinComparison>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAnalystRoundRobinComparisonQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystRoundRobinComparison>>>
+export type GetAnalystRoundRobinComparisonQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Compare away and home Round Robin constructions for every game
+ */
+
+export function useGetAnalystRoundRobinComparison<TData = Awaited<ReturnType<typeof getAnalystRoundRobinComparison>>, TError = ErrorType<unknown>>(
+ params: GetAnalystRoundRobinComparisonParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystRoundRobinComparison>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAnalystRoundRobinComparisonQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

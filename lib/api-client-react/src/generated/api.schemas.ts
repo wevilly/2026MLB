@@ -1368,6 +1368,188 @@ export interface MarketResearch {
   systemNote: string;
 }
 
+export type RoundRobinLegMarket = typeof RoundRobinLegMarket[keyof typeof RoundRobinLegMarket];
+
+
+export const RoundRobinLegMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type RoundRobinLegResearchState = typeof RoundRobinLegResearchState[keyof typeof RoundRobinLegResearchState];
+
+
+export const RoundRobinLegResearchState = {
+  STRONG: 'STRONG',
+  POSITIVE: 'POSITIVE',
+  NEUTRAL: 'NEUTRAL',
+  NEGATIVE: 'NEGATIVE',
+  BLOCKED: 'BLOCKED',
+} as const;
+
+export type RoundRobinLegLineupState = typeof RoundRobinLegLineupState[keyof typeof RoundRobinLegLineupState];
+
+
+export const RoundRobinLegLineupState = {
+  POSTED: 'POSTED',
+  PROJECTED: 'PROJECTED',
+  UNKNOWN: 'UNKNOWN',
+} as const;
+
+export type RoundRobinLegEvidenceFreshness = typeof RoundRobinLegEvidenceFreshness[keyof typeof RoundRobinLegEvidenceFreshness];
+
+
+export const RoundRobinLegEvidenceFreshness = {
+  CURRENT: 'CURRENT',
+  STALE: 'STALE',
+  INCOMPLETE: 'INCOMPLETE',
+} as const;
+
+export type RoundRobinLegOpportunityEvidence = { [key: string]: unknown };
+
+export type RoundRobinLegStarterMatchupEvidence = { [key: string]: unknown };
+
+export type RoundRobinLegBullpenPathEvidence = { [key: string]: unknown };
+
+export type RoundRobinLegParkEvidence = { [key: string]: unknown };
+
+export type RoundRobinLegCounterEvidence = { [key: string]: unknown };
+
+/**
+ * A candidate evaluated in a game-level Round Robin construction. Research fields are audit context, never betting values.
+ */
+export interface RoundRobinLeg {
+  candidateId: string;
+  playerId: number;
+  playerName: string;
+  market: RoundRobinLegMarket;
+  /** @nullable */
+  researchRank: number | null;
+  researchState: RoundRobinLegResearchState;
+  lineupState: RoundRobinLegLineupState;
+  starterState: string;
+  bvpEvidence: BatterPitcherEvidence | null;
+  arsenalStatus: string;
+  evidenceFreshness: RoundRobinLegEvidenceFreshness;
+  /** @nullable */
+  primaryMechanism: string | null;
+  opportunityEvidence: RoundRobinLegOpportunityEvidence;
+  starterMatchupEvidence: RoundRobinLegStarterMatchupEvidence;
+  bullpenPathEvidence: RoundRobinLegBullpenPathEvidence;
+  parkEvidence: RoundRobinLegParkEvidence;
+  counterEvidence: RoundRobinLegCounterEvidence;
+  selectable: boolean;
+  /** @nullable */
+  selectionBlockReason: string | null;
+}
+
+export type RoundRobinConstructionConstructionType = typeof RoundRobinConstructionConstructionType[keyof typeof RoundRobinConstructionConstructionType];
+
+
+export const RoundRobinConstructionConstructionType = {
+  TB_TB: 'TB_TB',
+  TB_WALK: 'TB_WALK',
+  XBH_WALK: 'XBH_WALK',
+  HR_HR: 'HR_HR',
+} as const;
+
+export type RoundRobinConstructionSide = typeof RoundRobinConstructionSide[keyof typeof RoundRobinConstructionSide];
+
+
+export const RoundRobinConstructionSide = {
+  AWAY: 'AWAY',
+  HOME: 'HOME',
+} as const;
+
+export interface RoundRobinConstruction {
+  constructionType: RoundRobinConstructionConstructionType;
+  constructionLabel: string;
+  side: RoundRobinConstructionSide;
+  /**
+     * @minItems 2
+     * @maxItems 2
+     */
+  legs: RoundRobinLeg[];
+  stateTotal: number;
+  rankTotal: number;
+  evidenceSummary: string;
+}
+
+export type RoundRobinSideComparisonSide = typeof RoundRobinSideComparisonSide[keyof typeof RoundRobinSideComparisonSide];
+
+
+export const RoundRobinSideComparisonSide = {
+  AWAY: 'AWAY',
+  HOME: 'HOME',
+} as const;
+
+export type RoundRobinSideComparisonConsideredConstructionTypesItem = typeof RoundRobinSideComparisonConsideredConstructionTypesItem[keyof typeof RoundRobinSideComparisonConsideredConstructionTypesItem];
+
+
+export const RoundRobinSideComparisonConsideredConstructionTypesItem = {
+  TB_TB: 'TB_TB',
+  TB_WALK: 'TB_WALK',
+  XBH_WALK: 'XBH_WALK',
+  HR_HR: 'HR_HR',
+} as const;
+
+export interface RoundRobinSideComparison {
+  side: RoundRobinSideComparisonSide;
+  team: string;
+  /** @minimum 0 */
+  evaluatedEligibleHitters: number;
+  /** @minimum 0 */
+  evaluatedIneligibleHitters: number;
+  consideredConstructionTypes: RoundRobinSideComparisonConsideredConstructionTypesItem[];
+  bestConstruction: RoundRobinConstruction | null;
+  /** @nullable */
+  unavailableReason: string | null;
+}
+
+/**
+ * @nullable
+ */
+export type RoundRobinGameComparisonSelectedSide = typeof RoundRobinGameComparisonSelectedSide[keyof typeof RoundRobinGameComparisonSelectedSide] | null;
+
+
+export const RoundRobinGameComparisonSelectedSide = {
+  AWAY: 'AWAY',
+  HOME: 'HOME',
+} as const;
+
+export interface RoundRobinGameComparison {
+  gamePk: number;
+  away: RoundRobinSideComparison;
+  home: RoundRobinSideComparison;
+  /** @nullable */
+  selectedSide: RoundRobinGameComparisonSelectedSide;
+  selectedConstruction: RoundRobinConstruction | null;
+  comparisonReason: string;
+}
+
+export type RoundRobinComparisonBoard = typeof RoundRobinComparisonBoard[keyof typeof RoundRobinComparisonBoard];
+
+
+export const RoundRobinComparisonBoard = {
+  RR1: 'RR1',
+  RR2: 'RR2',
+  RR3: 'RR3',
+  RR4: 'RR4',
+  RR5: 'RR5',
+} as const;
+
+/**
+ * Both teams are evaluated before a game construction is selected. It contains no odds, prices, EV, CLV, vig, or probabilities.
+ */
+export interface RoundRobinComparison {
+  date: string;
+  board: RoundRobinComparisonBoard;
+  games: RoundRobinGameComparison[];
+  prohibitedFields: string[];
+}
+
 export type DailyMarketBoardEntryMarket = typeof DailyMarketBoardEntryMarket[keyof typeof DailyMarketBoardEntryMarket];
 
 
@@ -2429,6 +2611,22 @@ export const GetAnalystMarketResearchMarket = {
   XBH: 'XBH',
   WALK: 'WALK',
   HR: 'HR',
+} as const;
+
+export type GetAnalystRoundRobinComparisonParams = {
+date?: string;
+board: GetAnalystRoundRobinComparisonBoard;
+};
+
+export type GetAnalystRoundRobinComparisonBoard = typeof GetAnalystRoundRobinComparisonBoard[keyof typeof GetAnalystRoundRobinComparisonBoard];
+
+
+export const GetAnalystRoundRobinComparisonBoard = {
+  RR1: 'RR1',
+  RR2: 'RR2',
+  RR3: 'RR3',
+  RR4: 'RR4',
+  RR5: 'RR5',
 } as const;
 
 export type RefreshMarketResearchTBParams = {

@@ -14,6 +14,7 @@ import {
   RefreshAnalystResearchResponse,
   GetAnalystBatterPitcherResponse,
   RefreshAnalystBatterPitcherResponse,
+  GetAnalystRoundRobinComparisonResponse,
   RefreshBullpenResponse,
   RefreshMarketResearchTBResponse,
   RefreshMarketResearchXBHResponse,
@@ -68,6 +69,7 @@ import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundation";
 import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFallback, researchHealth } from "../services/research-foundation";
 import { getBatterPitcherEvidence, refreshBatterPitcherSlate, type BvpMarket } from "../services/batter-pitcher-research";
+import { compareRoundRobinGame, type RoundRobinBoardId, type RoundRobinCandidate } from "../services/round-robin-comparison";
 import { getBullpenRoom, refreshBullpen } from "../services/bullpen-foundation";
 import { runTBEngine } from "../services/tb-engine";
 import { runXBHEngine } from "../services/xbh-engine";
@@ -927,6 +929,133 @@ function stripProhibitedKeys(val: unknown): unknown {
   }
   return val;
 }
+
+router.get("/analyst/round-robin/comparison", async (req, res, next) => {
+  try {
+    const date = requestedDate(req.query.date);
+    const board = typeof req.query.board === "string" ? req.query.board.toUpperCase() : "";
+    if (!["RR1", "RR2", "RR3", "RR4", "RR5"].includes(board)) {
+      res.status(400).json({ error: "board must be RR1, RR2, RR3, RR4, or RR5." });
+      return;
+    }
+    const rows = await pool.query<{
+      candidate_id: string; game_pk: number; player_id: number; player_name: string; market: string;
+      research_rank: number | null; research_state: "STRONG" | "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "BLOCKED";
+      primary_mechanism: string | null; opportunity_evidence: Record<string, unknown>; starter_matchup_evidence: Record<string, unknown>;
+      bullpen_path_evidence: Record<string, unknown>; park_evidence: Record<string, unknown>; counter_evidence: Record<string, unknown>;
+      missing_stale_evidence: string | null; identity_resolved: boolean; side: "AWAY" | "HOME"; team: string; lineup_state: "POSTED" | "PROJECTED";
+    }>(
+      `WITH latest_lineup AS (
+         SELECT DISTINCT ON (ls.game_pk, ls.team_id)
+           ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state
+         FROM lineup_snapshots ls
+         JOIN games g ON g.game_pk = ls.game_pk
+         WHERE g.game_date = $1 AND ls.state IN ('POSTED', 'PROJECTED')
+         ORDER BY ls.game_pk, ls.team_id, (ls.state = 'POSTED') DESC, ls.observed_at DESC
+       )
+       SELECT mrc.candidate_id, mrc.game_pk::bigint, mrc.player_id, COALESCE(p.full_name, 'Unknown') AS player_name,
+              mrc.market, mrc.research_rank, mrc.research_state, mrc.primary_mechanism,
+              mrc.opportunity_evidence, mrc.starter_matchup_evidence, mrc.bullpen_path_evidence,
+              mrc.park_evidence, mrc.counter_evidence, mrc.missing_stale_evidence, ll.state AS lineup_state,
+              CASE WHEN ll.team_id = g.away_team_id THEN 'AWAY' ELSE 'HOME' END AS side,
+              CASE WHEN ll.team_id = g.away_team_id THEN away.abbreviation ELSE home.abbreviation END AS team,
+              NOT EXISTS (
+                SELECT 1 FROM player_eligibility pe
+                WHERE pe.player_id = mrc.player_id
+                  AND pe.effective_date = mrc.slate_date
+                  AND pe.requires_identity_review
+              ) AS identity_resolved
+       FROM market_research_candidates mrc
+       JOIN games g ON g.game_pk = mrc.game_pk
+       JOIN teams away ON away.team_id = g.away_team_id
+       JOIN teams home ON home.team_id = g.home_team_id
+       JOIN latest_lineup ll ON ll.game_pk = mrc.game_pk
+       JOIN lineup_entries le ON le.lineup_snapshot_id = ll.lineup_snapshot_id AND le.player_id = mrc.player_id
+       LEFT JOIN players p ON p.player_id = mrc.player_id
+       WHERE mrc.slate_date = $1
+       ORDER BY mrc.game_pk, side, mrc.research_rank ASC NULLS LAST, player_name`,
+      [date],
+    );
+
+    const candidates = await Promise.all(rows.rows.map(async (row) => {
+      const starterId = typeof row.starter_matchup_evidence?.starterPlayerId === "number"
+        ? row.starter_matchup_evidence.starterPlayerId
+        : null;
+      const starterState = typeof row.starter_matchup_evidence?.starterState === "string"
+        ? row.starter_matchup_evidence.starterState
+        : "UNKNOWN";
+      const baseEligibility = getMarketResearchSelectionEligibility({
+        researchState: row.research_state,
+        missingStaleEvidence: row.missing_stale_evidence,
+        identityResolved: row.identity_resolved,
+      });
+      const starterResolved = starterId !== null && !["UNKNOWN", "TBD"].includes(starterState);
+      const selectionBlockReason = !starterResolved
+        ? "BLOCKED"
+        : baseEligibility.selectionBlockReason;
+      const selectable = starterResolved && baseEligibility.selectable;
+      const bvpEvidence = starterId
+        ? await getBatterPitcherEvidence(row.player_id, starterId, date, MARKET_DB_TO_SHORTCODE[row.market] as BvpMarket)
+        : null;
+      const evidenceFreshness = row.missing_stale_evidence
+        ? /\bstale\b/i.test(row.missing_stale_evidence) ? "STALE" : "INCOMPLETE"
+        : "CURRENT";
+      return {
+        candidateId: row.candidate_id,
+        gamePk: Number(row.game_pk),
+        playerId: row.player_id,
+        playerName: row.player_name,
+        market: MARKET_DB_TO_SHORTCODE[row.market] as RoundRobinCandidate["market"],
+        researchRank: row.research_rank,
+        researchState: row.research_state,
+        side: row.side,
+        team: row.team,
+        selectable,
+        selectionBlockReason,
+        lineupState: row.lineup_state,
+        starterState,
+        bvpStatus: bvpEvidence?.status ?? "NOT_FOUND",
+        bvpEvidence,
+        arsenalStatus: bvpEvidence?.arsenal.status ?? "NOT_FOUND",
+        evidenceFreshness,
+        primaryMechanism: row.primary_mechanism,
+        opportunityEvidence: stripProhibitedKeys(row.opportunity_evidence ?? {}) as Record<string, unknown>,
+        starterMatchupEvidence: stripProhibitedKeys(row.starter_matchup_evidence ?? {}) as Record<string, unknown>,
+        bullpenPathEvidence: stripProhibitedKeys(row.bullpen_path_evidence ?? {}) as Record<string, unknown>,
+        parkEvidence: stripProhibitedKeys(row.park_evidence ?? {}) as Record<string, unknown>,
+        counterEvidence: stripProhibitedKeys(row.counter_evidence ?? {}) as Record<string, unknown>,
+      } satisfies RoundRobinCandidate;
+    }));
+
+    const gameMetadata = await pool.query<{ game_pk: number; away: string; home: string }>(
+      `SELECT g.game_pk::bigint, away.abbreviation AS away, home.abbreviation AS home
+       FROM games g JOIN teams away ON away.team_id = g.away_team_id JOIN teams home ON home.team_id = g.home_team_id
+       WHERE g.game_date = $1 ORDER BY g.start_time_utc NULLS LAST`,
+      [date],
+    );
+    const byGame = new Map<number, RoundRobinCandidate[]>();
+    for (const candidate of candidates) {
+      const gameCandidates = byGame.get(candidate.gamePk) ?? [];
+      gameCandidates.push(candidate);
+      byGame.set(candidate.gamePk, gameCandidates);
+    }
+    const games = gameMetadata.rows.map((game) => compareRoundRobinGame(
+      board as RoundRobinBoardId,
+      Number(game.game_pk),
+      game.away,
+      game.home,
+      byGame.get(Number(game.game_pk)) ?? [],
+    ));
+    res.json(GetAnalystRoundRobinComparisonResponse.parse({
+      date,
+      board,
+      games,
+      prohibitedFields: PROHIBITED_FIELDS,
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get("/analyst/market-research", async (req, res, next) => {
   try {

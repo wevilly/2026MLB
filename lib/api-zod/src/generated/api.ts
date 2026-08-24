@@ -810,6 +810,274 @@ export const GetAnalystMarketResearchResponse = zod.object({
 
 
 /**
+ * Evaluates both teams' eligible projected or posted hitters before choosing
+ * a legal research construction. The comparison is source-backed only and
+ * permanently excludes odds, price, EV, CLV, vig, and probabilities.
+ * @summary Compare away and home Round Robin constructions for every game
+ */
+export const GetAnalystRoundRobinComparisonQueryParams = zod.object({
+  "date": zod.date().optional(),
+  "board": zod.enum(['RR1', 'RR2', 'RR3', 'RR4', 'RR5'])
+})
+
+export const getAnalystRoundRobinComparisonResponseGamesItemAwayEvaluatedEligibleHittersMin = 0;
+
+export const getAnalystRoundRobinComparisonResponseGamesItemAwayEvaluatedIneligibleHittersMin = 0;
+
+export const getAnalystRoundRobinComparisonResponseGamesItemAwayBestConstructionOneLegsMin = 2;
+export const getAnalystRoundRobinComparisonResponseGamesItemAwayBestConstructionOneLegsMax = 2;
+
+export const getAnalystRoundRobinComparisonResponseGamesItemHomeEvaluatedEligibleHittersMin = 0;
+
+export const getAnalystRoundRobinComparisonResponseGamesItemHomeEvaluatedIneligibleHittersMin = 0;
+
+export const getAnalystRoundRobinComparisonResponseGamesItemHomeBestConstructionOneLegsMin = 2;
+export const getAnalystRoundRobinComparisonResponseGamesItemHomeBestConstructionOneLegsMax = 2;
+
+export const getAnalystRoundRobinComparisonResponseGamesItemSelectedConstructionOneLegsMin = 2;
+export const getAnalystRoundRobinComparisonResponseGamesItemSelectedConstructionOneLegsMax = 2;
+
+
+
+export const GetAnalystRoundRobinComparisonResponse = zod.object({
+  "date": zod.coerce.date(),
+  "board": zod.enum(['RR1', 'RR2', 'RR3', 'RR4', 'RR5']),
+  "games": zod.array(zod.object({
+  "gamePk": zod.number().int(),
+  "away": zod.object({
+  "side": zod.enum(['AWAY', 'HOME']),
+  "team": zod.string(),
+  "evaluatedEligibleHitters": zod.number().int().min(getAnalystRoundRobinComparisonResponseGamesItemAwayEvaluatedEligibleHittersMin),
+  "evaluatedIneligibleHitters": zod.number().int().min(getAnalystRoundRobinComparisonResponseGamesItemAwayEvaluatedIneligibleHittersMin),
+  "consideredConstructionTypes": zod.array(zod.enum(['TB_TB', 'TB_WALK', 'XBH_WALK', 'HR_HR'])),
+  "bestConstruction": zod.union([zod.object({
+  "constructionType": zod.enum(['TB_TB', 'TB_WALK', 'XBH_WALK', 'HR_HR']),
+  "constructionLabel": zod.string(),
+  "side": zod.enum(['AWAY', 'HOME']),
+  "legs": zod.array(zod.object({
+  "candidateId": zod.string(),
+  "playerId": zod.number().int(),
+  "playerName": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "researchRank": zod.number().int().nullable(),
+  "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
+  "lineupState": zod.enum(['POSTED', 'PROJECTED', 'UNKNOWN']),
+  "starterState": zod.string(),
+  "bvpEvidence": zod.union([zod.object({
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
+  "source": zod.string(),
+  "coverageStatus": zod.string(),
+  "batterId": zod.number().int(),
+  "pitcherId": zod.number().int(),
+  "effectiveTo": zod.coerce.date(),
+  "sampleBand": zod.enum(['ANECDOTE', 'WEAK_CONTEXT', 'SECONDARY_CONTEXT', 'MEANINGFUL_SUPPORT']),
+  "pa": zod.number().int(),
+  "metrics": zod.object({
+  "avg": zod.number().nullable(),
+  "slg": zod.number().nullable(),
+  "xslg": zod.number().nullable(),
+  "xbh": zod.number().int(),
+  "homeRuns": zod.number().int(),
+  "walks": zod.number().int(),
+  "hardHitPercent": zod.number().nullable(),
+  "barrelPercent": zod.number().nullable()
+}),
+  "ageDays": zod.number().int(),
+  "decayWeight": zod.number(),
+  "shrinkageWeight": zod.number(),
+  "marketSignal": zod.number(),
+  "rankAdjustment": zod.number(),
+  "arsenal": zod.object({
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
+  "summary": zod.string(),
+  "weightedXslg": zod.number().nullable(),
+  "pitchTypes": zod.number().int()
+}),
+  "note": zod.string()
+}).describe('Named-pair history is canonical-ID-only and subordinate to current aggregate and arsenal evidence. It never emits odds, probabilities, or recommendations.'),zod.null()]),
+  "arsenalStatus": zod.string(),
+  "evidenceFreshness": zod.enum(['CURRENT', 'STALE', 'INCOMPLETE']),
+  "primaryMechanism": zod.string().nullable(),
+  "opportunityEvidence": zod.object({
+
+}).passthrough(),
+  "starterMatchupEvidence": zod.object({
+
+}).passthrough(),
+  "bullpenPathEvidence": zod.object({
+
+}).passthrough(),
+  "parkEvidence": zod.object({
+
+}).passthrough(),
+  "counterEvidence": zod.object({
+
+}).passthrough(),
+  "selectable": zod.boolean(),
+  "selectionBlockReason": zod.string().nullable()
+}).describe('A candidate evaluated in a game-level Round Robin construction. Research fields are audit context, never betting values.')).min(getAnalystRoundRobinComparisonResponseGamesItemAwayBestConstructionOneLegsMin).max(getAnalystRoundRobinComparisonResponseGamesItemAwayBestConstructionOneLegsMax),
+  "stateTotal": zod.number().int(),
+  "rankTotal": zod.number().int(),
+  "evidenceSummary": zod.string()
+}),zod.null()]),
+  "unavailableReason": zod.string().nullable()
+}),
+  "home": zod.object({
+  "side": zod.enum(['AWAY', 'HOME']),
+  "team": zod.string(),
+  "evaluatedEligibleHitters": zod.number().int().min(getAnalystRoundRobinComparisonResponseGamesItemHomeEvaluatedEligibleHittersMin),
+  "evaluatedIneligibleHitters": zod.number().int().min(getAnalystRoundRobinComparisonResponseGamesItemHomeEvaluatedIneligibleHittersMin),
+  "consideredConstructionTypes": zod.array(zod.enum(['TB_TB', 'TB_WALK', 'XBH_WALK', 'HR_HR'])),
+  "bestConstruction": zod.union([zod.object({
+  "constructionType": zod.enum(['TB_TB', 'TB_WALK', 'XBH_WALK', 'HR_HR']),
+  "constructionLabel": zod.string(),
+  "side": zod.enum(['AWAY', 'HOME']),
+  "legs": zod.array(zod.object({
+  "candidateId": zod.string(),
+  "playerId": zod.number().int(),
+  "playerName": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "researchRank": zod.number().int().nullable(),
+  "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
+  "lineupState": zod.enum(['POSTED', 'PROJECTED', 'UNKNOWN']),
+  "starterState": zod.string(),
+  "bvpEvidence": zod.union([zod.object({
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
+  "source": zod.string(),
+  "coverageStatus": zod.string(),
+  "batterId": zod.number().int(),
+  "pitcherId": zod.number().int(),
+  "effectiveTo": zod.coerce.date(),
+  "sampleBand": zod.enum(['ANECDOTE', 'WEAK_CONTEXT', 'SECONDARY_CONTEXT', 'MEANINGFUL_SUPPORT']),
+  "pa": zod.number().int(),
+  "metrics": zod.object({
+  "avg": zod.number().nullable(),
+  "slg": zod.number().nullable(),
+  "xslg": zod.number().nullable(),
+  "xbh": zod.number().int(),
+  "homeRuns": zod.number().int(),
+  "walks": zod.number().int(),
+  "hardHitPercent": zod.number().nullable(),
+  "barrelPercent": zod.number().nullable()
+}),
+  "ageDays": zod.number().int(),
+  "decayWeight": zod.number(),
+  "shrinkageWeight": zod.number(),
+  "marketSignal": zod.number(),
+  "rankAdjustment": zod.number(),
+  "arsenal": zod.object({
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
+  "summary": zod.string(),
+  "weightedXslg": zod.number().nullable(),
+  "pitchTypes": zod.number().int()
+}),
+  "note": zod.string()
+}).describe('Named-pair history is canonical-ID-only and subordinate to current aggregate and arsenal evidence. It never emits odds, probabilities, or recommendations.'),zod.null()]),
+  "arsenalStatus": zod.string(),
+  "evidenceFreshness": zod.enum(['CURRENT', 'STALE', 'INCOMPLETE']),
+  "primaryMechanism": zod.string().nullable(),
+  "opportunityEvidence": zod.object({
+
+}).passthrough(),
+  "starterMatchupEvidence": zod.object({
+
+}).passthrough(),
+  "bullpenPathEvidence": zod.object({
+
+}).passthrough(),
+  "parkEvidence": zod.object({
+
+}).passthrough(),
+  "counterEvidence": zod.object({
+
+}).passthrough(),
+  "selectable": zod.boolean(),
+  "selectionBlockReason": zod.string().nullable()
+}).describe('A candidate evaluated in a game-level Round Robin construction. Research fields are audit context, never betting values.')).min(getAnalystRoundRobinComparisonResponseGamesItemHomeBestConstructionOneLegsMin).max(getAnalystRoundRobinComparisonResponseGamesItemHomeBestConstructionOneLegsMax),
+  "stateTotal": zod.number().int(),
+  "rankTotal": zod.number().int(),
+  "evidenceSummary": zod.string()
+}),zod.null()]),
+  "unavailableReason": zod.string().nullable()
+}),
+  "selectedSide": zod.union([zod.literal('AWAY'),zod.literal('HOME'),zod.literal(null)]).nullable(),
+  "selectedConstruction": zod.union([zod.object({
+  "constructionType": zod.enum(['TB_TB', 'TB_WALK', 'XBH_WALK', 'HR_HR']),
+  "constructionLabel": zod.string(),
+  "side": zod.enum(['AWAY', 'HOME']),
+  "legs": zod.array(zod.object({
+  "candidateId": zod.string(),
+  "playerId": zod.number().int(),
+  "playerName": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "researchRank": zod.number().int().nullable(),
+  "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
+  "lineupState": zod.enum(['POSTED', 'PROJECTED', 'UNKNOWN']),
+  "starterState": zod.string(),
+  "bvpEvidence": zod.union([zod.object({
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
+  "source": zod.string(),
+  "coverageStatus": zod.string(),
+  "batterId": zod.number().int(),
+  "pitcherId": zod.number().int(),
+  "effectiveTo": zod.coerce.date(),
+  "sampleBand": zod.enum(['ANECDOTE', 'WEAK_CONTEXT', 'SECONDARY_CONTEXT', 'MEANINGFUL_SUPPORT']),
+  "pa": zod.number().int(),
+  "metrics": zod.object({
+  "avg": zod.number().nullable(),
+  "slg": zod.number().nullable(),
+  "xslg": zod.number().nullable(),
+  "xbh": zod.number().int(),
+  "homeRuns": zod.number().int(),
+  "walks": zod.number().int(),
+  "hardHitPercent": zod.number().nullable(),
+  "barrelPercent": zod.number().nullable()
+}),
+  "ageDays": zod.number().int(),
+  "decayWeight": zod.number(),
+  "shrinkageWeight": zod.number(),
+  "marketSignal": zod.number(),
+  "rankAdjustment": zod.number(),
+  "arsenal": zod.object({
+  "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
+  "summary": zod.string(),
+  "weightedXslg": zod.number().nullable(),
+  "pitchTypes": zod.number().int()
+}),
+  "note": zod.string()
+}).describe('Named-pair history is canonical-ID-only and subordinate to current aggregate and arsenal evidence. It never emits odds, probabilities, or recommendations.'),zod.null()]),
+  "arsenalStatus": zod.string(),
+  "evidenceFreshness": zod.enum(['CURRENT', 'STALE', 'INCOMPLETE']),
+  "primaryMechanism": zod.string().nullable(),
+  "opportunityEvidence": zod.object({
+
+}).passthrough(),
+  "starterMatchupEvidence": zod.object({
+
+}).passthrough(),
+  "bullpenPathEvidence": zod.object({
+
+}).passthrough(),
+  "parkEvidence": zod.object({
+
+}).passthrough(),
+  "counterEvidence": zod.object({
+
+}).passthrough(),
+  "selectable": zod.boolean(),
+  "selectionBlockReason": zod.string().nullable()
+}).describe('A candidate evaluated in a game-level Round Robin construction. Research fields are audit context, never betting values.')).min(getAnalystRoundRobinComparisonResponseGamesItemSelectedConstructionOneLegsMin).max(getAnalystRoundRobinComparisonResponseGamesItemSelectedConstructionOneLegsMax),
+  "stateTotal": zod.number().int(),
+  "rankTotal": zod.number().int(),
+  "evidenceSummary": zod.string()
+}),zod.null()]),
+  "comparisonReason": zod.string()
+})),
+  "prohibitedFields": zod.array(zod.string())
+}).describe('Both teams are evaluated before a game construction is selected. It contains no odds, prices, EV, CLV, vig, or probabilities.')
+
+
+/**
  * Executes the Phase 3A Total Bases research engine for all lineup candidates
  * on the given slate date. Writes ranked candidates into the market_research_candidates
  * table via the shared Phase 3 contract.

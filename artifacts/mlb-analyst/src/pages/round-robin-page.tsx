@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   useGetAnalystDataHealth,
   useGetAnalystMarketResearch,
+  useGetAnalystRoundRobinComparison,
   useGetAnalystToday,
   type MarketResearchCandidate,
+  type RoundRobinSideComparison,
 } from '@workspace/api-client-react';
 import { AlertTriangle, CalendarDays, Info, Layers, Plus, RefreshCw, Search, X } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -110,6 +112,46 @@ function createEmptyTrays(): Record<BoardId, MarketResearchCandidate[]> {
   return { rr1: [], rr2: [], rr3: [], rr4: [], rr5: [] };
 }
 
+function evidenceKeys(value: Record<string, unknown>) {
+  const keys = Object.keys(value).slice(0, 3);
+  return keys.length ? keys.map((key) => key.replaceAll(/([A-Z])/g, ' $1').trim()).join(' · ') : 'NOT FOUND';
+}
+
+function SideConstruction({ side, selected }: { side: RoundRobinSideComparison; selected: boolean }) {
+  const construction = side.bestConstruction;
+  return (
+    <article className={selected ? 'round-robin-side-card selected' : 'round-robin-side-card'} data-testid={`round-robin-side-${side.side.toLowerCase()}`}>
+      <header>
+        <div><Kicker>{side.side} · {side.team}</Kicker><strong>{construction?.constructionLabel ?? 'No legal construction'}</strong></div>
+        {selected && <Badge tone="good">Selected</Badge>}
+      </header>
+      <p className="round-robin-side-count">{side.evaluatedEligibleHitters} eligible · {side.evaluatedIneligibleHitters} blocked for safety</p>
+      {!!side.consideredConstructionTypes.length && <p className="round-robin-side-count">Compared: {side.consideredConstructionTypes.map((type) => type.replaceAll('_', ' + ')).join(' · ')}</p>}
+      {construction ? (
+        <>
+          <ol className="round-robin-comparison-legs">
+            {construction.legs.map((leg) => (
+              <li key={leg.candidateId}>
+                <div>
+                  <strong>{leg.playerName}</strong>
+                  <span><Badge tone="accent">{MARKET_LABELS[leg.market as ResearchMarket]}</Badge> <Badge tone={toneFor(leg.researchState)}>{leg.researchState}</Badge> <small>rank {leg.researchRank ?? '—'}</small></span>
+                </div>
+                <p>
+                  {leg.lineupState} lineup · {leg.starterState} starter · BvP {leg.bvpEvidence?.status ?? 'NOT FOUND'} · arsenal {leg.arsenalStatus} · freshness {leg.evidenceFreshness}
+                </p>
+                <small>
+                  Opportunity: {evidenceKeys(leg.opportunityEvidence)} · bullpen: {evidenceKeys(leg.bullpenPathEvidence)} · park: {evidenceKeys(leg.parkEvidence)} · counter: {evidenceKeys(leg.counterEvidence)}
+                </small>
+              </li>
+            ))}
+          </ol>
+          <p className="round-robin-comparison-summary">{construction.evidenceSummary}</p>
+        </>
+      ) : <p className="round-robin-missing">{side.unavailableReason}</p>}
+    </article>
+  );
+}
+
 export default function RoundRobinPage() {
   const [date, setDate] = useState(currentEasternDate);
   const [activeBoardId, setActiveBoardId] = useState<BoardId>('rr1');
@@ -124,6 +166,8 @@ export default function RoundRobinPage() {
   const slateQuery = useGetAnalystToday({ date });
   const healthQuery = useGetAnalystDataHealth();
   const activeBoard = BOARDS.find((board) => board.id === activeBoardId) ?? BOARDS[0];
+  const manualConstructionDisabled = true;
+  const comparisonQuery = useGetAnalystRoundRobinComparison({ date, board: activeBoardId.toUpperCase() as 'RR1' | 'RR2' | 'RR3' | 'RR4' | 'RR5' });
   const candidates = researchQuery.data?.candidates ?? [];
   const games = slateQuery.data?.games ?? [];
   const candidatesById = useMemo(
@@ -131,10 +175,10 @@ export default function RoundRobinPage() {
     [candidates],
   );
   const tray = useMemo(
-    () => trays[activeBoardId]
+    () => manualConstructionDisabled ? [] : trays[activeBoardId]
       .map((leg) => candidatesById.get(leg.candidateId))
       .filter((leg): leg is MarketResearchCandidate => Boolean(leg?.selectable)),
-    [activeBoardId, candidatesById, trays],
+    [activeBoardId, candidatesById, manualConstructionDisabled, trays],
   );
   const selectableCandidateCount = useMemo(
     () => candidates.filter((candidate) => candidate.selectable).length,
@@ -206,6 +250,7 @@ export default function RoundRobinPage() {
   };
 
   const addCandidate = (candidate: MarketResearchCandidate) => {
+    if (manualConstructionDisabled) return;
     const currentCandidate = candidatesById.get(candidate.candidateId);
     if (!currentCandidate?.selectable) return;
     if (tray.some((leg) => leg.playerId === currentCandidate.playerId && leg.market === currentCandidate.market)) return;
@@ -307,6 +352,33 @@ export default function RoundRobinPage() {
             </div>
           )}
 
+          <Panel className="round-robin-comparisons">
+            <SectionHeading eyebrow="Both-team game comparison" title="Best legal construction by side" detail="Both offenses are evaluated before the game slot is selected. Safety-blocked rows remain visible but cannot enter a construction." />
+            {comparisonQuery.isLoading ? <LoadingPanel rows={3} /> : comparisonQuery.isError ? (
+              <QueryMessage kind="error" onRetry={() => comparisonQuery.refetch()} />
+            ) : !comparisonQuery.data?.games.length ? (
+              <div className="round-robin-empty"><Info size={18} /><div><strong>NOT EVALUATED</strong><p>No games are available for this slate date.</p></div></div>
+            ) : (
+              <div className="round-robin-comparison-list" data-testid="round-robin-team-comparisons">
+                {comparisonQuery.data.games.map((game) => (
+                  <article className="round-robin-game-comparison" key={game.gamePk} data-testid={`round-robin-game-comparison-${game.gamePk}`}>
+                    <header>
+                      <div><Kicker>Game {game.gamePk}</Kicker><h3>{game.away.team} @ {game.home.team}</h3></div>
+                      {game.selectedConstruction
+                        ? <Badge tone="good">{game.selectedSide} selected · {game.selectedConstruction.constructionLabel}</Badge>
+                        : <Badge tone="warn">No selected side</Badge>}
+                    </header>
+                    <div className="round-robin-side-grid">
+                      <SideConstruction side={game.away} selected={game.selectedSide === 'AWAY'} />
+                      <SideConstruction side={game.home} selected={game.selectedSide === 'HOME'} />
+                    </div>
+                    <p className="round-robin-comparison-reason"><strong>Comparison:</strong> {game.comparisonReason}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </Panel>
+
           <Panel className="round-robin-candidates">
             <SectionHeading eyebrow="Player research" title="Add a leg" detail="All research stays visible for audit. Only rows with complete, current evidence can be selected." />
             <div className="round-robin-filters">
@@ -375,11 +447,11 @@ export default function RoundRobinPage() {
                             <button
                               className="button button-quiet round-robin-add"
                               onClick={() => addCandidate(candidate)}
-                              disabled={alreadyAdded || !candidate.selectable}
-                              title={selectionBlockLabel ? `Not selectable: ${selectionBlockLabel}` : undefined}
+                               disabled={manualConstructionDisabled || alreadyAdded || !candidate.selectable}
+                               title={manualConstructionDisabled ? 'Read-only board: use the audited two-team comparison above.' : selectionBlockLabel ? `Not selectable: ${selectionBlockLabel}` : undefined}
                               data-testid={`button-add-leg-${candidate.playerId}-${candidate.market}`}
                             >
-                              <Plus size={13} /> {alreadyAdded ? 'Added' : candidate.selectable ? 'Add' : 'Unavailable'}
+                               <Plus size={13} /> {manualConstructionDisabled ? 'Read only' : alreadyAdded ? 'Added' : candidate.selectable ? 'Add' : 'Unavailable'}
                             </button>
                           </td>
                         </tr>
@@ -401,7 +473,9 @@ export default function RoundRobinPage() {
               action={tray.length ? <button className="button button-quiet" onClick={() => updateActiveTray(() => [])} data-testid="button-clear-round-robin">Clear</button> : undefined}
             />
             <div className="round-robin-tray-body">
-              {!tray.length ? (
+              {manualConstructionDisabled ? (
+                <div className="round-robin-tray-empty"><Layers size={21} /><p>Read-only board. The audited two-team constructions above are the only selectable game results.</p></div>
+              ) : !tray.length ? (
                 <div className="round-robin-tray-empty"><Layers size={21} /><p>Add eligible player legs to build combinations.</p></div>
               ) : (
                 <ol className="round-robin-legs">
@@ -423,7 +497,7 @@ export default function RoundRobinPage() {
                 </ol>
               )}
 
-              <div className="round-robin-combinations">
+              {!manualConstructionDisabled && <div className="round-robin-combinations">
                 <Kicker>Combination builder</Kicker>
                 <div className="round-robin-size-selector" role="group" aria-label="Combination size">
                   {([2, 3, 4] as CombinationSize[]).map((size) => (
@@ -451,7 +525,7 @@ export default function RoundRobinPage() {
                 ) : (
                   <p className="round-robin-list-note">Add at least {combinationSize} legs to generate combinations.</p>
                 )}
-              </div>
+              </div>}
             </div>
           </Panel>
         </aside>
