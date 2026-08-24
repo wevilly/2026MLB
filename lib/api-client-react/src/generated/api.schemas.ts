@@ -182,6 +182,13 @@ export const ResearchHealthHandednessIngestStatus = {
   NOT_RUN: 'NOT_RUN',
 } as const;
 
+export type ResearchHealthHandednessPopulationScope = typeof ResearchHealthHandednessPopulationScope[keyof typeof ResearchHealthHandednessPopulationScope];
+
+
+export const ResearchHealthHandednessPopulationScope = {
+  TODAY_LINEUP_HITTERS_AND_SLATE_STARTERS: 'TODAY_LINEUP_HITTERS_AND_SLATE_STARTERS',
+} as const;
+
 export interface ResearchHealth {
   playerProfiles: number;
   pitcherProfiles: number;
@@ -207,6 +214,14 @@ export interface ResearchHealth {
   handednessCoveredPlayers: number;
   parkRequiredVenues: number;
   parkVenueCoverageGaps: number;
+  handednessPopulationScope: ResearchHealthHandednessPopulationScope;
+  lineupHitters: number;
+  lineupHittersMissingBats: number;
+  slateStarters: number;
+  slateStartersMissingThrows: number;
+  playersTotal: number;
+  playersMissingThrows: number;
+  playersMissingBats: number;
 }
 
 export interface DataHealth {

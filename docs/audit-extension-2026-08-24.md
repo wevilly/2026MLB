@@ -441,6 +441,89 @@ the router, it has no ordering hazard and no unreviewed HTTP surface.
 
 ---
 
+## 12. Slate readiness
+
+Found while checking a stale test assertion in `task-50-operations-recovery`,
+which had been in no test script and was still asserting
+`phase2aReady: officialEmptySlate || phaseTwoReady`. Both findings come from
+commit `7b1171a` "Expand data foundation service and refactor analyst routes"
+(Replit Agent, 2026-08-24).
+
+### 12.1 The scheduled slate is single-source FantasyPros — HIGH, DESIGN
+
+The daily orchestration has exactly two required steps:
+
+```
+runRequiredStep(... "fantasypros_ingest",   () => ingestFantasyPros(slateDate))
+runRequiredStep(... "fantasypros_baseline", () => runFantasyProsBaseline(slateDate))
+```
+
+`ingestMlbOfficial` is not among them. `7b1171a` added `persistFantasyProsGames`,
+which writes `games` directly from FantasyPros matchups with a null `venue_id`
+and a null `start_time_utc`, and the slate count behind `phase2aReady` and
+`slateState` is `SELECT count(*) FROM games WHERE game_date = $1`. So the games
+counted for today's slate are, on the scheduled path, FantasyPros rows.
+
+The MLB schedule still reaches `games` by two other routes, neither of which
+builds today's slate: the operator-triggered `POST /analyst/refresh` ingest, and
+`runNightlySettlement`, which refreshes the PRIOR slate from MLB before settling
+it. Official data therefore arrives in time to settle yesterday, not in time to
+define today.
+
+The readiness diagnostics naming FantasyPros are consequently ACCURATE for the
+scheduled path. An earlier reading of this in PR #2 called it a misattribution;
+that reading was wrong and is withdrawn here.
+
+Task 2.7 gave LINEUP ingestion a second source and a real POSTED state, and the
+precedence in `replit.md` — a submitted MLB card outranks a FantasyPros report,
+which outranks a projection — governs which roster is used inside a game that is
+already on the slate. This finding sits one layer above that: which games are on
+the slate at all has no second source and no conflict detection. 2.7's mechanism
+is intact and is not weakened by this; it simply does not reach this layer.
+
+Required change: decide deliberately whether the slate should stay single-source.
+If it should not, add an MLB schedule step to the daily pipeline and give the
+slate the same treatment 2.7 gave lineups, including a precedence rule and
+conflict detection for a game present in one source and absent from the other.
+If it should, state that in `replit.md` as a decision, and record that a
+FantasyPros-derived `games` row carries no venue and no first-pitch time, which
+the park and weather features both depend on.
+
+Severity HIGH: it is the layer every other layer is selected from, and the
+single-source dependency 2.7 existed to remove is still present one level up.
+
+### 12.2 A published off-day is indistinguishable from a failed ingest — MEDIUM
+
+`7b1171a` removed `officialEmptySlate`:
+
+```
+const officialEmptySlate = !slate.rows[0]?.games
+  && mlbSource?.status === "FRESH" && mlbSource.rowCount === 0;
+```
+
+It had let a genuinely empty published slate report READY, with the reason "MLB
+published an official empty slate", rather than BLOCKED. With MLB ingestion out
+of the daily pipeline there is no fresh MLB source badge to evaluate, so the
+concept became unreachable and was removed rather than reimplemented.
+
+The consequence is that on a real off-day the board reports `NO_INGEST_RUN` and
+a CRITICAL "No FantasyPros matchup records are available" issue. That is the
+same output a failed FantasyPros ingest produces on a day with a full schedule.
+The operator cannot tell "there is no baseball today" from "the feed is broken",
+which is the distinction the readiness contract exists to make.
+
+Required change: restore an explicit empty-slate state, sourced from whichever
+schedule authority 12.1 settles on. A source that succeeded and legitimately
+returned zero games is a different fact from a source that failed, and both are
+different from a source that never ran.
+
+Severity MEDIUM: it misreports rather than corrupts, and only on off-days, but
+it is exactly the class of untruth the readiness contract is for. Note that the
+frontend has been presenting the null model layer honestly throughout; this is
+a defect underneath the interface, not in it.
+
+---
+
 ## Summary of scheduled work
 
 | # | Item | Severity | Repeats |
@@ -462,3 +545,5 @@ the router, it has no ordering hazard and no unreviewed HTTP surface.
 | S15 | `assertNoBettingData` on the export boundary | LOW | new |
 | S16 | Cache eviction cost, per-process scope documented | LOW | new |
 | S17 | Audit event filters; derived BvP coverage status; logged rollback failures | LOW | new |
+| S18 | Slate is single-source FantasyPros; no second source or conflict detection one layer above lineups | HIGH | task 2.7 |
+| S19 | No empty-slate state: a published off-day reads as a failed ingest | MEDIUM | new |

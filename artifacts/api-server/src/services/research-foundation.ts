@@ -1169,6 +1169,8 @@ export async function researchHealth(effectiveDate: string) {
     eligible_hitter_profiles: number; eligible_pitcher_profiles: number; hitter_profiles_missing_evidence: number; pitcher_profiles_missing_evidence: number;
      no_mlb_sample: number; source_threshold_or_unavailable: number; identity_or_eligibility_gaps: number; role_gaps: number;
      handedness_target_players: number; handedness_covered_players: number; handedness_ingest_status: string | null; park_required_venues: number; park_venue_coverage_gaps: number;
+     lineup_hitters: number; lineup_hitters_missing_bats: number; slate_starters: number; slate_starters_missing_throws: number;
+     players_total: number; players_missing_throws: number; players_missing_bats: number;
   }>(
     `WITH effective_day AS (
        SELECT $1::date AS effective_date
@@ -1214,6 +1216,26 @@ export async function researchHealth(effectiveDate: string) {
         JOIN park_research_features f ON f.park_research_snapshot_id = ps.park_research_snapshot_id
         WHERE ps.source_id = 'PARK_FACTORS'
         GROUP BY ps.venue_id, ps.park_research_snapshot_id, ps.season, ps.retrieved_at, f.batter_side
+      ),
+      -- Audit S1. The platoon layer reads players.bats for the hitter and
+      -- players.throws for the pitcher. Both were being overwritten with an
+      -- empty string by the player upserts, and an empty string is not null:
+      -- it reads as a recorded value, so resolveBatterSide returns no side and
+      -- every split metric silently falls back to the unsplit season line.
+      -- These are the population counters that make that visible instead.
+      today_lineup_hitters AS (
+        SELECT DISTINCT le.player_id
+        FROM lineup_entries le
+        JOIN lineup_snapshots ls ON ls.lineup_snapshot_id = le.lineup_snapshot_id
+        JOIN games g ON g.game_pk = ls.game_pk
+        WHERE g.game_date = (SELECT effective_date FROM effective_day)
+      ),
+      today_starters AS (
+        SELECT DISTINCT s.player_id
+        FROM starters s
+        JOIN games g ON g.game_pk = s.game_pk
+        WHERE g.game_date = (SELECT effective_date FROM effective_day)
+          AND s.player_id IS NOT NULL
       ),
       latest_park_side AS (
         SELECT DISTINCT ON (venue_id, batter_side) venue_id, batter_side, season, component_count
@@ -1284,7 +1306,21 @@ export async function researchHealth(effectiveDate: string) {
          NOT EXISTS (SELECT 1 FROM latest_park_side p WHERE p.venue_id = v.venue_id AND p.batter_side IS NULL AND p.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int AND p.component_count = 5)
          OR NOT EXISTS (SELECT 1 FROM latest_park_side p WHERE p.venue_id = v.venue_id AND p.batter_side = 'L' AND p.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int AND p.component_count = 5)
          OR NOT EXISTS (SELECT 1 FROM latest_park_side p WHERE p.venue_id = v.venue_id AND p.batter_side = 'R' AND p.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int AND p.component_count = 5)
-       ) AS park_venue_coverage_gaps`,
+       ) AS park_venue_coverage_gaps,
+       -- Audit S1 population counters. Null and '' are counted together
+       -- deliberately: both mean the handedness is not usable, and the whole
+       -- point of the S1 fix is that the second should stop being written.
+       (SELECT count(*)::int FROM today_lineup_hitters) AS lineup_hitters,
+       (SELECT count(*)::int FROM today_lineup_hitters h JOIN players p ON p.player_id = h.player_id
+         WHERE p.bats IS NULL OR btrim(p.bats) = '') AS lineup_hitters_missing_bats,
+       (SELECT count(*)::int FROM today_starters) AS slate_starters,
+       (SELECT count(*)::int FROM today_starters t JOIN players p ON p.player_id = t.player_id
+         WHERE p.throws IS NULL OR btrim(p.throws) = '') AS slate_starters_missing_throws,
+       -- The whole-table rate, which is the number the remediation plan asked
+       -- for and which cannot be answered from code alone.
+       (SELECT count(*)::int FROM players) AS players_total,
+       (SELECT count(*)::int FROM players WHERE throws IS NULL OR btrim(throws) = '') AS players_missing_throws,
+       (SELECT count(*)::int FROM players WHERE bats IS NULL OR btrim(bats) = '') AS players_missing_bats`,
     [effectiveDate],
   );
   const row = result.rows[0];
@@ -1313,5 +1349,13 @@ export async function researchHealth(effectiveDate: string) {
     handednessCoveredPlayers: row?.handedness_covered_players ?? 0,
     parkRequiredVenues: row?.park_required_venues ?? 0,
     parkVenueCoverageGaps: row?.park_venue_coverage_gaps ?? 0,
+    handednessPopulationScope: "TODAY_LINEUP_HITTERS_AND_SLATE_STARTERS",
+    lineupHitters: row?.lineup_hitters ?? 0,
+    lineupHittersMissingBats: row?.lineup_hitters_missing_bats ?? 0,
+    slateStarters: row?.slate_starters ?? 0,
+    slateStartersMissingThrows: row?.slate_starters_missing_throws ?? 0,
+    playersTotal: row?.players_total ?? 0,
+    playersMissingThrows: row?.players_missing_throws ?? 0,
+    playersMissingBats: row?.players_missing_bats ?? 0,
   };
 }

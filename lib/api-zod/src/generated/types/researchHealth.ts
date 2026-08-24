@@ -7,6 +7,7 @@
  */
 import type { ResearchHealthHandednessCoverageScope } from './researchHealthHandednessCoverageScope';
 import type { ResearchHealthHandednessIngestStatus } from './researchHealthHandednessIngestStatus';
+import type { ResearchHealthHandednessPopulationScope } from './researchHealthHandednessPopulationScope';
 
 export interface ResearchHealth {
   playerProfiles: number;
@@ -33,4 +34,12 @@ export interface ResearchHealth {
   handednessCoveredPlayers: number;
   parkRequiredVenues: number;
   parkVenueCoverageGaps: number;
+  handednessPopulationScope: ResearchHealthHandednessPopulationScope;
+  lineupHitters: number;
+  lineupHittersMissingBats: number;
+  slateStarters: number;
+  slateStartersMissingThrows: number;
+  playersTotal: number;
+  playersMissingThrows: number;
+  playersMissingBats: number;
 }

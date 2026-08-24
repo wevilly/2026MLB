@@ -69,7 +69,9 @@ Read this before adding anything.
 | --- | --- |
 | Database schema | `lib/db/src/schema/foundation.ts` |
 | Database policy: triggers, roles, partial indexes | `lib/db/scripts/apply-immutability.mjs` |
-| Migrations drizzle push cannot express | `lib/db/scripts/pre-push-migrations.mjs` |
+| Migrations drizzle push cannot express, or that would make it prompt | `lib/db/scripts/pre-push-migrations.mjs` |
+| Prohibited-betting vocabulary | `artifacts/api-server/src/services/betting-content-guard.ts` |
+| One-off data repair | `lib/db/scripts/backfill-handedness.mjs` |
 | API contract | `lib/api-spec/openapi.yaml` |
 | Generated request/response types and hooks | `lib/api-zod/src/generated`, `lib/api-client-react/src/generated` |
 | Selection eligibility rules | `lib/api-zod/src/market-research-eligibility.ts` |
@@ -159,6 +161,19 @@ The two rows in that table without a trigger are a known gap, not a decision.
   the set of (player, game, market) rows on `daily_market_board` must equal the
   set of non-BLOCKED candidates. The refresh fails loudly rather than leaving a
   stale row.
+- **Today's slate is FantasyPros, not the MLB schedule.** The daily pipeline's
+  only two required steps are `fantasypros_ingest` and `fantasypros_baseline`.
+  `ingestMlbOfficial` is NOT a pipeline step: it runs from the operator refresh
+  route, and inside `runNightlySettlement`, which refreshes the PRIOR slate
+  before settling it. So official data arrives in time to settle yesterday, not
+  to define today, and the `games` rows counted for today's slate come from
+  `persistFantasyProsGames`, with a null `venue_id` and null `start_time_utc`.
+  The readiness diagnostics naming FantasyPros are accurate. Tracked as audit
+  S18, because the slate has no second source and no conflict detection, one
+  layer above where task 2.7 put both for lineups.
+- **There is no empty-slate state.** `officialEmptySlate` was removed in
+  7b1171a, so a genuine published off-day reports `NO_INGEST_RUN` and a CRITICAL
+  issue, which is exactly what a failed feed on a full slate reports. Audit S19.
 - **Lineups have a documented source precedence and conflict detection.** A
   submitted MLB card outranks a FantasyPros report, which outranks a projection.
   Precedence supplies the roster; it never resolves a disagreement. A disputed
@@ -206,6 +221,26 @@ Exactly one ACTIVE model per market, enforced by the partial unique index
 - **Run `pnpm --filter @workspace/db run push`, not `drizzle-kit push` directly.**
   Push alone skips the pre-push migrations and leaves the immutability policy
   unapplied.
+- **`drizzle-kit push` EXITS 0 when it dies on an interactive prompt.** Verified
+  against drizzle-kit 0.31.10: it prints the error, applies nothing, and still
+  reports success, so `set -e` does not catch it and neither does checking the
+  exit status. `scripts/post-merge.sh` matches the log text explicitly for this
+  reason. If push ever appears to succeed while the schema does not move, this
+  is why.
+- **A dropped column and an added column on the same table make push prompt.**
+  That is `promptColumnsConflicts`: push cannot tell a rename from a
+  create-plus-drop and wants a human. There is no human in the postMerge hook,
+  so it aborts the WHOLE diff, including every unrelated additive change in it.
+  Write the change as explicit idempotent DDL in
+  `lib/db/scripts/pre-push-migrations.mjs` instead. Pure additions never prompt.
+- **Handedness is NULL when unknown, never an empty string.** `players.bats` and
+  `players.throws` feed the platoon layer, and an empty string is not null: it
+  reads as a recorded value, `resolveBatterSide` returns null for a switch
+  hitter, and every split metric silently falls back to the unsplit season line.
+  Both player upserts guard on a non-empty excluded value, the same way
+  `reliever_profiles.throws` does. `lib/db/scripts/backfill-handedness.mjs`
+  re-hydrates gaps from the MLB people endpoint and never overwrites a known
+  value.
 - **Advisory lock keys in use**, all `hashtext(key)` unless noted:
   - `orchestration-launch:{date}`
   - `orchestration-execution:{runId}`
@@ -229,7 +264,22 @@ Exactly one ACTIVE model per market, enforced by the partial unique index
 - **Tests ending in `.test.ts` are database-free** and run through
   `tests/helpers/bundle.ts`, which stubs the pool, the artifact storage client
   and the logger. Tests ending in `.test.mjs` need a live database and a running
-  server.
+  server. Exceptions exist: some `.test.mjs` files only read source text.
+- **Every test file must appear in a package script.** Four did not, and two of
+  them had been failing silently since routes/analyst.ts was split.
+  `tests/test-suite-coverage.test.ts` fails if a test file is left out of every
+  script. A test that never runs is worse than no test, because it reads as
+  coverage.
+- **Content from outside the system is fenced before it reaches a prompt.**
+  `runAiAnalystChat` wraps tool output in `UNTRUSTED_TOOL_OUTPUT` markers, and
+  the system prompt states that nothing inside them is an instruction. The
+  markers are stripped from the payload first, so retrieved text cannot close
+  the fence and continue as trusted input.
+- **The prohibited-betting vocabulary lives in one place**,
+  `services/betting-content-guard.ts`. `prohibitedBettingTerm` is for structured
+  keys and identifiers; `prohibitedBettingTermInProse` is for free text written
+  by a person and exempts only "over" and "under", which are ordinary English in
+  a sentence and betting sides in a field name.
 
 ## Known open work
 

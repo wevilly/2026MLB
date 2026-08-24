@@ -495,8 +495,18 @@ function checkCounterEvidence(
   hitterPA: N,
   pitcherBF: N,
   weather: GameWeather | null = null,
+  bats: string | null = null,
+  pitcherThrows: string | null = null,
 ): string[] {
   const counters: string[] = [];
+
+  // Audit S12. The platoon side could not be resolved, so every split metric
+  // resolved for this candidate silently falls back to the unsplit season line.
+  // Disclosed as counter evidence, never in missing_stale_evidence: that field
+  // is a blocking gate, and an unknown handedness is a caveat on the reading,
+  // not a veto on the candidate. Pairs with S1, which is what makes the
+  // underlying value trustworthy in the first place.
+  if (resolveBatterSide(bats, pitcherThrows) === null) counters.push("PLATOON_SIDE_UNRESOLVED");
 
   // Insufficient barrel generation
   const barrelPa = n(hitter, "barrel_pa");
@@ -1146,6 +1156,7 @@ export async function runHREngine(slateDate: string): Promise<HREngineResult> {
       const gameWeather = slateWeather.get(player.gamePk) ?? null;
       const counterEvidence = checkCounterEvidence(
         hitterFeatures, pitcherFeatures, parkFeatures, hitterPA, pitcherBF, gameWeather,
+        player.bats, starter.throws,
       );
       const baseEvidenceScore = computeEvidenceScore(
         hitterFeatures, pitcherFeatures, parkFeatures, bullpen,
