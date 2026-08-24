@@ -117,6 +117,17 @@ function evidenceKeys(value: Record<string, unknown>) {
   return keys.length ? keys.map((key) => key.replaceAll(/([A-Z])/g, ' $1').trim()).join(' · ') : 'NOT FOUND';
 }
 
+function baselineRank(candidate: Pick<MarketResearchCandidate, 'opportunityEvidence'>) {
+  const direct = candidate.opportunityEvidence?.baselineRank;
+  const nested = candidate.opportunityEvidence?.baseline;
+  const value = typeof direct === 'number'
+    ? direct
+    : nested && typeof nested === 'object' && typeof (nested as Record<string, unknown>).baselineRank === 'number'
+      ? (nested as Record<string, unknown>).baselineRank
+      : null;
+  return typeof value === 'number' ? value : null;
+}
+
 function SideConstruction({ side, selected }: { side: RoundRobinSideComparison; selected: boolean }) {
   const construction = side.bestConstruction;
   return (
@@ -134,7 +145,11 @@ function SideConstruction({ side, selected }: { side: RoundRobinSideComparison; 
               <li key={leg.candidateId}>
                 <div>
                   <strong>{leg.playerName}</strong>
-                  <span><Badge tone="accent">{MARKET_LABELS[leg.market as ResearchMarket]}</Badge> <Badge tone={toneFor(leg.researchState)}>{leg.researchState}</Badge> <small>rank {leg.researchRank ?? '—'}</small></span>
+                  <span>
+                    <Badge tone="accent">{MARKET_LABELS[leg.market as ResearchMarket]}</Badge>{' '}
+                    <Badge tone={toneFor(leg.researchState)}>{leg.researchState}</Badge>{' '}
+                    <small>baseline {baselineRank(leg) ?? '—'} · research {leg.researchRank ?? '—'}</small>
+                  </span>
                 </div>
                 <p>
                   {leg.lineupState} lineup · {leg.starterState} starter · BvP {leg.bvpEvidence?.status ?? 'NOT FOUND'} · arsenal {leg.arsenalStatus} · freshness {leg.evidenceFreshness}
@@ -365,7 +380,7 @@ export default function RoundRobinPage() {
           )}
 
           <Panel className="round-robin-comparisons">
-            <SectionHeading eyebrow="Both-team game comparison" title="Best legal construction by side" detail="Both offenses are evaluated before the game slot is selected. Safety-blocked rows remain visible but cannot enter a construction." />
+            <SectionHeading eyebrow="Both-team game comparison" title="Best legal construction by side" detail="Both offenses are evaluated before a side is selected. Baseline ranks remain audit-visible while optional enrichment is incomplete; safety-blocked rows cannot enter a construction." />
             {comparisonQuery.isLoading ? <LoadingPanel rows={3} /> : comparisonQuery.isError ? (
               <QueryMessage kind="error" onRetry={() => comparisonQuery.refetch()} />
             ) : !comparisonQuery.data?.games.length ? (
@@ -385,6 +400,8 @@ export default function RoundRobinPage() {
                       <SideConstruction side={game.home} selected={game.selectedSide === 'HOME'} />
                     </div>
                     <p className="round-robin-comparison-reason"><strong>Comparison:</strong> {game.comparisonReason}</p>
+                    {!!game.evidenceGaps.length && <p className="round-robin-comparison-reason"><strong>Evidence gaps:</strong> {game.evidenceGaps.join(' · ')}</p>}
+                    {!!game.noPairCauses.length && <p className="round-robin-comparison-reason"><strong>Availability causes:</strong> {game.noPairCauses.join(' · ')}</p>}
                   </article>
                 ))}
               </div>
@@ -426,7 +443,7 @@ export default function RoundRobinPage() {
               <div className="table-wrap">
                 <table className="data-table" data-testid="round-robin-candidate-table">
                   <thead>
-                    <tr><th>Player</th><th>Game</th><th>Leg</th><th>Research</th><th>Why / availability</th><th>Named matchup</th><th className="number">Action</th></tr>
+                    <tr><th>Player</th><th>Game</th><th>Leg</th><th>Baseline / research</th><th>Why / availability</th><th>Named matchup</th><th className="number">Action</th></tr>
                   </thead>
                   <tbody>
                     {filteredCandidates.map((candidate) => {
@@ -439,7 +456,13 @@ export default function RoundRobinPage() {
                           <td><strong>{candidate.playerName}</strong></td>
                           <td className="text-xs">{gameLabel(candidate)}</td>
                           <td><Badge tone="accent">{MARKET_LABELS[candidate.market as ResearchMarket]}</Badge></td>
-                          <td><Badge tone={toneFor(candidate.researchState)}>{candidate.researchState}</Badge></td>
+                          <td>
+                            <Badge tone={toneFor(candidate.researchState)}>{candidate.researchState}</Badge>
+                            <small className="round-robin-missing"> baseline {baselineRank(candidate) ?? '—'} · research {candidate.researchRank ?? '—'}</small>
+                            {baselineRank(candidate) !== null && candidate.researchRank !== null && baselineRank(candidate) !== candidate.researchRank && (
+                              <small className="round-robin-missing"> · DISAGREEMENT: optional research changed the ordinal order</small>
+                            )}
+                          </td>
                           <td className="text-xs">
                             <span>{candidate.primaryMechanism?.replaceAll('_', ' ') ?? 'NOT FOUND'}</span>
                             {candidate.missingStaleEvidence && <small className="round-robin-missing"> · {candidate.missingStaleEvidence}</small>}

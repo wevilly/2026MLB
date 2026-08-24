@@ -8,6 +8,7 @@ import { runXBHEngine } from "./xbh-engine";
 import { runWALKEngine } from "./walk-engine";
 import { runHREngine } from "./hr-engine";
 import { runHRRBIEngine } from "./hrrbi-engine";
+import { runFantasyProsBaseline } from "./fantasypros-baseline";
 import { captureSlateSnapshots, correctSnapshot } from "./feature-store";
 import { populateDailyMarketBoard } from "./daily-market-board";
 import { recordAuditEvent } from "./audit";
@@ -25,7 +26,7 @@ export type RunStep = {
 };
 
 const STEP_NAMES = [
-  "mlb_ingest", "fantasypros_ingest", "research_refresh", "bullpen_refresh",
+  "fantasypros_ingest", "fantasypros_baseline", "research_refresh", "bullpen_refresh",
   "tb_engine", "xbh_engine", "walk_engine", "hr_engine", "hrrbi_engine", "market_board",
   "health_check", "feature_snapshot_freeze",
 ] as const;
@@ -33,7 +34,10 @@ const STEP_NAMES = [
 const activeRuns = new Set<string>();
 let schedulerStarted = false;
 
-const QUALIFYING_RUN_STATUSES = ["RUNNING", "COMPLETE", "PARTIAL"] as const;
+// A finished partial run is intentionally retryable: it may contain a valid
+// FantasyPros baseline while optional research was unavailable. Only work that
+// is still executing may block an operator-triggered refresh.
+const QUALIFYING_RUN_STATUSES = ["RUNNING"] as const;
 
 function currentEasternDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -130,6 +134,10 @@ function responseDetail(value: unknown) {
   if (value && typeof value === "object" && "error" in value && (value as { error?: unknown }).error) {
     throw new Error(String((value as { error: unknown }).error));
   }
+  if (value && typeof value === "object") {
+    const summary = JSON.stringify(value);
+    return summary.length > 500 ? `${summary.slice(0, 497)}...` : summary;
+  }
   return "completed";
 }
 
@@ -150,7 +158,7 @@ async function runStep(runId: string, steps: RunStep[], name: string, action: ()
   try {
     const result = await action();
     step.status = warning ? "WARNING" : "SUCCESS";
-    step.detail = warning ? String(result) : responseDetail(result);
+    step.detail = responseDetail(result);
   } catch (error) {
     step.status = "FAILED";
     step.detail = error instanceof Error ? error.message : String(error);
@@ -198,18 +206,22 @@ async function executeRun(runId: string, slateDate: string) {
     : { ...step });
   await persistSteps(runId, steps);
   try {
-    if (!await runRequiredStep(runId, slateDate, steps, "mlb_ingest", () => ingestMlbOfficial(slateDate))) return;
+    if (!await runRequiredStep(runId, slateDate, steps, "fantasypros_ingest", () => ingestFantasyPros(slateDate))) return;
+    if (!await runRequiredStep(runId, slateDate, steps, "fantasypros_baseline", () => runFantasyProsBaseline(slateDate))) return;
     const postIngestStart = await earliestStart(slateDate);
     await pool.query(`UPDATE orchestration_runs SET schedule = schedule || $2::jsonb WHERE run_id = $1`, [runId, JSON.stringify(scheduleFor(slateDate, postIngestStart))]);
-    if (!await runRequiredStep(runId, slateDate, steps, "fantasypros_ingest", () => ingestFantasyPros(slateDate))) return;
-    if (!await runRequiredStep(runId, slateDate, steps, "research_refresh", () => ingestResearch(slateDate))) return;
-    if (!await runRequiredStep(runId, slateDate, steps, "bullpen_refresh", () => refreshBullpen(slateDate))) return;
-    if (!await runRequiredStep(runId, slateDate, steps, "tb_engine", () => runTBEngine(slateDate))) return;
-    if (!await runRequiredStep(runId, slateDate, steps, "xbh_engine", () => runXBHEngine(slateDate))) return;
-    if (!await runRequiredStep(runId, slateDate, steps, "walk_engine", () => runWALKEngine(slateDate))) return;
-    if (!await runRequiredStep(runId, slateDate, steps, "hr_engine", () => runHREngine(slateDate))) return;
-    if (!await runRequiredStep(runId, slateDate, steps, "hrrbi_engine", () => runHRRBIEngine(slateDate))) return;
-    if (!await runRequiredStep(runId, slateDate, steps, "market_board", () => populateDailyMarketBoard(slateDate))) return;
+    // The baseline is a complete, auditable FantasyPros product. Everything
+    // below is optional enrichment and may not erase or delay it. Record any
+    // failure in the ledger, but continue so one unavailable research source
+    // cannot turn a usable projected-lineup slate into a blocked slate.
+    await runStep(runId, steps, "research_refresh", () => ingestResearch(slateDate), true);
+    await runStep(runId, steps, "bullpen_refresh", () => refreshBullpen(slateDate), true);
+    await runStep(runId, steps, "tb_engine", () => runTBEngine(slateDate), true);
+    await runStep(runId, steps, "xbh_engine", () => runXBHEngine(slateDate), true);
+    await runStep(runId, steps, "walk_engine", () => runWALKEngine(slateDate), true);
+    await runStep(runId, steps, "hr_engine", () => runHREngine(slateDate), true);
+    await runStep(runId, steps, "hrrbi_engine", () => runHRRBIEngine(slateDate), true);
+    await runStep(runId, steps, "market_board", () => populateDailyMarketBoard(slateDate), true);
     if (await cancellationRequested(runId)) {
       markPendingSkipped(steps, "Skipped because the run was interrupted");
       await finaliseRun(runId, slateDate, steps, "CANCELLED");

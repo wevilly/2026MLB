@@ -2866,4 +2866,3 @@ export const RefreshBullpenResponse = zod.object({
   "teamsComputed": zod.number().int(),
   "error": zod.string().nullable()
 })
-

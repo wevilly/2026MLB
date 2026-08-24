@@ -122,7 +122,7 @@ test("FantasyPros secrets and authorization headers are absent from client and f
   }
 });
 
-test("current-player eligibility policy declares authoritative states and quarantine flags", () => {
+test("FantasyPros projected-player eligibility keeps identity and quarantine safeguards", () => {
   const schema = readText("lib/db/src/schema/foundation.ts");
   const service = readText("artifacts/api-server/src/services/data-foundation.ts");
   const routes = readText("artifacts/api-server/src/routes/analyst.ts");
@@ -132,13 +132,11 @@ test("current-player eligibility policy declares authoritative states and quaran
   for (const field of ["eligible_today_research", "eligible_lineup_projection", "eligible_pitcher_research", "requires_identity_review", "quarantined_from_current_research"]) {
     assert.ok(schema.includes(field), `missing eligibility field ${field}`);
   }
-  assert.ok(service.includes("no_current_official_roster_observation"));
-  assert.ok(service.includes("missing_authoritative_identity_bridge"));
-  assert.ok(service.includes("MLB_TEAMS_URL"), "official roster coverage must not depend only on slate teams");
-  assert.ok(service.includes("officialPersonFallback"), "bridged players absent from a roster require official person-state verification");
-  assert.ok(service.includes('const status: EligibilityStatus = active ? "UNKNOWN" : "RETIRED"'), "people metadata must not infer major- or minor-league roster membership");
-  assert.ok(service.includes('["UNKNOWN", "MINOR_LEAGUE", "FREE_AGENT"].includes(official.status)'), "non-roster fallback classifications must be revalidated on every refresh");
-  assert.ok(routes.includes("pe.eligible_today_research AND NOT pe.requires_identity_review"));
+  assert.ok(service.includes("missing_fantasypros_to_mlbam_identity_bridge"));
+  assert.ok(service.includes("unmapped_fantasypros_team"));
+  assert.ok(service.includes("fantasyProsProjection: true"));
+  assert.ok(service.includes("FANTASY_PROS_TEAM_IDS"));
+  assert.ok(routes.includes("pe.source_id = 'FANTASYPROS'"));
 });
 
 test("official starters and posted lineups establish canonical current-player coverage", () => {
@@ -159,12 +157,12 @@ test("projected lineup identity gaps block eligibility rather than silently ente
   assert.ok(service.includes("!identity.rowCount || !identity.rows[0].eligible_lineup_projection"));
 });
 
-test("aliases, team disagreements, and snapshot equality remain auditable", () => {
+test("aliases, FantasyPros game mapping, and snapshot equality remain auditable", () => {
   const schema = readText("lib/db/src/schema/foundation.ts");
   const service = readText("artifacts/api-server/src/services/data-foundation.ts");
   assert.ok(schema.includes("player_external_id_aliases"));
   assert.ok(service.includes("DUPLICATE_SOURCE_ID"));
-  assert.ok(service.includes("TEAM_ASSIGNMENT_CONFLICT"));
+  assert.ok(service.includes("FANTASYPROS_GAME_MAPPING_BLOCKING"));
   assert.ok(schema.includes("content_checksum"));
   assert.ok(schema.includes("unchanged_from_prior"));
   assert.ok(service.includes("normalisedChecksum"));

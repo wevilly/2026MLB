@@ -448,9 +448,8 @@ async function analystDataHealth(date: string) {
     ),
   ]);
   const currentDate = currentEasternDate();
-  const phaseTwoSources = sources.filter((source) => !["FanGraphs", "Weather"].includes(source.name));
-  const mlbSource = sources.find((source) => source.name === "MLB Official");
-  const officialEmptySlate = !slate.rows[0]?.games && mlbSource?.status === "FRESH" && mlbSource.rowCount === 0;
+  const fantasyProsSource = sources.find((source) => source.name === "FantasyPros");
+  const baselineReady = Boolean(slate.rows[0]?.games) && Boolean(marketCandidates.rows[0]?.candidates);
   const phaseTwoReady = research.handednessCoverageScope === "FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE"
     && research.handednessIngestStatus === "SUCCESS"
     && research.missingHandednessSplits === 0
@@ -460,29 +459,22 @@ async function analystDataHealth(date: string) {
     && research.hitterProfilesMissingEvidence === 0
     && research.pitcherProfilesMissingEvidence === 0;
   const workflowRun = workflow.rows[0];
-  const bullpenReady = officialEmptySlate || bullpen.rows[0]?.status === "SUCCESS";
-  const marketReady = officialEmptySlate || Boolean(marketCandidates.rows[0]?.candidates);
-  const slateState = officialEmptySlate ? "EMPTY_OFFICIAL_SLATE"
-    : !slate.rows[0]?.games
-      ? mlbSource?.status === "BLOCKED" || mlbSource?.status === "PARTIAL" ? "FAILED_SOURCE" : "NO_INGEST_RUN"
-      : !phaseTwoReady || !bullpenReady || !marketReady ? "MISSING_DOWNSTREAM_STAGE" : "POPULATED";
+  const optionalEnrichmentReady = phaseTwoReady && bullpen.rows[0]?.status === "SUCCESS";
+  const slateState = !slate.rows[0]?.games
+    ? fantasyProsSource?.status === "BLOCKED" || fantasyProsSource?.status === "PARTIAL" ? "FAILED_SOURCE" : "NO_INGEST_RUN"
+    : baselineReady ? "POPULATED" : "MISSING_DOWNSTREAM_STAGE";
   const blockingReasons = [
-    ...(slate.rows[0]?.games || officialEmptySlate ? [] : [`No official MLB schedule records are available for ${date}.`]),
-    ...(phaseTwoReady || officialEmptySlate ? [] : [`Same-day research coverage is incomplete for ${date}.`]),
-    ...(!bullpenReady ? [`Bullpen availability has not completed successfully for ${date}.`] : []),
-    ...(marketReady ? [] : [`No market candidates were produced for ${date}.`]),
+    ...(slate.rows[0]?.games ? [] : [`No FantasyPros matchup records are available for ${date}.`]),
+    ...(marketCandidates.rows[0]?.candidates ? [] : [`No FantasyPros baseline candidates were produced for ${date}.`]),
     ...(coverage.unresolvedActivePlayers || coverage.blockingProjectedLineupIssues
       ? [`${coverage.unresolvedActivePlayers + coverage.blockingProjectedLineupIssues} unresolved or blocking identity record(s) remain.`]
       : []),
-    ...phaseTwoSources.filter((source) => ["BLOCKED", "NOT RUN", "STALE", "NOT CONFIGURED"].includes(source.status))
-      .map((source) => `${source.name} is ${source.status.toLowerCase()} (${source.detail}).`),
     ...(workflowRun && ["FAILED", "CANCELLED"].includes(workflowRun.overall_status)
       ? [`The latest workflow is ${workflowRun.overall_status.toLowerCase()}${workflowRun.error_message ? `: ${workflowRun.error_message}` : "."}`]
       : []),
   ];
   const partialReasons = [
-    ...phaseTwoSources.filter((source) => source.status === "PARTIAL")
-      .map((source) => `${source.name} is partial (${source.detail}).`),
+    ...(optionalEnrichmentReady ? [] : ["Optional enrichment is still running or incomplete; baseline ordinal ranks remain available."]),
     ...(workflowRun && ["RUNNING", "PARTIAL"].includes(workflowRun.overall_status)
       ? [`The latest workflow is ${workflowRun.overall_status.toLowerCase()}; outputs are not operational until it completes.`]
       : []),
@@ -490,8 +482,7 @@ async function analystDataHealth(date: string) {
   const isCurrentDate = date === currentDate;
   const status: OperationalReadiness["status"] = !isCurrentDate
     ? "AUDIT_ONLY"
-    : officialEmptySlate ? "READY"
-      : blockingReasons.length ? "BLOCKED"
+    : blockingReasons.length ? "BLOCKED"
       : partialReasons.length ? "PARTIAL"
         : "READY";
   const reasons = !isCurrentDate
@@ -508,10 +499,8 @@ async function analystDataHealth(date: string) {
     observedAt: new Date().toISOString(),
   };
   const readinessIssues = [
-    ...(slate.rows[0]?.games || officialEmptySlate ? [] : [{ label: "CURRENT SLATE MISSING", detail: `No official MLB schedule records are available for ${date}.`, severity: "CRITICAL" }]),
-    ...(phaseTwoReady || officialEmptySlate ? [] : [{ label: "CURRENT RESEARCH INCOMPLETE", detail: `Same-day research coverage is not complete for ${date}.`, severity: "CRITICAL" }]),
-    ...(bullpenReady ? [] : [{ label: "BULLPEN REFRESH INCOMPLETE", detail: `Bullpen availability is not ready for ${date}.`, severity: "CRITICAL" }]),
-    ...(marketReady ? [] : [{ label: "MARKET STAGE MISSING", detail: `No market candidates were produced for ${date}.`, severity: "CRITICAL" }]),
+    ...(slate.rows[0]?.games ? [] : [{ label: "FANTASYPROS SLATE MISSING", detail: `No FantasyPros matchup records are available for ${date}.`, severity: "CRITICAL" }]),
+    ...(marketCandidates.rows[0]?.candidates ? [] : [{ label: "BASELINE STAGE MISSING", detail: `No FantasyPros baseline candidates were produced for ${date}.`, severity: "CRITICAL" }]),
     ...(coverage.unresolvedActivePlayers || coverage.blockingProjectedLineupIssues
       ? [{ label: "CURRENT IDENTITY UNRESOLVED", detail: `${coverage.unresolvedActivePlayers + coverage.blockingProjectedLineupIssues} active identity record(s) are unresolved or blocking.`, severity: "CRITICAL" }]
       : []),
@@ -524,12 +513,11 @@ async function analystDataHealth(date: string) {
     timezone: "America/New_York",
     slateState,
     overall: readiness.status,
-    phase2aReady: officialEmptySlate || phaseTwoReady,
+    phase2aReady: baselineReady,
     readinessDiagnostics: [
-      { code: "OFFICIAL_SCHEDULE", label: "Official MLB schedule", status: officialEmptySlate || slate.rows[0]?.games ? "READY" : "BLOCKED", detail: officialEmptySlate ? `MLB published an official empty slate for ${date}.` : slate.rows[0]?.games ? `${slate.rows[0].games} official game(s) are available for ${date}.` : `No official MLB schedule records are available for ${date}.` },
-      { code: "RESEARCH", label: "Current-date research", status: officialEmptySlate || phaseTwoReady ? "READY" : "BLOCKED", detail: officialEmptySlate ? "Not required because MLB published an official empty slate." : phaseTwoReady ? "Required handedness and park coverage is complete." : `Research is incomplete for ${date}; inspect the named source rows.` },
-      { code: "BULLPEN", label: "Bullpen availability", status: bullpenReady ? "READY" : "BLOCKED", detail: officialEmptySlate ? "Not required because MLB published an official empty slate." : bullpenReady ? "Current-date bullpen availability was refreshed." : `Bullpen refresh has not completed successfully for ${date}.` },
-      { code: "MARKET_CANDIDATES", label: "Market research stage", status: marketReady ? "READY" : "BLOCKED", detail: officialEmptySlate ? "Not required because MLB published an official empty slate." : marketReady ? `${marketCandidates.rows[0]?.candidates ?? 0} current-date candidate(s) are available.` : `No market candidates were produced for ${date}.` },
+      { code: "FANTASYPROS_SLATE", label: "FantasyPros projected slate", status: slate.rows[0]?.games ? "READY" : "BLOCKED", detail: slate.rows[0]?.games ? `${slate.rows[0].games} FantasyPros game(s) are available for ${date}.` : `No FantasyPros matchup records are available for ${date}.` },
+      { code: "BASELINE", label: "FantasyPros baseline ranks", status: baselineReady ? "READY" : "BLOCKED", detail: baselineReady ? `${marketCandidates.rows[0]?.candidates ?? 0} independent market baseline candidate(s) are available.` : `No baseline candidates were produced for ${date}.` },
+      { code: "OPTIONAL_RESEARCH", label: "Optional research enrichment", status: optionalEnrichmentReady ? "READY" : "BLOCKED", detail: optionalEnrichmentReady ? "Current role paths and research coverage are available." : "Enrichment remains non-blocking and is still incomplete." },
     ],
     readiness,
     sources,
@@ -591,15 +579,15 @@ router.get("/analyst/today", async (req, res, next) => {
       awayStarter: { name: game.away_starter ?? "TBD", hand: game.away_hand || "NOT FOUND", state: game.away_state ?? "TBD", note: "" },
       homeStarter: { name: game.home_starter ?? "TBD", hand: game.home_hand || "NOT FOUND", state: game.home_state ?? "TBD", note: "" },
       lineupState: game.posted_lineup_teams === 2 ? "POSTED" : game.projected_lineup_teams > 0 ? "PROJECTED" : "UNKNOWN",
-      state: health.readiness.usable && game.posted_lineup_teams === 2 && game.away_state === "CONFIRMED" && game.home_state === "CONFIRMED"
+      state: health.readiness.usable && game.projected_lineup_teams === 2 && game.away_state !== "TBD" && game.home_state !== "TBD"
         ? "READY"
         : health.readiness.status === "BLOCKED" || health.readiness.status === "AUDIT_ONLY" ? "BLOCKED" : "PARTIAL",
       flag: !health.readiness.usable
         ? health.readiness.reason
-        : game.posted_lineup_teams === 2
-        ? "Official posted lineups persisted"
+        : game.projected_lineup_teams === 2
+        ? "FantasyPros projected lineups persisted"
         : game.projected_lineup_teams > 0
-          ? "FantasyPros projected lineup evidence"
+          ? "FantasyPros lineup evidence is incomplete"
           : "No lineup evidence found",
     }));
     const today = {
@@ -612,7 +600,7 @@ router.get("/analyst/today", async (req, res, next) => {
       alerts: [
         "Pre-model slate status uses READY, PARTIAL, and BLOCKED only.",
         "No forecast, price, odds, implied probability, EV, or CLV data is used in this workflow.",
-        games.length ? "Official schedule and starter observations are persisted." : "No official schedule records have been ingested for this date.",
+        games.length ? "FantasyPros projected matchups, lineups, and starter observations are persisted." : "No FantasyPros projected slate has been ingested for this date.",
         health.identityCoverage.blockingProjectedLineupIssues
           ? `${health.identityCoverage.blockingProjectedLineupIssues} projected-lineup identity issue(s) are blocking research eligibility.`
           : "Projected lineup identities have no current blocking issue.",
@@ -785,7 +773,7 @@ router.get("/analyst/game-lab", async (req, res, next) => {
       homeStarter: { name: game.home_starter ?? "TBD", hand: game.home_hand ?? "NOT FOUND", state: game.home_state ?? "TBD", note: "" },
       lineupState: game.posted_lineup_teams === 2 ? "POSTED" : game.projected_lineup_teams ? "PROJECTED" : "UNKNOWN",
       state: game.posted_lineup_teams === 2 && game.away_state === "CONFIRMED" && game.home_state === "CONFIRMED" ? "READY" : "PARTIAL" as const,
-      flag: game.posted_lineup_teams === 2 ? "Official posted lineups persisted" : "Research context only — no matchup score",
+      flag: game.projected_lineup_teams === 2 ? "FantasyPros projected lineups persisted" : "Research context only — no matchup score",
     }));
     const selectedIndex = req.query.gameId ? games.rows.findIndex((game) => game.game_pk === Number(req.query.gameId)) : (games.rows.length ? 0 : -1);
     const selected = selectedIndex >= 0 ? responseGames[selectedIndex] : null;
@@ -950,7 +938,12 @@ router.get("/analyst/audit-events", async (req, res, next) => {
 
 router.post("/analyst/refresh/mlb", async (req, res, next) => {
   try {
-    res.status(201).json(await ingestMlbOfficial(requestedDate(req.query.date)));
+    const date = requestedDate(req.query.date);
+    if (date >= currentEasternDate()) {
+      res.status(409).json({ error: "MLB Official ingestion is reserved for postgame settlement and final-state history; use FantasyPros for pregame refreshes." });
+      return;
+    }
+    res.status(201).json(await ingestMlbOfficial(date));
   } catch (error) {
     next(error);
   }
@@ -1093,6 +1086,7 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
               NOT EXISTS (
                 SELECT 1 FROM player_eligibility pe
                 WHERE pe.player_id = mrc.player_id
+                  AND pe.source_id = 'FANTASYPROS'
                   AND pe.effective_date = mrc.slate_date
                   AND pe.requires_identity_review
               ) AS identity_resolved
@@ -1158,7 +1152,7 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
         bullpenPathEvidence: stripProhibitedKeys(row.bullpen_path_evidence ?? {}) as Record<string, unknown>,
         parkEvidence: stripProhibitedKeys(row.park_evidence ?? {}) as Record<string, unknown>,
         counterEvidence: stripProhibitedKeys(row.counter_evidence ?? {}) as Record<string, unknown>,
-        sourceLineage: { lineupSource: row.lineup_source, lineupState: row.lineup_state, starterSource: "MLB_OFFICIAL" },
+        sourceLineage: { lineupSource: row.lineup_source, lineupState: row.lineup_state, starterSource: "FANTASYPROS" },
         sampleDenominators: {
           starter: (row.starter_matchup_evidence ?? {}).sampleSize ?? null,
           bullpen: (row.bullpen_path_evidence ?? {}).sampleSize ?? null,
@@ -1227,7 +1221,7 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
       {
         lineupState: `${game.away_lineup_state ?? "UNKNOWN"},${game.home_lineup_state ?? "UNKNOWN"}`,
         lineupSource: `${game.away_lineup_source ?? "MISSING"},${game.home_lineup_source ?? "MISSING"}`,
-        starterState: "MLB_OFFICIAL_CONTEXT",
+        starterState: "FANTASYPROS_PROJECTED_CONTEXT",
         evidenceGaps: [
           !game.away_lineup_state || !game.home_lineup_state ? "Missing selected lineup snapshot for one or both teams" : null,
           !operationallyUsable ? (health.readiness.reason ?? "Research readiness is unavailable") : null,
@@ -1317,6 +1311,7 @@ router.get("/analyst/market-research", async (req, res, next) => {
                 SELECT 1
                 FROM player_eligibility pe
                 WHERE pe.player_id = mrc.player_id
+                  AND pe.source_id = 'FANTASYPROS'
                   AND pe.effective_date = mrc.slate_date
                   AND pe.requires_identity_review
               ) AS identity_resolved,

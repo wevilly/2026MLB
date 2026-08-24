@@ -196,9 +196,21 @@ function pair(
       ? "No stale evidence flag."
       : `${leg.evidenceFreshness} evidence: ${leg.selectionBlockReason ?? "review required"}.`,
   }));
-  const geometry = constructionType === "TB_TB" || constructionType === "XBH_H_R_RBI" || constructionType === "XBH_WALK"
-    ? "Same-team lineup geometry; two distinct player IDs."
+  const [firstLeg, secondLeg] = legs;
+  const firstOrder = typeof firstLeg.opportunityEvidence.battingOrder === "number"
+    ? firstLeg.opportunityEvidence.battingOrder
     : null;
+  const secondOrder = typeof secondLeg.opportunityEvidence.battingOrder === "number"
+    ? secondLeg.opportunityEvidence.battingOrder
+    : null;
+  const orderText = firstOrder && secondOrder ? ` projected batting order ${firstOrder} + ${secondOrder}` : "";
+  const geometry = constructionType === "TB_TB"
+    ? `Two distinct 2+ TB hitters from the same offense; no repeated player.${orderText}`
+    : constructionType === "TB_WALK"
+      ? `Distinct 2+ TB and walk legs from the same offense; lineup opportunity is kept separate.${orderText}`
+      : constructionType === "XBH_H_R_RBI"
+        ? `Distinct XBH and H+R+RBI legs from the same offense; the production path is not counted twice.${orderText}`
+        : `Distinct XBH and walk legs from the same offense; contact and patience paths remain separate.${orderText}`;
   return {
     constructionType,
     constructionLabel,

@@ -133,6 +133,130 @@ async function upsertTeam(team: JsonObject) {
   return true;
 }
 
+// FantasyPros supplies team abbreviations but not the MLB schedule record that
+// previously created the local team rows. This fixed directory is a key map,
+// not a live MLB pregame lookup: FantasyPros remains the source of the date,
+// matchup, lineup, and starter state.
+const FANTASY_PROS_TEAM_IDS: Record<string, number> = {
+  ARI: 109, ATL: 144, BAL: 110, BOS: 111, CHC: 112, CWS: 145, CIN: 113,
+  CLE: 114, COL: 115, DET: 116, HOU: 117, KC: 118, LAA: 108, LAD: 119,
+  MIA: 146, MIL: 158, MIN: 142, NYM: 121, NYY: 147, ATH: 133, OAK: 133,
+  PHI: 143, PIT: 134, SD: 135, SEA: 136, SF: 137, STL: 138, TB: 139,
+  TEX: 140, TOR: 141, WSH: 120,
+};
+
+function fantasyProsTeamId(abbreviation: string) {
+  return FANTASY_PROS_TEAM_IDS[abbreviation.toUpperCase()] ?? null;
+}
+
+async function upsertFantasyProsTeam(abbreviation: string) {
+  const teamId = fantasyProsTeamId(abbreviation);
+  if (!teamId) return null;
+  await pool.query(
+    `INSERT INTO teams (team_id, abbreviation, name, active)
+     VALUES ($1, $2, $3, true)
+     ON CONFLICT (team_id) DO UPDATE SET abbreviation = EXCLUDED.abbreviation,
+       name = EXCLUDED.name, active = true, updated_at = now()`,
+    [teamId, abbreviation, abbreviation],
+  );
+  return teamId;
+}
+
+function fantasyProsGameTeams(game: JsonObject) {
+  const teams = Object.keys(asObject(game.teams)).filter((team) => Boolean(fantasyProsTeamId(team)));
+  const explicitAway = String(game.away_team ?? game.away ?? "").toUpperCase();
+  const explicitHome = String(game.home_team ?? game.home ?? "").toUpperCase();
+  if (fantasyProsTeamId(explicitAway) && fantasyProsTeamId(explicitHome) && explicitAway !== explicitHome) {
+    return { away: explicitAway, home: explicitHome };
+  }
+  // Some lineups responses only list the two clubs. Side orientation is not a
+  // research signal, but a stable order lets the same-team boards render both
+  // sides without asking MLB to fill in a pregame schedule.
+  const [away, home] = teams.sort();
+  return away && home ? { away, home } : null;
+}
+
+async function persistFantasyProsGames(
+  ingestRunId: string,
+  effectiveDate: string,
+  payload: JsonObject,
+) {
+  let games = 0;
+  for (const rawGame of asArray(payload.games)) {
+    const game = asObject(rawGame);
+    const gamePk = Number(game.game_id);
+    const sides = fantasyProsGameTeams(game);
+    if (!Number.isSafeInteger(gamePk) || gamePk <= 0 || !sides) {
+      await recordIssue(
+        FANTASY_PROS_SOURCE,
+        ingestRunId,
+        "FANTASYPROS_GAME_MAPPING_BLOCKING",
+        "BLOCKING",
+        "FantasyPros matchup has no usable game ID or two mapped team abbreviations.",
+      );
+      continue;
+    }
+    const [awayTeamId, homeTeamId] = await Promise.all([
+      upsertFantasyProsTeam(sides.away),
+      upsertFantasyProsTeam(sides.home),
+    ]);
+    if (!awayTeamId || !homeTeamId || awayTeamId === homeTeamId) continue;
+    await pool.query(
+      `INSERT INTO games
+         (game_pk, game_date, start_time_utc, away_team_id, home_team_id, game_status, game_type, doubleheader_code)
+       VALUES ($1, $2, NULL, $3, $4, $5, 'R', '')
+       ON CONFLICT (game_pk) DO UPDATE SET game_date = EXCLUDED.game_date,
+         away_team_id = EXCLUDED.away_team_id, home_team_id = EXCLUDED.home_team_id,
+         game_status = EXCLUDED.game_status, updated_at = now()`,
+      [gamePk, effectiveDate, awayTeamId, homeTeamId, String(game.status ?? "SCHEDULED")],
+    );
+    games += 1;
+  }
+  return games;
+}
+
+async function persistFantasyProsStarters(
+  ingestRunId: string,
+  effectiveDate: string,
+  payload: JsonObject,
+) {
+  let starters = 0;
+  for (const rawGame of asArray(payload.games)) {
+    const game = asObject(rawGame);
+    const gamePk = Number(game.game_id);
+    if (!Number.isSafeInteger(gamePk) || gamePk <= 0) continue;
+    for (const [abbreviation, rawPitcher] of Object.entries(asObject(game.pitchers))) {
+      const teamId = fantasyProsTeamId(abbreviation);
+      const pitcher = asObject(rawPitcher);
+      const externalId = String(pitcher.player_id ?? "");
+      if (!teamId || !externalId) continue;
+      const identity = await pool.query<{ player_id: number }>(
+        `SELECT player_id FROM player_external_ids
+         WHERE source_id = $1 AND external_player_id = $2 AND valid_to IS NULL
+         UNION ALL
+         SELECT player_id FROM player_external_id_aliases
+         WHERE source_id = $1 AND external_player_id = $2
+         LIMIT 1`,
+        [FANTASY_PROS_SOURCE, externalId],
+      );
+      const raw = { ...pitcher, fantasyProsGameId: game.game_id, team: abbreviation };
+      const existing = await pool.query(
+        `SELECT 1 FROM starters WHERE game_pk = $1 AND team_id = $2 AND source_id = $3
+           AND raw->>'checksum' = $4 LIMIT 1`,
+        [gamePk, teamId, FANTASY_PROS_SOURCE, String(checksum(raw))],
+      );
+      if (existing.rowCount) continue;
+      await pool.query(
+        `INSERT INTO starters (game_pk, team_id, player_id, starter_state, source_id, observed_at, raw)
+         VALUES ($1, $2, $3, 'PROBABLE', $4, now(), $5)`,
+        [gamePk, teamId, identity.rows[0]?.player_id ?? null, FANTASY_PROS_SOURCE, { ...raw, checksum: checksum(raw), effectiveDate }],
+      );
+      starters += 1;
+    }
+  }
+  return starters;
+}
+
 async function upsertStarter(
   person: JsonObject,
   teamId: number,
@@ -312,16 +436,14 @@ async function projectionEligibility(
   playerId: number | null,
   confidence: "CONFIRMED" | "HIGH_CONFIDENCE" | "REVIEW_REQUIRED",
 ) {
-  let official = playerId ? await officialEligibilityForPlayer(playerId, effectiveDate) : null;
-  if (
-    playerId
-    && (!official || ["UNKNOWN", "MINOR_LEAGUE", "FREE_AGENT"].includes(official.status))
-  ) {
-    official = await officialPersonFallback(playerId, effectiveDate);
-  }
-  const status: EligibilityStatus = official?.status ?? "UNKNOWN";
-  const requiresIdentityReview = !playerId || !official;
-  const reason = !playerId ? "missing_authoritative_identity_bridge" : !official ? "no_current_official_roster_observation" : null;
+  const teamId = await upsertFantasyProsTeam(sourceTeamAbbreviation);
+  const status: EligibilityStatus = playerId && teamId ? "MLB_ACTIVE" : "UNKNOWN";
+  const requiresIdentityReview = !playerId;
+  const reason = !playerId
+    ? "missing_fantasypros_to_mlbam_identity_bridge"
+    : !teamId
+      ? "unmapped_fantasypros_team"
+      : null;
   const flags = await upsertEligibility({
     playerId,
     sourceId: FANTASY_PROS_SOURCE,
@@ -329,10 +451,10 @@ async function projectionEligibility(
     sourceDisplayName: rawName,
     status,
     effectiveDate,
-    currentTeamId: official?.current_team_id ?? null,
+    currentTeamId: teamId,
     sourceTeamAbbreviation,
     evidence: {
-      authoritativeRoster: official ? { status: official.status, team: official.abbreviation } : null,
+      fantasyProsProjection: true,
       sourceTeam: sourceTeamAbbreviation,
       identityBridge: playerId ? "mlbam" : null,
     },
@@ -340,7 +462,7 @@ async function projectionEligibility(
     requiresIdentityReview,
     quarantineReason: reason,
   });
-  return { ...flags, officialTeam: official?.abbreviation ?? null, status, requiresIdentityReview };
+  return { ...flags, officialTeam: sourceTeamAbbreviation || null, status, requiresIdentityReview };
 }
 
 function projectionComponents(row: JsonObject) {
@@ -520,17 +642,19 @@ async function persistFantasyProsLineups(
   let snapshots = 0;
   let unresolvedEntries = 0;
   for (const game of asArray(payload.games)) {
+    const gamePayload = asObject(game);
+    const gamePk = Number(gamePayload.game_id);
     const hitters = asObject(game.hitters);
     for (const [abbreviation, lineup] of Object.entries(hitters)) {
       const target = await pool.query<{ game_pk: number; team_id: number }>(
         `SELECT g.game_pk, t.team_id
          FROM games g JOIN teams t ON t.team_id IN (g.away_team_id, g.home_team_id)
-         WHERE g.game_date = $1 AND t.abbreviation = $2 LIMIT 1`,
-        [effectiveDate, abbreviation],
+         WHERE g.game_pk = $1 AND g.game_date = $2 AND t.abbreviation = $3 LIMIT 1`,
+        [gamePk, effectiveDate, abbreviation],
       );
       const gameTarget = target.rows[0];
       if (!gameTarget) {
-        await recordIssue(FANTASY_PROS_SOURCE, ingestRunId, "GAME_STATE_CONFLICT", "REVIEW", `Projected lineup team ${abbreviation} could not map to an official game.`);
+        await recordIssue(FANTASY_PROS_SOURCE, ingestRunId, "FANTASYPROS_GAME_MAPPING_BLOCKING", "BLOCKING", `FantasyPros lineup team ${abbreviation} could not map to its FantasyPros game ID ${String(gamePayload.game_id ?? "unknown")}.`);
         continue;
       }
       const lineupRows = Object.entries(asObject(lineup))
@@ -538,7 +662,7 @@ async function persistFantasyProsLineups(
         .filter((item) => Number.isInteger(item.order) && item.order >= 1 && item.order <= 9)
         .sort((a, b) => a.order - b.order);
       const lineupRaw = {
-        checksum: checksum({ gameId: game.game_id, abbreviation, lineupRows }),
+        checksum: checksum({ gameId: gamePayload.game_id, abbreviation, lineupRows }),
         owner: FANTASY_PROS_SOURCE,
         state,
         entries: lineupRows.map((row) => ({ order: row.order, playerId: String(row.value.player_id ?? ""), position: String(row.value.position ?? "") })),
@@ -896,19 +1020,9 @@ export async function ingestFantasyPros(requestedDate: string) {
           resolvedPlayerId,
           identityConfidence,
         );
-        if (eligibility.officialTeam && sourceTeam && eligibility.officialTeam !== sourceTeam) {
-          const conflictKey = `${sourcePlayerId}:${sourceTeam}:${eligibility.officialTeam}`;
-          if (!teamConflicts.has(conflictKey)) {
-            teamConflicts.add(conflictKey);
-            await recordIssue(
-              FANTASY_PROS_SOURCE,
-              ingestRunId,
-              "TEAM_ASSIGNMENT_CONFLICT",
-              "REVIEW",
-              `${sourceName}: FantasyPros team ${sourceTeam} disagrees with official MLB organization ${eligibility.officialTeam}.`,
-            );
-          }
-        }
+        // FantasyPros is the pregame team authority. A team change is reflected
+        // by a new source snapshot; there is no pregame MLB comparison or
+        // silent fallback here.
         await pool.query(
           `INSERT INTO fantasypros_projection_rows (snapshot_id, source_player_id, canonical_player_id, team_abbreviation, position, projected_stats, normalized_stats, raw_row, identity_confidence)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
@@ -966,6 +1080,8 @@ export async function ingestFantasyPros(requestedDate: string) {
         `${missingIdentity.size} FantasyPros player IDs require canonical MLB identity resolution.`,
       );
     }
+    const gamesPersisted = await persistFantasyProsGames(ingestRunId, effectiveDate, lineups.payload);
+    const starterRows = await persistFantasyProsStarters(ingestRunId, effectiveDate, lineups.payload);
     const [lineupResult, confirmedLineupResult] = await Promise.all([
       persistFantasyProsLineups(ingestRunId, effectiveDate, lineups.payload, "PROJECTED"),
       persistFantasyProsLineups(ingestRunId, effectiveDate, currentLineups.payload, "CONFIRMED"),
@@ -981,6 +1097,8 @@ export async function ingestFantasyPros(requestedDate: string) {
         playerDirectoryRows: playerDirectory.size,
         projectedLineupPayloads: asArray(lineups.payload.games).length,
         confirmedLineupPayloads: asArray(currentLineups.payload.games).length,
+        fantasyProsGamesPersisted: gamesPersisted,
+        fantasyProsStartersPersisted: starterRows,
         projectedLineupSnapshots: lineupResult.snapshots,
         confirmedLineupSnapshots: confirmedLineupResult.snapshots,
         lineupIdentityRejected: lineupResult.unresolvedEntries + confirmedLineupResult.unresolvedEntries,

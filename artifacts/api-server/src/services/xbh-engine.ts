@@ -641,7 +641,13 @@ async function writeCandidate(c: XBHCandidate, ingestRunId: string): Promise<str
        research_state = EXCLUDED.research_state,
        primary_mechanism = EXCLUDED.primary_mechanism,
        secondary_mechanism = EXCLUDED.secondary_mechanism,
-       opportunity_evidence = EXCLUDED.opportunity_evidence,
+        opportunity_evidence = CASE
+          WHEN market_research_candidates.opportunity_evidence->>'source' = 'FANTASYPROS'
+            THEN jsonb_build_object('baseline', market_research_candidates.opportunity_evidence, 'research', EXCLUDED.opportunity_evidence)
+          WHEN market_research_candidates.opportunity_evidence ? 'baseline'
+            THEN jsonb_set(market_research_candidates.opportunity_evidence, '{research}', EXCLUDED.opportunity_evidence, true)
+          ELSE EXCLUDED.opportunity_evidence
+        END,
        starter_matchup_evidence = EXCLUDED.starter_matchup_evidence,
        bullpen_path_evidence = EXCLUDED.bullpen_path_evidence,
        park_evidence = EXCLUDED.park_evidence,
