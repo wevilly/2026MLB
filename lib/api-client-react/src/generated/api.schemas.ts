@@ -1122,9 +1122,38 @@ export interface WalkForwardValidationResult {
   benchmarkBeat: boolean;
   benchmarkMethod: string;
   calibrationMethod: string;
+  /**
+     * Brier margin the model had to beat, derived from the held-out row
+     * count rather than being a fixed constant.
+     * @nullable
+     */
+  benchmarkMargin: number | null;
+  /** Ten-bin reliability curve over the pooled out-of-fold probabilities. */
   calibrationCurve: WalkForwardCalibrationPoint[];
+  /**
+     * Expected calibration error over the reliability bins. This is the
+     * quantity the acceptance gate reads.
+     * @nullable
+     */
+  expectedCalibrationError: number | null;
+  expectedCalibrationErrorThreshold: number;
+  /**
+     * Mean absolute distance between each prediction and its binary label.
+     * Reported for continuity with the field previously and wrongly named
+     * calibrationError. Nothing gates on it.
+     * @nullable
+     */
+  meanAbsolutePredictionError: number | null;
   /** @nullable */
-  calibrationError: number | null;
+  brierSkillScore: number | null;
+  /**
+     * Standard deviation of the pooled predicted probabilities, the sharpness guard.
+     * @nullable
+     */
+  predictionStdDev: number | null;
+  predictionStdDevThreshold: number;
+  /** Named reasons the run did not pass. Empty on a PASS. */
+  failureReasons: string[];
   calibrationPassed: boolean;
   /** @nullable */
   calibrationSlope: number | null;
@@ -1697,13 +1726,25 @@ export const DailyMarketBoardEntryConfidenceLabel = {
   NONE: 'NONE',
 } as const;
 
+/**
+ * Why the row carries the confidence it does. ARTIFACT_INVALID means
+ * the ACTIVE artifact failed verification. MARKET_MISMATCH means the
+ * artifact is for another market. INSUFFICIENT_FEATURES means the
+ * inference vector did not cover enough of the model's frozen feature
+ * schema for a probability to be emitted. MODEL_DECLINED means the
+ * model ran and returned a probability below the confirmation
+ * threshold, and carries that probability.
+ */
 export type DailyMarketBoardEntryConfidenceBasis = typeof DailyMarketBoardEntryConfidenceBasis[keyof typeof DailyMarketBoardEntryConfidenceBasis];
 
 
 export const DailyMarketBoardEntryConfidenceBasis = {
   RESEARCH_ONLY: 'RESEARCH_ONLY',
   MODEL_CONFIRMED: 'MODEL_CONFIRMED',
-  MODEL_REJECTED: 'MODEL_REJECTED',
+  MODEL_DECLINED: 'MODEL_DECLINED',
+  ARTIFACT_INVALID: 'ARTIFACT_INVALID',
+  MARKET_MISMATCH: 'MARKET_MISMATCH',
+  INSUFFICIENT_FEATURES: 'INSUFFICIENT_FEATURES',
 } as const;
 
 /**
@@ -1726,11 +1767,29 @@ export interface DailyMarketBoardEntry {
   /** @nullable */
   modelPrediction: number | null;
   confidenceLabel: DailyMarketBoardEntryConfidenceLabel;
+  /**
+     * Why the row carries the confidence it does. ARTIFACT_INVALID means
+     * the ACTIVE artifact failed verification. MARKET_MISMATCH means the
+     * artifact is for another market. INSUFFICIENT_FEATURES means the
+     * inference vector did not cover enough of the model's frozen feature
+     * schema for a probability to be emitted. MODEL_DECLINED means the
+     * model ran and returned a probability below the confirmation
+     * threshold, and carries that probability.
+     */
   confidenceBasis: DailyMarketBoardEntryConfidenceBasis;
   /** @nullable */
   calibratedProbability: number | null;
   /** @nullable */
   modelVersionId: string | null;
+  /**
+     * Fraction of the model's frozen feature schema this row supplied.
+     * @nullable
+     */
+  featureCoverage: number | null;
+  /** Features the model expected that this row did not supply. Imputed with their training means. */
+  imputedFeatures: string[];
+  /** Feature keys this row supplied that the model has never seen. */
+  unknownFeatures: string[];
   boardFrozenAt: string;
 }
 
@@ -3078,3 +3137,4 @@ team?: string;
 export type RefreshBullpenParams = {
 date?: string;
 };
+

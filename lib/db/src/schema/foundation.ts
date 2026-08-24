@@ -183,10 +183,22 @@ export const confidenceLabelEnum = pgEnum("confidence_label", [
   "NONE",
 ]);
 
+/**
+ * MODEL_REJECTED used to mean four different things: a corrupt or mismatched
+ * artifact, a market mismatch, a null feature vector, and a model that ran fine
+ * and returned a probability below the confirmation threshold. An operator
+ * cannot act on the last one while it is indistinguishable from the first.
+ *
+ * MODEL_DECLINED is the model running and declining. It is a legitimate model
+ * output and carries a populated calibrated_probability.
+ */
 export const confidenceBasisEnum = pgEnum("confidence_basis", [
   "RESEARCH_ONLY",
   "MODEL_CONFIRMED",
-  "MODEL_REJECTED",
+  "MODEL_DECLINED",
+  "ARTIFACT_INVALID",
+  "MARKET_MISMATCH",
+  "INSUFFICIENT_FEATURES",
 ]);
 
 export const researchWindowEnum = pgEnum("research_window", [
@@ -1744,6 +1756,23 @@ export const dailyMarketBoard = pgTable("daily_market_board", {
   confidenceLabel: confidenceLabelEnum("confidence_label").notNull().default("NONE"),
   confidenceBasis: confidenceBasisEnum("confidence_basis").notNull().default("RESEARCH_ONLY"),
   calibratedProbability: numeric("calibrated_probability"),
+  /**
+   * Fraction of the model's frozen feature schema the inference vector
+   * supplied. Below the coverage floor no probability is emitted and the basis
+   * is INSUFFICIENT_FEATURES.
+   */
+  featureCoverage: numeric("feature_coverage"),
+  /**
+   * Features the model expected and this row did not supply. They were imputed
+   * with their stored training means, never with zero, and are listed here so a
+   * human can see that a probability came from a partial vector.
+   */
+  imputedFeatures: jsonb("imputed_features").notNull().default([]),
+  /**
+   * Feature keys present in the inference vector that the model has never seen.
+   * Recorded, not failed on: they mean the feature store has moved.
+   */
+  unknownFeatures: jsonb("unknown_features").notNull().default([]),
   boardFrozenAt: timestamp("board_frozen_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1765,10 +1794,34 @@ export const walkForwardRuns = pgTable("walk_forward_runs", {
   benchmarkBeat: boolean("benchmark_beat").notNull().default(false),
   benchmarkMethod: text("benchmark_method").notNull(),
   calibrationMethod: text("calibration_method").notNull(),
+  /** Ten-bin reliability curve. Five bins cannot resolve a 0.05 calibration error. */
   calibrationCurve: jsonb("calibration_curve").notNull().default([]),
-  calibrationError: numeric("calibration_error"),
+  /**
+   * Expected calibration error over the reliability bins. This is the quantity
+   * the acceptance gate reads. The column previously named calibration_error
+   * held the mean absolute distance between each prediction and its binary
+   * label, which is not a calibration measurement and rewarded overconfidence.
+   */
+  expectedCalibrationError: numeric("expected_calibration_error"),
+  /**
+   * The former calibration_error value, retained for continuity under a name
+   * that does not claim to measure calibration. Nothing gates on it.
+   */
+  meanAbsolutePredictionError: numeric("mean_absolute_prediction_error"),
+  /** Brier skill score of the model against the fold's training base rate. */
+  brierSkillScore: numeric("brier_skill_score"),
+  /** Standard deviation of the pooled predicted probabilities: the sharpness guard. */
+  predictionStdDev: numeric("prediction_std_dev"),
+  /** Brier margin the model had to beat, derived from the held-out row count. */
+  benchmarkMargin: numeric("benchmark_margin"),
+  /** Named reasons the run did not pass, empty on a PASS. */
+  failureReasons: jsonb("failure_reasons").notNull().default([]),
   calibrationPassed: boolean("calibration_passed").notNull().default(false),
-  /** Weighted fold-local calibration parameters for downstream inference. */
+  /**
+   * Deployment calibration fitted once on the pooled out-of-fold scores of the
+   * frozen artifact. Not an average of per-fold fits: those were fitted to
+   * differently scaled score distributions and averaging them is undefined.
+   */
   calibrationSlope: numeric("calibration_slope"),
   calibrationIntercept: numeric("calibration_intercept"),
   status: walkForwardStatusEnum("status").notNull(),

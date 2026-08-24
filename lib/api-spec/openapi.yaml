@@ -2402,15 +2402,41 @@ components:
         benchmarkBeat: { type: boolean }
         benchmarkMethod: { type: string }
         calibrationMethod: { type: string }
+        benchmarkMargin:
+          type: ["number", "null"]
+          description: |
+            Brier margin the model had to beat, derived from the held-out row
+            count rather than being a fixed constant.
         calibrationCurve:
           type: array
+          description: Ten-bin reliability curve over the pooled out-of-fold probabilities.
           items: { $ref: "#/components/schemas/WalkForwardCalibrationPoint" }
-        calibrationError: { type: ["number", "null"] }
+        expectedCalibrationError:
+          type: ["number", "null"]
+          description: |
+            Expected calibration error over the reliability bins. This is the
+            quantity the acceptance gate reads.
+        expectedCalibrationErrorThreshold: { type: number }
+        meanAbsolutePredictionError:
+          type: ["number", "null"]
+          description: |
+            Mean absolute distance between each prediction and its binary label.
+            Reported for continuity with the field previously and wrongly named
+            calibrationError. Nothing gates on it.
+        brierSkillScore: { type: ["number", "null"] }
+        predictionStdDev:
+          type: ["number", "null"]
+          description: Standard deviation of the pooled predicted probabilities, the sharpness guard.
+        predictionStdDevThreshold: { type: number }
+        failureReasons:
+          type: array
+          description: Named reasons the run did not pass. Empty on a PASS.
+          items: { type: string }
         calibrationPassed: { type: boolean }
         calibrationSlope: { type: ["number", "null"] }
         calibrationIntercept: { type: ["number", "null"] }
         status: { type: string, enum: [PASS, FAIL, INCOMPLETE] }
-      required: [walkForwardRunId, versionId, market, foldCount, foldResults, overallMetric, benchmarkMetric, benchmarkBeat, benchmarkMethod, calibrationMethod, calibrationCurve, calibrationError, calibrationPassed, calibrationSlope, calibrationIntercept, status]
+      required: [walkForwardRunId, versionId, market, foldCount, foldResults, overallMetric, benchmarkMetric, benchmarkBeat, benchmarkMethod, benchmarkMargin, calibrationMethod, calibrationCurve, expectedCalibrationError, expectedCalibrationErrorThreshold, meanAbsolutePredictionError, brierSkillScore, predictionStdDev, predictionStdDevThreshold, failureReasons, calibrationPassed, calibrationSlope, calibrationIntercept, status]
     WalkForwardValidationList:
       type: object
       additionalProperties: false
@@ -2685,11 +2711,32 @@ components:
         primaryMechanism: { type: ["string", "null"] }
         modelPrediction: { type: ["number", "null"] }
         confidenceLabel: { type: string, enum: [FIRE, HALF, HOLD, NONE] }
-        confidenceBasis: { type: string, enum: [RESEARCH_ONLY, MODEL_CONFIRMED, MODEL_REJECTED] }
+        confidenceBasis:
+          type: string
+          description: |
+            Why the row carries the confidence it does. ARTIFACT_INVALID means
+            the ACTIVE artifact failed verification. MARKET_MISMATCH means the
+            artifact is for another market. INSUFFICIENT_FEATURES means the
+            inference vector did not cover enough of the model's frozen feature
+            schema for a probability to be emitted. MODEL_DECLINED means the
+            model ran and returned a probability below the confirmation
+            threshold, and carries that probability.
+          enum: [RESEARCH_ONLY, MODEL_CONFIRMED, MODEL_DECLINED, ARTIFACT_INVALID, MARKET_MISMATCH, INSUFFICIENT_FEATURES]
         calibratedProbability: { type: ["number", "null"] }
         modelVersionId: { type: ["string", "null"] }
+        featureCoverage:
+          type: ["number", "null"]
+          description: Fraction of the model's frozen feature schema this row supplied.
+        imputedFeatures:
+          type: array
+          description: Features the model expected that this row did not supply. Imputed with their training means.
+          items: { type: string }
+        unknownFeatures:
+          type: array
+          description: Feature keys this row supplied that the model has never seen.
+          items: { type: string }
         boardFrozenAt: { type: string }
-      required: [boardId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, modelPrediction, confidenceLabel, confidenceBasis, calibratedProbability, modelVersionId, boardFrozenAt]
+      required: [boardId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, modelPrediction, confidenceLabel, confidenceBasis, calibratedProbability, modelVersionId, featureCoverage, imputedFeatures, unknownFeatures, boardFrozenAt]
     DailyMarketBoard:
       type: object
       additionalProperties: false

@@ -24,9 +24,38 @@ export interface WalkForwardValidationResult {
   benchmarkBeat: boolean;
   benchmarkMethod: string;
   calibrationMethod: string;
+  /**
+     * Brier margin the model had to beat, derived from the held-out row
+     * count rather than being a fixed constant.
+     * @nullable
+     */
+  benchmarkMargin: number | null;
+  /** Ten-bin reliability curve over the pooled out-of-fold probabilities. */
   calibrationCurve: WalkForwardCalibrationPoint[];
+  /**
+     * Expected calibration error over the reliability bins. This is the
+     * quantity the acceptance gate reads.
+     * @nullable
+     */
+  expectedCalibrationError: number | null;
+  expectedCalibrationErrorThreshold: number;
+  /**
+     * Mean absolute distance between each prediction and its binary label.
+     * Reported for continuity with the field previously and wrongly named
+     * calibrationError. Nothing gates on it.
+     * @nullable
+     */
+  meanAbsolutePredictionError: number | null;
   /** @nullable */
-  calibrationError: number | null;
+  brierSkillScore: number | null;
+  /**
+     * Standard deviation of the pooled predicted probabilities, the sharpness guard.
+     * @nullable
+     */
+  predictionStdDev: number | null;
+  predictionStdDevThreshold: number;
+  /** Named reasons the run did not pass. Empty on a PASS. */
+  failureReasons: string[];
   calibrationPassed: boolean;
   /** @nullable */
   calibrationSlope: number | null;

@@ -1789,6 +1789,12 @@ function marketBoardPresentation(
     modelVersionId: null,
     confidenceLabel: "NONE" as const,
     confidenceBasis: "RESEARCH_ONLY" as const,
+    // The feature coverage disclosures describe a model output. When the model
+    // output is suppressed they are suppressed with it, so a research-only
+    // presentation never carries half of a model row.
+    featureCoverage: null,
+    imputedFeatures: [] as string[],
+    unknownFeatures: [] as string[],
   }));
 }
 

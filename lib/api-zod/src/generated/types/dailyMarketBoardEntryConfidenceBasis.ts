@@ -6,11 +6,23 @@
  * OpenAPI spec version: 0.1.0
  */
 
+/**
+ * Why the row carries the confidence it does. ARTIFACT_INVALID means
+ * the ACTIVE artifact failed verification. MARKET_MISMATCH means the
+ * artifact is for another market. INSUFFICIENT_FEATURES means the
+ * inference vector did not cover enough of the model's frozen feature
+ * schema for a probability to be emitted. MODEL_DECLINED means the
+ * model ran and returned a probability below the confirmation
+ * threshold, and carries that probability.
+ */
 export type DailyMarketBoardEntryConfidenceBasis = typeof DailyMarketBoardEntryConfidenceBasis[keyof typeof DailyMarketBoardEntryConfidenceBasis];
 
 
 export const DailyMarketBoardEntryConfidenceBasis = {
   RESEARCH_ONLY: 'RESEARCH_ONLY',
   MODEL_CONFIRMED: 'MODEL_CONFIRMED',
-  MODEL_REJECTED: 'MODEL_REJECTED',
+  MODEL_DECLINED: 'MODEL_DECLINED',
+  ARTIFACT_INVALID: 'ARTIFACT_INVALID',
+  MARKET_MISMATCH: 'MARKET_MISMATCH',
+  INSUFFICIENT_FEATURES: 'INSUFFICIENT_FEATURES',
 } as const;

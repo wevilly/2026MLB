@@ -1885,13 +1885,20 @@ export const ValidateAnalystModelResponse = zod.object({
   "benchmarkBeat": zod.boolean(),
   "benchmarkMethod": zod.string(),
   "calibrationMethod": zod.string(),
+  "benchmarkMargin": zod.number().nullable().describe('Brier margin the model had to beat, derived from the held-out row\ncount rather than being a fixed constant.\n'),
   "calibrationCurve": zod.array(zod.object({
   "bucket": zod.number().int().min(validateAnalystModelResponseCalibrationCurveItemBucketMin),
   "count": zod.number().int().min(validateAnalystModelResponseCalibrationCurveItemCountMin),
   "predictedProbability": zod.number().nullable(),
   "observedRate": zod.number().nullable()
-})),
-  "calibrationError": zod.number().nullable(),
+})).describe('Ten-bin reliability curve over the pooled out-of-fold probabilities.'),
+  "expectedCalibrationError": zod.number().nullable().describe('Expected calibration error over the reliability bins. This is the\nquantity the acceptance gate reads.\n'),
+  "expectedCalibrationErrorThreshold": zod.number(),
+  "meanAbsolutePredictionError": zod.number().nullable().describe('Mean absolute distance between each prediction and its binary label.\nReported for continuity with the field previously and wrongly named\ncalibrationError. Nothing gates on it.\n'),
+  "brierSkillScore": zod.number().nullable(),
+  "predictionStdDev": zod.number().nullable().describe('Standard deviation of the pooled predicted probabilities, the sharpness guard.'),
+  "predictionStdDevThreshold": zod.number(),
+  "failureReasons": zod.array(zod.string()).describe('Named reasons the run did not pass. Empty on a PASS.'),
   "calibrationPassed": zod.boolean(),
   "calibrationSlope": zod.number().nullable(),
   "calibrationIntercept": zod.number().nullable(),
@@ -1930,13 +1937,20 @@ export const GetAnalystModelValidationResponse = zod.object({
   "benchmarkBeat": zod.boolean(),
   "benchmarkMethod": zod.string(),
   "calibrationMethod": zod.string(),
+  "benchmarkMargin": zod.number().nullable().describe('Brier margin the model had to beat, derived from the held-out row\ncount rather than being a fixed constant.\n'),
   "calibrationCurve": zod.array(zod.object({
   "bucket": zod.number().int().min(getAnalystModelValidationResponseRunsItemOneCalibrationCurveItemBucketMin),
   "count": zod.number().int().min(getAnalystModelValidationResponseRunsItemOneCalibrationCurveItemCountMin),
   "predictedProbability": zod.number().nullable(),
   "observedRate": zod.number().nullable()
-})),
-  "calibrationError": zod.number().nullable(),
+})).describe('Ten-bin reliability curve over the pooled out-of-fold probabilities.'),
+  "expectedCalibrationError": zod.number().nullable().describe('Expected calibration error over the reliability bins. This is the\nquantity the acceptance gate reads.\n'),
+  "expectedCalibrationErrorThreshold": zod.number(),
+  "meanAbsolutePredictionError": zod.number().nullable().describe('Mean absolute distance between each prediction and its binary label.\nReported for continuity with the field previously and wrongly named\ncalibrationError. Nothing gates on it.\n'),
+  "brierSkillScore": zod.number().nullable(),
+  "predictionStdDev": zod.number().nullable().describe('Standard deviation of the pooled predicted probabilities, the sharpness guard.'),
+  "predictionStdDevThreshold": zod.number(),
+  "failureReasons": zod.array(zod.string()).describe('Named reasons the run did not pass. Empty on a PASS.'),
   "calibrationPassed": zod.boolean(),
   "calibrationSlope": zod.number().nullable(),
   "calibrationIntercept": zod.number().nullable(),
@@ -2010,9 +2024,12 @@ export const GetAnalystDailyMarketBoardResponse = zod.object({
   "primaryMechanism": zod.string().nullable(),
   "modelPrediction": zod.number().nullable(),
   "confidenceLabel": zod.enum(['FIRE', 'HALF', 'HOLD', 'NONE']),
-  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_REJECTED']),
+  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_DECLINED', 'ARTIFACT_INVALID', 'MARKET_MISMATCH', 'INSUFFICIENT_FEATURES']).describe('Why the row carries the confidence it does. ARTIFACT_INVALID means\nthe ACTIVE artifact failed verification. MARKET_MISMATCH means the\nartifact is for another market. INSUFFICIENT_FEATURES means the\ninference vector did not cover enough of the model\'s frozen feature\nschema for a probability to be emitted. MODEL_DECLINED means the\nmodel ran and returned a probability below the confirmation\nthreshold, and carries that probability.\n'),
   "calibratedProbability": zod.number().nullable(),
   "modelVersionId": zod.string().nullable(),
+  "featureCoverage": zod.number().nullable().describe('Fraction of the model\'s frozen feature schema this row supplied.'),
+  "imputedFeatures": zod.array(zod.string()).describe('Features the model expected that this row did not supply. Imputed with their training means.'),
+  "unknownFeatures": zod.array(zod.string()).describe('Feature keys this row supplied that the model has never seen.'),
   "boardFrozenAt": zod.string()
 }).describe('One persisted confidence record. Model values are generated only by a\nverified ACTIVE artifact with accepted calibration; no betting fields are\npart of this contract.\n')),
   "total": zod.number().int().min(getAnalystDailyMarketBoardResponseTotalMin),
@@ -2077,9 +2094,12 @@ export const GetAnalystDailyBoardGameSummaryResponse = zod.object({
   "primaryMechanism": zod.string().nullable(),
   "modelPrediction": zod.number().nullable(),
   "confidenceLabel": zod.enum(['FIRE', 'HALF', 'HOLD', 'NONE']),
-  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_REJECTED']),
+  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_DECLINED', 'ARTIFACT_INVALID', 'MARKET_MISMATCH', 'INSUFFICIENT_FEATURES']).describe('Why the row carries the confidence it does. ARTIFACT_INVALID means\nthe ACTIVE artifact failed verification. MARKET_MISMATCH means the\nartifact is for another market. INSUFFICIENT_FEATURES means the\ninference vector did not cover enough of the model\'s frozen feature\nschema for a probability to be emitted. MODEL_DECLINED means the\nmodel ran and returned a probability below the confirmation\nthreshold, and carries that probability.\n'),
   "calibratedProbability": zod.number().nullable(),
   "modelVersionId": zod.string().nullable(),
+  "featureCoverage": zod.number().nullable().describe('Fraction of the model\'s frozen feature schema this row supplied.'),
+  "imputedFeatures": zod.array(zod.string()).describe('Features the model expected that this row did not supply. Imputed with their training means.'),
+  "unknownFeatures": zod.array(zod.string()).describe('Feature keys this row supplied that the model has never seen.'),
   "boardFrozenAt": zod.string()
 }).describe('One persisted confidence record. Model values are generated only by a\nverified ACTIVE artifact with accepted calibration; no betting fields are\npart of this contract.\n'))
 })),
@@ -2866,3 +2886,5 @@ export const RefreshBullpenResponse = zod.object({
   "teamsComputed": zod.number().int(),
   "error": zod.string().nullable()
 })
+
+

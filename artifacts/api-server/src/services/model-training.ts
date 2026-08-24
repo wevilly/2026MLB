@@ -1,17 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import { pool } from "@workspace/db";
 import { storeModelArtifact, verifyModelArtifact } from "../lib/model-artifact-storage";
+import { MODEL_MARKETS, toDbMarket, toShortMarket, type ModelMarket } from "./market-codes";
+import {
+  MODEL_ALGORITHM,
+  MODEL_ARTIFACT_SCHEMA_VERSION,
+  TRAINABLE_FEATURE_PREFIXES,
+  VIF_CAP,
+  fitLogisticModel,
+  trainableVector,
+  type NumericVector,
+} from "./model-math";
 
-export const MODEL_MARKETS = ["TB", "XBH", "WALK", "HR"] as const;
-export type ModelMarket = (typeof MODEL_MARKETS)[number];
+export { MODEL_MARKETS, type ModelMarket };
+export type { NumericVector };
 type JsonObject = Record<string, unknown>;
-
-const DB_MARKETS: Record<ModelMarket, string> = {
-  TB: "TOTAL_BASES_2_PLUS",
-  XBH: "EXTRA_BASE_HIT",
-  WALK: "BATTER_WALK",
-  HR: "HOME_RUN",
-};
 
 export class ModelTrainingValidationError extends Error {
   constructor(message: string) {
@@ -20,81 +23,95 @@ export class ModelTrainingValidationError extends Error {
   }
 }
 
-function featureSetHash(names: string[]): string {
+export function featureSetHash(names: string[]): string {
   return createHash("sha256").update(names.slice().sort().join("\n")).digest("hex");
 }
 
-export function flattenNumbers(value: unknown, path = "", result: Record<string, number> = {}): Record<string, number> {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    result[path || "value"] = value;
-  } else if (Array.isArray(value)) {
-    value.forEach((entry, index) => flattenNumbers(entry, `${path}[${index}]`, result));
-  } else if (value && typeof value === "object") {
-    for (const [key, entry] of Object.entries(value as JsonObject).sort(([a], [b]) => a.localeCompare(b))) {
-      flattenNumbers(entry, path ? `${path}.${key}` : key, result);
-    }
+type TrainingRow = { vector: NumericVector; label: boolean };
+
+/**
+ * Fits the market model.
+ *
+ * Option B of remediation task 1.2: L2 penalised logistic regression fitted
+ * directly on outcome_hit. The board's question is binary, so the model answers
+ * the binary question and there is no threshold-subtraction step between the
+ * model output and the calibrated probability. outcome_value is not needed
+ * anywhere downstream; model_prediction on the board carries the model's raw
+ * score, which under this algorithm is a logit.
+ *
+ * The previous implementation computed, for each feature independently, the
+ * univariate slope cov(x, y) / var(x) and summed all of those slopes together.
+ * That is a sum of marginal effects, not a multivariate fit: every collinear
+ * feature contributed its full marginal effect again, and with xslg, slg, iso,
+ * barrel_percent and hard_hit_percent all measuring the same quantity the
+ * prediction inflated roughly in proportion to the redundancy of the feature
+ * set. Its algorithm identifier is deliberately not reused.
+ */
+function trainMarketArtifact(market: ModelMarket, rows: TrainingRow[]) {
+  const candidateNames = [...new Set(rows.flatMap((row) => Object.keys(row.vector)))].sort();
+  if (!candidateNames.length) {
+    throw new ModelTrainingValidationError(
+      `No allowlisted training feature was present for ${market}. Expected keys under ${TRAINABLE_FEATURE_PREFIXES.join(", ")}.`,
+    );
   }
-  return result;
-}
-
-function trainLinearArtifact(market: ModelMarket, rows: Array<{ features: JsonObject; outcomeValue: number }>) {
-  const vectors = rows.map((row) => flattenNumbers(row.features));
-  const names = [...new Set(vectors.flatMap((vector) => Object.keys(vector)))].sort();
-  const means = new Map(names.map((name) => [name, rows.reduce((sum, _, index) => sum + (vectors[index][name] ?? 0), 0) / rows.length]));
-  const targetMean = rows.reduce((sum, row) => sum + row.outcomeValue, 0) / rows.length;
-  const coefficients: Record<string, number> = {};
-  const importance: Record<string, number> = {};
-
-  for (const name of names) {
-    let numerator = 0;
-    let denominator = 0;
-    for (let index = 0; index < rows.length; index += 1) {
-      const centeredFeature = (vectors[index][name] ?? 0) - (means.get(name) ?? 0);
-      numerator += centeredFeature * (rows[index].outcomeValue - targetMean);
-      denominator += centeredFeature * centeredFeature;
-    }
-    const coefficient = denominator ? numerator / denominator : 0;
-    coefficients[name] = Number(coefficient.toFixed(10));
-    importance[name] = Number(Math.abs(coefficient).toFixed(10));
+  const fit = fitLogisticModel(rows, candidateNames);
+  const hash = featureSetHash(fit.featureNames);
+  const importance: NumericVector = {};
+  for (const name of fit.featureNames) {
+    // Coefficients are on the standardised scale, so their magnitudes are
+    // directly comparable across features. Under the previous fitter they were
+    // on each feature's own raw scale and were not.
+    importance[name] = Number(Math.abs(fit.coefficients[name]).toFixed(10));
   }
-
-  const intercept = Number((targetMean - names.reduce((sum, name) => sum + (coefficients[name] ?? 0) * (means.get(name) ?? 0), 0)).toFixed(10));
-  const algorithm = "deterministic-centered-linear-v1";
-  const hash = featureSetHash(names);
   return {
-    algorithm,
+    algorithm: MODEL_ALGORITHM,
     featureSetHash: hash,
-    artifact: {
-      schemaVersion: 1,
-      market,
-      algorithm,
-      featureSetHash: hash,
-      featureNames: names,
-      coefficients,
-      intercept,
-    },
+    candidateNames,
+    fit,
     importance,
+    artifact: {
+      schemaVersion: MODEL_ARTIFACT_SCHEMA_VERSION,
+      market,
+      algorithm: MODEL_ALGORITHM,
+      featureSetHash: hash,
+      featureNames: fit.featureNames,
+      coefficients: fit.coefficients,
+      intercept: fit.intercept,
+      featureMeans: fit.featureMeans,
+      featureStdDevs: fit.featureStdDevs,
+      droppedFeatures: fit.droppedFeatures,
+      lambda: fit.lambda,
+      target: "outcome_hit",
+      link: "logit",
+    },
   };
 }
 
 export async function trainMarketModel(market: ModelMarket) {
   const trainingRunId = randomUUID();
-  const algorithm = "deterministic-centered-linear-v1";
+  const dbMarket = toDbMarket(market);
   await pool.query(
     `INSERT INTO model_training_runs
        (training_run_id, market, status, algorithm, metadata)
      VALUES ($1, $2, 'RUNNING', $3, $4)`,
-    [trainingRunId, DB_MARKETS[market], algorithm, { source: "MLB_OFFICIAL settled outcomes + frozen feature snapshots" }],
+    [trainingRunId, dbMarket, MODEL_ALGORITHM,
+      { source: "MLB_OFFICIAL settled outcomes + frozen feature snapshots" }],
   );
 
   try {
+    // The snapshot must predate first pitch. A snapshot frozen at 23:00 on the
+    // slate date is post-game for a 19:05 start, and training the deployed
+    // artifact on it teaches the model information that did not exist when the
+    // board was published. This is the same bound task 1.4 applies to the
+    // walk-forward TEST folds, applied at the source of the deployed model.
     const rows = await pool.query<{
       features: JsonObject;
-      outcome_value: string;
+      outcome_hit: boolean;
       slate_date: string;
     }>(
-      `SELECT pfs.features, ho.outcome_value, pfs.slate_date::text AS slate_date
+      `SELECT pfs.features, ho.outcome_hit, pfs.slate_date::text AS slate_date
        FROM pregame_feature_snapshots pfs
+       JOIN games g ON g.game_pk = pfs.game_pk
        JOIN historical_outcomes ho
          ON ho.player_id = pfs.player_id
         AND ho.game_pk = pfs.game_pk
@@ -103,6 +120,8 @@ export async function trainMarketModel(market: ModelMarket) {
         AND ho.settlement_state = 'SETTLED'
         AND ho.source_id = 'MLB_OFFICIAL'
        WHERE pfs.market = $1
+         AND g.start_time_utc IS NOT NULL
+         AND pfs.frozen_at < g.start_time_utc
          AND NOT EXISTS (
            SELECT 1 FROM pregame_feature_snapshots newer
             WHERE newer.correction_of = pfs.snapshot_id
@@ -112,14 +131,17 @@ export async function trainMarketModel(market: ModelMarket) {
             WHERE newer.correction_of = ho.outcome_id
          )
        ORDER BY pfs.slate_date, pfs.created_at`,
-      [DB_MARKETS[market]],
+      [dbMarket],
     );
     if (!rows.rows.length) {
       throw new ModelTrainingValidationError(`No official settled training rows are available for ${market}.`);
     }
 
-    const trainingRows = rows.rows.map((row) => ({ features: row.features ?? {}, outcomeValue: Number(row.outcome_value) }));
-    const trained = trainLinearArtifact(market, trainingRows);
+    const trainingRows: TrainingRow[] = rows.rows.map((row) => ({
+      vector: trainableVector(row.features ?? {}),
+      label: row.outcome_hit,
+    }));
+    const trained = trainMarketArtifact(market, trainingRows);
     const versionId = `${market.toLowerCase()}-${randomUUID()}`;
     const content = JSON.stringify(trained.artifact);
     const artifactContentHash = createHash("sha256").update(content).digest("hex");
@@ -128,9 +150,18 @@ export async function trainMarketModel(market: ModelMarket) {
     const trainingSeasons = [...new Set(rows.rows.map((row) => row.slate_date.slice(0, 4)))].sort();
     const hyperparameters = {
       market,
-      target: "outcome_value",
-      centering: "feature-and-target-means",
-      featureCount: Object.keys(trained.artifact.coefficients).length,
+      target: "outcome_hit",
+      link: "logit",
+      penalty: "l2",
+      lambda: trained.fit.lambda,
+      lambdaSelection: "5-fold cross validation on the training rows only",
+      standardisation: "zero mean unit variance, parameters stored in the artifact",
+      vifCap: VIF_CAP,
+      featureAllowlistPrefixes: [...TRAINABLE_FEATURE_PREFIXES],
+      candidateFeatureCount: trained.candidateNames.length,
+      featureCount: trained.fit.featureNames.length,
+      converged: trained.fit.converged,
+      iterations: trained.fit.iterations,
     };
 
     await pool.query(
@@ -138,7 +169,7 @@ export async function trainMarketModel(market: ModelMarket) {
          (version_id, market, training_seasons, feature_set_hash, algorithm,
           hyperparameters, training_sample_count, status, artifact_key, artifact_generation, artifact_content_hash)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'CANDIDATE', $8, $9, $10)`,
-      [versionId, DB_MARKETS[market], JSON.stringify(trainingSeasons), trained.featureSetHash, trained.algorithm,
+      [versionId, dbMarket, JSON.stringify(trainingSeasons), trained.featureSetHash, trained.algorithm,
         hyperparameters, trainingRows.length, artifactKey, artifactGeneration, artifactContentHash],
     );
     await pool.query(
@@ -146,10 +177,20 @@ export async function trainMarketModel(market: ModelMarket) {
           SET model_version_id = $1, finished_at = now(), status = 'SUCCESS',
               training_seasons = $2, feature_set_hash = $3, algorithm = $4,
               hyperparameters = $5, training_sample_count = $6,
-              feature_importance = $7, artifact_content_hash = $8
+              feature_importance = $7, artifact_content_hash = $8,
+              metadata = $10
         WHERE training_run_id = $9`,
       [versionId, JSON.stringify(trainingSeasons), trained.featureSetHash, trained.algorithm, hyperparameters,
-        trainingRows.length, trained.importance, artifactContentHash, trainingRunId],
+        trainingRows.length, trained.importance, artifactContentHash, trainingRunId,
+        {
+          source: "MLB_OFFICIAL settled outcomes + frozen feature snapshots",
+          // The explicit list of feature keys that entered this fit, and the
+          // list of keys the allowlist admitted but the fitter refused, with
+          // the reason for each refusal.
+          fittedFeatureKeys: trained.fit.featureNames,
+          candidateFeatureKeys: trained.candidateNames,
+          droppedFeatures: trained.fit.droppedFeatures,
+        }],
     );
     return {
       trainingRunId,
@@ -163,6 +204,9 @@ export async function trainMarketModel(market: ModelMarket) {
       artifactKey,
       artifactGeneration,
       artifactContentHash,
+      fittedFeatureKeys: trained.fit.featureNames,
+      droppedFeatures: trained.fit.droppedFeatures,
+      lambda: trained.fit.lambda,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -202,11 +246,11 @@ export async function queryModelVersions(market: ModelMarket | null) {
        FROM model_versions
       ${market ? "WHERE market = $1" : ""}
       ORDER BY trained_at DESC`,
-    market ? [DB_MARKETS[market]] : [],
+    market ? [toDbMarket(market)] : [],
   );
   return result.rows.map((row) => ({
     versionId: row.version_id,
-    market: row.market === "TOTAL_BASES_2_PLUS" ? "TB" : row.market === "EXTRA_BASE_HIT" ? "XBH" : row.market === "BATTER_WALK" ? "WALK" : "HR",
+    market: toShortMarket(row.market),
     trainedAt: row.trained_at,
     trainingSeasons: row.training_seasons,
     featureSetHash: row.feature_set_hash,

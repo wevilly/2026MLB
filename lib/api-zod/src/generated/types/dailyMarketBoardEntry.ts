@@ -30,10 +30,28 @@ export interface DailyMarketBoardEntry {
   /** @nullable */
   modelPrediction: number | null;
   confidenceLabel: DailyMarketBoardEntryConfidenceLabel;
+  /**
+     * Why the row carries the confidence it does. ARTIFACT_INVALID means
+     * the ACTIVE artifact failed verification. MARKET_MISMATCH means the
+     * artifact is for another market. INSUFFICIENT_FEATURES means the
+     * inference vector did not cover enough of the model's frozen feature
+     * schema for a probability to be emitted. MODEL_DECLINED means the
+     * model ran and returned a probability below the confirmation
+     * threshold, and carries that probability.
+     */
   confidenceBasis: DailyMarketBoardEntryConfidenceBasis;
   /** @nullable */
   calibratedProbability: number | null;
   /** @nullable */
   modelVersionId: string | null;
+  /**
+     * Fraction of the model's frozen feature schema this row supplied.
+     * @nullable
+     */
+  featureCoverage: number | null;
+  /** Features the model expected that this row did not supply. Imputed with their training means. */
+  imputedFeatures: string[];
+  /** Feature keys this row supplied that the model has never seen. */
+  unknownFeatures: string[];
   boardFrozenAt: string;
 }
