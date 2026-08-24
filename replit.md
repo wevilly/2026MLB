@@ -231,6 +231,17 @@ Exactly one ACTIVE model per market, enforced by the partial unique index
   and the logger. Tests ending in `.test.mjs` need a live database and a running
   server.
 
+## Known open work
+
+`docs/audit-extension-2026-08-24.md` holds the findings for every service the
+original audit did not read, plus the frontend. Seventeen items are scheduled
+there, with severity and with which earlier task each repeats. The one to read
+first is S1: `players.throws` is overwritten with an empty string by the
+game-feed player upsert, which silently degrades the platoon and split-metric
+layer in every engine to unsplit season values.
+
+`docs/repository-inventory.md` holds the repository hygiene assessment.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure and package details.
