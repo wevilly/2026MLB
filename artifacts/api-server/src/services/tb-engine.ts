@@ -689,69 +689,117 @@ function buildCounterEvidenceJson(c: TBCandidate): object {
 
 // ── DB write ──────────────────────────────────────────────────────────────────
 
-async function writeCandidate(c: TBCandidate, ingestRunId: string): Promise<string> {
-  const result = await pool.query<{ candidate_id: string }>(
-    `INSERT INTO market_research_candidates
-       (slate_date, game_pk, player_id, market, research_rank, research_state,
-        primary_mechanism, secondary_mechanism,
-        opportunity_evidence, starter_matchup_evidence, bullpen_path_evidence,
-        park_evidence, recent_vs_season_vs_career, counter_evidence,
-        missing_stale_evidence, rank_semantics, ingest_run_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-     ON CONFLICT (slate_date, market, player_id, game_pk) DO UPDATE SET
-       research_rank = EXCLUDED.research_rank,
-       research_state = EXCLUDED.research_state,
-       primary_mechanism = EXCLUDED.primary_mechanism,
-       secondary_mechanism = EXCLUDED.secondary_mechanism,
-        opportunity_evidence = CASE
-          WHEN market_research_candidates.opportunity_evidence->>'source' = 'FANTASYPROS'
-            THEN jsonb_build_object('baseline', market_research_candidates.opportunity_evidence, 'research', EXCLUDED.opportunity_evidence)
-          WHEN market_research_candidates.opportunity_evidence ? 'baseline'
-            THEN jsonb_set(market_research_candidates.opportunity_evidence, '{research}', EXCLUDED.opportunity_evidence, true)
-          ELSE EXCLUDED.opportunity_evidence
-        END,
-       starter_matchup_evidence = EXCLUDED.starter_matchup_evidence,
-       bullpen_path_evidence = EXCLUDED.bullpen_path_evidence,
-       park_evidence = EXCLUDED.park_evidence,
-       recent_vs_season_vs_career = EXCLUDED.recent_vs_season_vs_career,
-       counter_evidence = EXCLUDED.counter_evidence,
-       missing_stale_evidence = EXCLUDED.missing_stale_evidence,
-       ingest_run_id = EXCLUDED.ingest_run_id,
-       updated_at = now()
-     RETURNING candidate_id`,
-    [
-      c.slateDate, c.gamePk, c.playerId, MARKET,
-      c.researchRank, c.researchState,
-      c.mechanism, c.secondaryMechanism,
-      JSON.stringify(buildOpportunityEvidence(c)),
-      JSON.stringify(buildStarterMatchupEvidence(c)),
-      JSON.stringify(buildBullpenPathEvidence(c)),
-      JSON.stringify(buildParkEvidence(c)),
-      JSON.stringify(buildRecentVsSeasonVsCareer(c)),
-      JSON.stringify(buildCounterEvidenceJson(c)),
-      c.missingData.length > 0 ? c.missingData.join("; ") : null,
-      "RANK_DONT_GATE: ordinal rank with transparent feature evidence; ties surfaced not collapsed; no threshold or gate implied",
-      ingestRunId,
-    ],
-  );
+/**
+ * Anything that can run a query: the shared pool, or a client inside a
+ * transaction. Every write in this engine takes one so the whole slate can be
+ * written atomically.
+ */
+type Queryable = Pick<typeof pool, "query">;
 
-  const candidateId = result.rows[0].candidate_id;
-  await writeEvidenceBlocks(candidateId, c);
-  return candidateId;
+const RANK_SEMANTICS =
+  "RANK_DONT_GATE: ordinal rank with transparent feature evidence; ties surfaced not collapsed; no threshold or gate implied";
+
+const CANDIDATE_COLUMNS = 17;
+const CANDIDATE_CHUNK_ROWS = 200;
+
+function candidateValues(c: TBCandidate, ingestRunId: string) {
+  return [
+    c.slateDate, c.gamePk, c.playerId, MARKET,
+    c.researchRank, c.researchState,
+    c.mechanism, c.secondaryMechanism,
+    JSON.stringify(buildOpportunityEvidence(c)),
+    JSON.stringify(buildStarterMatchupEvidence(c)),
+    JSON.stringify(buildBullpenPathEvidence(c)),
+    JSON.stringify(buildParkEvidence(c)),
+    JSON.stringify(buildRecentVsSeasonVsCareer(c)),
+    JSON.stringify(buildCounterEvidenceJson(c)),
+    c.missingData.length > 0 ? c.missingData.join("; ") : null,
+    RANK_SEMANTICS,
+    ingestRunId,
+  ];
 }
 
-async function writeEvidenceBlocks(candidateId: string, c: TBCandidate): Promise<void> {
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  return chunks;
+}
+
+/**
+ * Upserts every candidate for the slate.
+ *
+ * Previously this was one INSERT per candidate plus roughly six evidence-block
+ * inserts per candidate, all issued sequentially on the shared pool. A ten-game
+ * slate is about 180 players and cost over a thousand sequential round trips,
+ * and a slow refresh that runs close to first pitch is a refresh that misses
+ * the freeze window.
+ */
+export async function writeCandidates(
+  executor: Queryable,
+  candidates: TBCandidate[],
+  ingestRunId: string,
+): Promise<Map<string, string>> {
+  const candidateIds = new Map<string, string>();
+  if (!candidates.length) return candidateIds;
+
+  for (const batch of chunk(candidates, CANDIDATE_CHUNK_ROWS)) {
+    const values: unknown[] = [];
+    const rowPlaceholders = batch.map((c, rowIndex) => {
+      values.push(...candidateValues(c, ingestRunId));
+      const base = rowIndex * CANDIDATE_COLUMNS;
+      return `(${Array.from({ length: CANDIDATE_COLUMNS }, (_, column) => `$${base + column + 1}`).join(",")})`;
+    });
+    const result = await executor.query<{ candidate_id: string; player_id: number; game_pk: string }>(
+      `INSERT INTO market_research_candidates
+         (slate_date, game_pk, player_id, market, research_rank, research_state,
+          primary_mechanism, secondary_mechanism,
+          opportunity_evidence, starter_matchup_evidence, bullpen_path_evidence,
+          park_evidence, recent_vs_season_vs_career, counter_evidence,
+          missing_stale_evidence, rank_semantics, ingest_run_id)
+       VALUES ${rowPlaceholders.join(",")}
+       ON CONFLICT (slate_date, market, player_id, game_pk) DO UPDATE SET
+         research_rank = EXCLUDED.research_rank,
+         research_state = EXCLUDED.research_state,
+         primary_mechanism = EXCLUDED.primary_mechanism,
+         secondary_mechanism = EXCLUDED.secondary_mechanism,
+          opportunity_evidence = CASE
+            WHEN market_research_candidates.opportunity_evidence->>'source' = 'FANTASYPROS'
+              THEN jsonb_build_object('baseline', market_research_candidates.opportunity_evidence, 'research', EXCLUDED.opportunity_evidence)
+            WHEN market_research_candidates.opportunity_evidence ? 'baseline'
+              THEN jsonb_set(market_research_candidates.opportunity_evidence, '{research}', EXCLUDED.opportunity_evidence, true)
+            ELSE EXCLUDED.opportunity_evidence
+          END,
+         starter_matchup_evidence = EXCLUDED.starter_matchup_evidence,
+         bullpen_path_evidence = EXCLUDED.bullpen_path_evidence,
+         park_evidence = EXCLUDED.park_evidence,
+         recent_vs_season_vs_career = EXCLUDED.recent_vs_season_vs_career,
+         counter_evidence = EXCLUDED.counter_evidence,
+         missing_stale_evidence = EXCLUDED.missing_stale_evidence,
+         ingest_run_id = EXCLUDED.ingest_run_id,
+         updated_at = now()
+       RETURNING candidate_id, player_id, game_pk::text AS game_pk`,
+      values,
+    );
+    for (const row of result.rows) {
+      candidateIds.set(`${row.player_id}:${Number(row.game_pk)}`, row.candidate_id);
+    }
+  }
+  return candidateIds;
+}
+
+type EvidenceBlock = {
+  blockType: string; metricKey: string; metricLabel: string;
+  value: N; unit: string | null; sampleSize: N;
+  direction: string; strength: string; narrative: string; rawEvidence: object;
+};
+
+/** Builds the evidence blocks for one candidate. Pure: it writes nothing. */
+export function buildEvidenceBlocks(c: TBCandidate): EvidenceBlock[] {
   const side = resolveBatterSide(c.hitterBats, c.starterThrows);
   const pitcherXSLGAllowed = resolvePitcherMetric(c.pitcherFeatures, "xslg_allowed", side);
   const hitterXSLG = resolveHitterMetric(c.hitterFeatures, "xslg", side);
 
-  type Block = {
-    blockType: string; metricKey: string; metricLabel: string;
-    value: N; unit: string | null; sampleSize: N;
-    direction: string; strength: string; narrative: string; rawEvidence: object;
-  };
-
-  const blocks: Block[] = [
+  const blocks: EvidenceBlock[] = [
     {
       blockType: "OPPORTUNITY", metricKey: "batting_order", metricLabel: "Batting order slot",
       value: c.battingOrder, unit: "slot", sampleSize: null,
@@ -817,19 +865,54 @@ async function writeEvidenceBlocks(candidateId: string, c: TBCandidate): Promise
     });
   }
 
-  for (const b of blocks) {
-    await pool.query(
+  return blocks;
+}
+
+const EVIDENCE_BLOCK_COLUMNS = 12;
+const EVIDENCE_BLOCK_CHUNK_ROWS = 300;
+
+/**
+ * Writes every evidence block for the slate in as few statements as the
+ * parameter limit allows, instead of roughly six sequential inserts per
+ * candidate.
+ *
+ * Rows are deduplicated on (candidate_id, block_type, metric_key) first: a
+ * multi-row ON CONFLICT DO UPDATE cannot affect the same row twice, and a
+ * duplicate within one statement would abort the whole slate.
+ */
+export async function writeEvidenceBlocks(
+  executor: Queryable,
+  rows: Array<{ candidateId: string; block: EvidenceBlock }>,
+): Promise<number> {
+  const deduplicated = new Map<string, { candidateId: string; block: EvidenceBlock }>();
+  for (const row of rows) {
+    deduplicated.set(`${row.candidateId}:${row.block.blockType}:${row.block.metricKey}`, row);
+  }
+  const ordered = [...deduplicated.values()];
+  for (const batch of chunk(ordered, EVIDENCE_BLOCK_CHUNK_ROWS)) {
+    const values: unknown[] = [];
+    const placeholders = batch.map(({ candidateId, block }, rowIndex) => {
+      values.push(
+        candidateId, block.blockType, TB_ENGINE_SOURCE, block.metricKey, block.metricLabel,
+        block.value, block.unit, block.sampleSize, block.direction, block.strength,
+        block.narrative, JSON.stringify(block.rawEvidence),
+      );
+      const base = rowIndex * EVIDENCE_BLOCK_COLUMNS;
+      const columns = Array.from({ length: EVIDENCE_BLOCK_COLUMNS }, (_, column) => `$${base + column + 1}`);
+      return `(${columns.join(",")},now())`;
+    });
+    await executor.query(
       `INSERT INTO market_research_evidence_blocks
          (candidate_id, block_type, source_id, metric_key, metric_label,
           value, unit, sample_size, direction, strength, narrative, raw_evidence, retrieved_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
+       VALUES ${placeholders.join(",")}
        ON CONFLICT (candidate_id, block_type, metric_key) DO UPDATE SET
          value = EXCLUDED.value, direction = EXCLUDED.direction, strength = EXCLUDED.strength,
          narrative = EXCLUDED.narrative, raw_evidence = EXCLUDED.raw_evidence, retrieved_at = EXCLUDED.retrieved_at`,
-      [candidateId, b.blockType, TB_ENGINE_SOURCE, b.metricKey, b.metricLabel,
-       b.value, b.unit, b.sampleSize, b.direction, b.strength, b.narrative, JSON.stringify(b.rawEvidence)],
+      values,
     );
   }
+  return ordered.length;
 }
 
 // ── Main engine entry point ───────────────────────────────────────────────────
@@ -841,10 +924,14 @@ async function writeEvidenceBlocks(candidateId: string, c: TBCandidate): Promise
  * the current candidate set. This ensures stale candidates from removed lineup
  * entries do not persist on the market board between reruns.
  */
-async function reconcileSlateCandidates(slateDate: string, candidates: TBCandidate[]): Promise<number> {
+async function reconcileSlateCandidates(
+  executor: Queryable,
+  slateDate: string,
+  candidates: TBCandidate[],
+): Promise<number> {
   if (candidates.length === 0) {
     // No candidates this run — wipe all TB candidates for this slate
-    const result = await pool.query<{ count: string }>(
+    const result = await executor.query<{ count: string }>(
       `WITH deleted AS (
          DELETE FROM market_research_candidates
          WHERE slate_date = $1 AND market = 'TOTAL_BASES_2_PLUS'
@@ -860,7 +947,7 @@ async function reconcileSlateCandidates(slateDate: string, candidates: TBCandida
   const playerIds = candidates.map((c) => c.playerId);
   const gamePks = candidates.map((c) => c.gamePk);
 
-  const result = await pool.query<{ count: string }>(
+  const result = await executor.query<{ count: string }>(
     `WITH eligible AS (
        SELECT unnest($2::integer[]) AS player_id,
               unnest($3::bigint[])  AS game_pk
@@ -894,7 +981,7 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
       // Reconcile even with zero games: a previously-run slate whose games were
       // cancelled/removed must still have its stale candidates cleared so the
       // market board does not show output from an invalid game.
-      const staleRemoved = await reconcileSlateCandidates(slateDate, []);
+      const staleRemoved = await reconcileSlateCandidates(pool, slateDate, []);
       const noGamesNote = staleRemoved > 0
         ? `No games on this date; ${staleRemoved} stale TB candidate(s) from a prior run have been cleared.`
         : "No games found for this date; TB board is empty.";
@@ -926,6 +1013,7 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
     const pitcherCache = new Map<number, FeatureMap>();
     const parkCache = new Map<number, FeatureMap>();
     const bullpenCache = new Map<string, BullpenSummary>();
+    const bvpCache = new Map<string, Awaited<ReturnType<typeof getBatterPitcherEvidence>>>();
 
     const candidates: TBCandidate[] = [];
 
@@ -988,7 +1076,16 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
         hitterFeatures, pitcherFeatures,
         player.battingOrder, player.bats, starter.throws, counterEvidence,
       );
-      const bvp = starter.playerId === null ? null : await getBatterPitcherEvidence(player.playerId, starter.playerId, slateDate, "TB");
+      // Cached by (batter, starter). The same starter faces every hitter in the
+      // opposing lineup, so this was one uncached lookup per candidate.
+      let bvp: Awaited<ReturnType<typeof getBatterPitcherEvidence>> | null = null;
+      if (starter.playerId !== null) {
+        const bvpKey = `${player.playerId}:${starter.playerId}`;
+        if (!bvpCache.has(bvpKey)) {
+          bvpCache.set(bvpKey, await getBatterPitcherEvidence(player.playerId, starter.playerId, slateDate, "TB"));
+        }
+        bvp = bvpCache.get(bvpKey) ?? null;
+      }
       const evidenceScore = baseEvidenceScore + (bvp?.rankAdjustment ?? 0);
       // Named matchup evidence orders otherwise-qualified candidates only; it must never
       // change the persisted research state or downstream selection eligibility.
@@ -1007,19 +1104,42 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
 
     assignCompetitionRanks(candidates);
 
-    // Write current candidates (upsert)
+    // One transaction for the whole slate.
+    //
+    // These writes used to run in a bare loop on the shared pool with the
+    // reconcile after them and nothing wrapping any of it, so a failure partway
+    // through left a partially populated board alongside an ingest run marked
+    // FAILED. The next reader saw a board that looked real and was not.
+    // daily-market-board.ts already did this correctly; this engine did not.
     let candidatesWritten = 0;
-    for (const c of candidates) {
-      await writeCandidate(c, ingestRunId);
-      candidatesWritten++;
+    let evidenceBlocksWritten = 0;
+    let staleRemoved = 0;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const candidateIds = await writeCandidates(client, candidates, ingestRunId);
+      candidatesWritten = candidateIds.size;
+      const evidenceRows = candidates.flatMap((c) => {
+        const candidateId = candidateIds.get(`${c.playerId}:${c.gamePk}`);
+        if (!candidateId) return [];
+        return buildEvidenceBlocks(c).map((block) => ({ candidateId, block }));
+      });
+      evidenceBlocksWritten = await writeEvidenceBlocks(client, evidenceRows);
+      // Reconcile inside the same transaction and after the writes, so current
+      // candidates are protected from deletion and a failure rolls the removal
+      // back with everything else.
+      staleRemoved = await reconcileSlateCandidates(client, slateDate, candidates);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
     }
-
-    // Reconcile: remove TB candidates from prior runs that are no longer in this lineup.
-    // Must run after writes so current candidates are protected from deletion.
-    const staleRemoved = await reconcileSlateCandidates(slateDate, candidates);
     if (staleRemoved > 0) {
       notes.push(`Reconciliation removed ${staleRemoved} stale TB candidate(s) from this slate.`);
     }
+    notes.push(`Wrote ${candidatesWritten} candidate(s) and ${evidenceBlocksWritten} evidence block(s) in one transaction.`);
 
     const counts = {
       strong: candidates.filter((c) => c.researchState === "STRONG").length,

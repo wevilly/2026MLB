@@ -647,8 +647,18 @@ function buildCounterEvidenceJson(c: WALKCandidate): object {
 
 // ── DB write ──────────────────────────────────────────────────────────────────
 
-async function writeCandidate(c: WALKCandidate, ingestRunId: string): Promise<string> {
-  const result = await pool.query<{ candidate_id: string }>(
+/**
+ * Anything that can run a query: the shared pool, or a client inside a
+ * transaction. The slate write path takes one so it can be made atomic.
+ */
+type Queryable = Pick<typeof pool, "query">;
+
+async function writeCandidate(
+  executor: Queryable,
+  c: WALKCandidate,
+  ingestRunId: string,
+): Promise<string> {
+  const result = await executor.query<{ candidate_id: string }>(
     `INSERT INTO market_research_candidates
        (slate_date, game_pk, player_id, market, research_rank, research_state,
         primary_mechanism, secondary_mechanism,
@@ -694,11 +704,15 @@ async function writeCandidate(c: WALKCandidate, ingestRunId: string): Promise<st
   );
 
   const candidateId = result.rows[0].candidate_id;
-  await writeEvidenceBlocks(candidateId, c);
+  await writeEvidenceBlocks(executor, candidateId, c);
   return candidateId;
 }
 
-async function writeEvidenceBlocks(candidateId: string, c: WALKCandidate): Promise<void> {
+async function writeEvidenceBlocks(
+  executor: Queryable,
+  candidateId: string,
+  c: WALKCandidate,
+): Promise<void> {
   const side = resolveBatterSide(c.hitterBats, c.starterThrows);
   const hitterBBPct  = n(c.hitterFeatures, hk("bb_percent", side)) ?? n(c.hitterFeatures, "bb_percent");
   const pitcherBBPct = n(c.pitcherFeatures, pk("bb_percent", side)) ?? n(c.pitcherFeatures, "bb_percent");
@@ -785,7 +799,7 @@ async function writeEvidenceBlocks(candidateId: string, c: WALKCandidate): Promi
   }
 
   for (const b of blocks) {
-    await pool.query(
+    await executor.query(
       `INSERT INTO market_research_evidence_blocks
          (candidate_id, block_type, source_id, metric_key, metric_label,
           value, unit, sample_size, direction, strength, narrative, raw_evidence, retrieved_at)
@@ -801,9 +815,13 @@ async function writeEvidenceBlocks(candidateId: string, c: WALKCandidate): Promi
 
 // ── Main engine entry point ───────────────────────────────────────────────────
 
-async function reconcileSlateCandidates(slateDate: string, candidates: WALKCandidate[]): Promise<number> {
+async function reconcileSlateCandidates(
+  executor: Queryable,
+  slateDate: string,
+  candidates: WALKCandidate[],
+): Promise<number> {
   if (candidates.length === 0) {
-    const result = await pool.query<{ count: string }>(
+    const result = await executor.query<{ count: string }>(
       `WITH deleted AS (
          DELETE FROM market_research_candidates
          WHERE slate_date = $1 AND market = 'BATTER_WALK'
@@ -817,7 +835,7 @@ async function reconcileSlateCandidates(slateDate: string, candidates: WALKCandi
   const playerIds = candidates.map((c) => c.playerId);
   const gamePks   = candidates.map((c) => c.gamePk);
 
-  const result = await pool.query<{ count: string }>(
+  const result = await executor.query<{ count: string }>(
     `WITH eligible AS (
        SELECT unnest($2::integer[]) AS player_id,
               unnest($3::bigint[])  AS game_pk
@@ -848,7 +866,7 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
 
     const games = await getSlateGames(slateDate);
     if (games.length === 0) {
-      const staleRemoved = await reconcileSlateCandidates(slateDate, []);
+      const staleRemoved = await reconcileSlateCandidates(pool, slateDate, []);
       const noGamesNote = staleRemoved > 0
         ? `No games on this date; ${staleRemoved} stale WALK candidate(s) from a prior run have been cleared.`
         : "No games found for this date; Walk board is empty.";
@@ -961,13 +979,31 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
 
     assignCompetitionRanks(candidates);
 
+    // One transaction for the whole slate.
+    //
+    // These writes previously ran in a bare loop on the shared pool with the
+    // reconcile after them and nothing wrapping any of it, so a failure partway
+    // through left a partially populated board next to an ingest run marked
+    // FAILED, and the next reader saw a board that looked real and was not.
     let candidatesWritten = 0;
-    for (const c of candidates) {
-      await writeCandidate(c, ingestRunId);
-      candidatesWritten++;
+    let staleRemoved = 0;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const c of candidates) {
+        await writeCandidate(client, c, ingestRunId);
+        candidatesWritten++;
+      }
+      // After the writes, so current candidates are protected from deletion,
+      // and inside the transaction, so a failure rolls the removal back too.
+      staleRemoved = await reconcileSlateCandidates(client, slateDate, candidates);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
     }
-
-    const staleRemoved = await reconcileSlateCandidates(slateDate, candidates);
     if (staleRemoved > 0) {
       notes.push(`Reconciliation removed ${staleRemoved} stale WALK candidate(s) from this slate.`);
     }
