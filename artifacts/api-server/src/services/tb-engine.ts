@@ -156,6 +156,71 @@ const pk = (metricKey: string, batterSide: string | null) =>
   batterSide ? `${metricKey}:${batterSide}` : metricKey;
 
 /**
+ * Metrics deliberately read unsplit, each with its reason.
+ *
+ * Anything not listed here resolves split-first with an unsplit fallback. Put
+ * a metric in one of these maps only with a stated justification: an
+ * unexplained unsplit read is how the same metric came to be resolved two
+ * different ways in this file.
+ */
+export const UNSPLIT_HITTER_METRICS = new Map<string, string>([
+  ["pa", "Season plate appearance count used as a sample denominator, not a rate."],
+]);
+
+export const UNSPLIT_PITCHER_METRICS = new Map<string, string>([
+  ["bf", "Season batters-faced count used as a sample denominator, not a rate."],
+  ["pa", "Season plate appearance count used as a sample denominator, not a rate."],
+]);
+
+/**
+ * The single hitter metric resolver.
+ *
+ * classifyMechanism read n(hitter, hk('iso', side)) ?? n(hitter, 'iso') while
+ * computeEvidenceScore read n(hitter, 'iso') with no split fallback, so the
+ * same player in the same pass could be classified POWER_ROUTE on his platoon
+ * split iso and then scored on his unsplit season iso. Every hitter metric
+ * read in this file now goes through here.
+ *
+ * splitOnly is for the reads that genuinely want the split value and nothing
+ * else, such as the "vs this pitcher hand" evidence fields, where falling back
+ * to the season line would mislabel the number.
+ */
+export function resolveHitterMetric(
+  map: FeatureMap,
+  metricKey: string,
+  pitcherHand: string | null,
+  options: { splitOnly?: boolean } = {},
+): N {
+  if (UNSPLIT_HITTER_METRICS.has(metricKey)) return n(map, metricKey);
+  const split = n(map, hk(metricKey, pitcherHand));
+  if (options.splitOnly) return pitcherHand ? split : null;
+  return split ?? n(map, metricKey);
+}
+
+/**
+ * An explicitly unsplit read, for the evidence fields that are labelled
+ * "season" and must show the season line rather than a platoon split. Named so
+ * that an unsplit read is always a deliberate choice with a visible reason,
+ * never an omission.
+ */
+function seasonHitterMetric(map: FeatureMap, metricKey: string): N {
+  return n(map, metricKey);
+}
+
+/** The single pitcher metric resolver. Same rule, keyed by batter side. */
+export function resolvePitcherMetric(
+  map: FeatureMap,
+  metricKey: string,
+  batterSide: string | null,
+  options: { splitOnly?: boolean } = {},
+): N {
+  if (UNSPLIT_PITCHER_METRICS.has(metricKey)) return n(map, metricKey);
+  const split = n(map, pk(metricKey, batterSide));
+  if (options.splitOnly) return batterSide ? split : null;
+  return split ?? n(map, metricKey);
+}
+
+/**
  * Resolve the effective batter side for a given batter's handedness and the
  * pitcher's throwing arm. Switch hitters bat opposite the pitcher.
  */
@@ -379,12 +444,12 @@ function classifyMechanism(
   pitcherThrows: string | null,
 ): { primary: TBMechanism; secondary: TBMechanism | null } {
   const side = resolveBatterSide(bats, pitcherThrows);
-  const xslg = n(hitter, hk("xslg", side)) ?? n(hitter, "xslg");
-  const iso = n(hitter, hk("iso", side)) ?? n(hitter, "iso");
-  const barrel = n(hitter, "barrel_percent");
-  const hardHit = n(hitter, "hard_hit_percent");
-  const kPct = n(hitter, hk("k_percent", side)) ?? n(hitter, "k_percent");
-  const xba = n(hitter, hk("xba", side)) ?? n(hitter, "xba");
+  const xslg = resolveHitterMetric(hitter, "xslg", side);
+  const iso = resolveHitterMetric(hitter, "iso", side);
+  const barrel = resolveHitterMetric(hitter, "barrel_percent", side);
+  const hardHit = resolveHitterMetric(hitter, "hard_hit_percent", side);
+  const kPct = resolveHitterMetric(hitter, "k_percent", side);
+  const xba = resolveHitterMetric(hitter, "xba", side);
 
   let powerSignals = 0;
   if (xslg !== null && xslg >= POWER_XSLG) powerSignals++;
@@ -416,7 +481,7 @@ function checkCounterEvidence(
   const effectiveBatterSide = resolveBatterSide(bats, pitcherThrows);
 
   // Pitcher K-rate counter
-  const pitcherK = n(pitcher, pk("k_percent", effectiveBatterSide)) ?? n(pitcher, "k_percent");
+  const pitcherK = resolvePitcherMetric(pitcher, "k_percent", effectiveBatterSide);
   if (pitcherK !== null && pitcherK >= HIGH_K_PITCHER) counters.push("HIGH_PITCHER_K_RATE");
 
   // Low-PA batting slot
@@ -453,10 +518,10 @@ function computeEvidenceScore(
   const side = resolveBatterSide(bats, pitcherThrows);
   const effectiveBatterSide = side;
 
-  const xslg = n(hitter, hk("xslg", side)) ?? n(hitter, "xslg");
-  const iso = n(hitter, "iso");
-  const barrel = n(hitter, "barrel_percent");
-  const pitcherXSLGAllowed = n(pitcher, pk("xslg_allowed", effectiveBatterSide)) ?? n(pitcher, "xslg_allowed");
+  const xslg = resolveHitterMetric(hitter, "xslg", side);
+  const iso = resolveHitterMetric(hitter, "iso", side);
+  const barrel = resolveHitterMetric(hitter, "barrel_percent", side);
+  const pitcherXSLGAllowed = resolvePitcherMetric(pitcher, "xslg_allowed", effectiveBatterSide);
 
   let score = 0;
 
@@ -543,7 +608,7 @@ function buildOpportunityEvidence(c: TBCandidate): object {
       : c.battingOrder <= 2 ? "HIGH"
         : c.battingOrder <= 4 ? "ABOVE_AVERAGE"
           : c.battingOrder <= 6 ? "AVERAGE" : "LOW",
-    seasonPA: n(c.hitterFeatures, "pa"),
+    seasonPA: seasonHitterMetric(c.hitterFeatures, "pa"),
   };
 }
 
@@ -557,11 +622,11 @@ function buildStarterMatchupEvidence(c: TBCandidate): object {
     hitterBats: c.hitterBats,
     effectivePlatoonSide: side,
     platoonDisfavored: isPlatoonDisfavored(c.hitterBats, c.starterThrows),
-    pitcherXSLGAllowed: n(c.pitcherFeatures, pk("xslg_allowed", side)) ?? n(c.pitcherFeatures, "xslg_allowed"),
-    pitcherKPct: n(c.pitcherFeatures, pk("k_percent", side)) ?? n(c.pitcherFeatures, "k_percent"),
-    pitcherHardHitPct: n(c.pitcherFeatures, pk("hard_hit_percent", side)) ?? n(c.pitcherFeatures, "hard_hit_percent"),
-    hitterXSLGvsPitcherHand: n(c.hitterFeatures, hk("xslg", side)),
-    hitterSLGvsPitcherHand: n(c.hitterFeatures, hk("slg", side)),
+    pitcherXSLGAllowed: resolvePitcherMetric(c.pitcherFeatures, "xslg_allowed", side),
+    pitcherKPct: resolvePitcherMetric(c.pitcherFeatures, "k_percent", side),
+    pitcherHardHitPct: resolvePitcherMetric(c.pitcherFeatures, "hard_hit_percent", side),
+    hitterXSLGvsPitcherHand: resolveHitterMetric(c.hitterFeatures, "xslg", side, { splitOnly: true }),
+    hitterSLGvsPitcherHand: resolveHitterMetric(c.hitterFeatures, "slg", side, { splitOnly: true }),
   };
 }
 
@@ -596,14 +661,14 @@ function buildParkEvidence(c: TBCandidate): object {
 
 function buildRecentVsSeasonVsCareer(c: TBCandidate): object {
   return {
-    seasonSLG: n(c.hitterFeatures, "slg"),
-    seasonXSLG: n(c.hitterFeatures, "xslg"),
-    seasonISO: n(c.hitterFeatures, "iso"),
-    seasonXBA: n(c.hitterFeatures, "xba"),
-    seasonKPct: n(c.hitterFeatures, "k_percent"),
-    seasonHardHitPct: n(c.hitterFeatures, "hard_hit_percent"),
-    seasonBarrelPct: n(c.hitterFeatures, "barrel_percent"),
-    seasonPA: n(c.hitterFeatures, "pa"),
+    seasonSLG: seasonHitterMetric(c.hitterFeatures, "slg"),
+    seasonXSLG: seasonHitterMetric(c.hitterFeatures, "xslg"),
+    seasonISO: seasonHitterMetric(c.hitterFeatures, "iso"),
+    seasonXBA: seasonHitterMetric(c.hitterFeatures, "xba"),
+    seasonKPct: seasonHitterMetric(c.hitterFeatures, "k_percent"),
+    seasonHardHitPct: seasonHitterMetric(c.hitterFeatures, "hard_hit_percent"),
+    seasonBarrelPct: seasonHitterMetric(c.hitterFeatures, "barrel_percent"),
+    seasonPA: seasonHitterMetric(c.hitterFeatures, "pa"),
     window: "SEASON",
   };
 }
@@ -677,8 +742,8 @@ async function writeCandidate(c: TBCandidate, ingestRunId: string): Promise<stri
 
 async function writeEvidenceBlocks(candidateId: string, c: TBCandidate): Promise<void> {
   const side = resolveBatterSide(c.hitterBats, c.starterThrows);
-  const pitcherXSLGAllowed = n(c.pitcherFeatures, pk("xslg_allowed", side)) ?? n(c.pitcherFeatures, "xslg_allowed");
-  const hitterXSLG = n(c.hitterFeatures, hk("xslg", side)) ?? n(c.hitterFeatures, "xslg");
+  const pitcherXSLGAllowed = resolvePitcherMetric(c.pitcherFeatures, "xslg_allowed", side);
+  const hitterXSLG = resolveHitterMetric(c.hitterFeatures, "xslg", side);
 
   type Block = {
     blockType: string; metricKey: string; metricLabel: string;
@@ -705,7 +770,7 @@ async function writeEvidenceBlocks(candidateId: string, c: TBCandidate): Promise
     },
     {
       blockType: "RECENT_VS_SEASON_VS_CAREER", metricKey: "season_xslg", metricLabel: "Season xSLG",
-      value: hitterXSLG, unit: "rate", sampleSize: n(c.hitterFeatures, "pa"),
+      value: hitterXSLG, unit: "rate", sampleSize: seasonHitterMetric(c.hitterFeatures, "pa"),
       direction: hitterXSLG === null ? "UNKNOWN" : hitterXSLG >= 0.450 ? "FAVORABLE" : hitterXSLG >= 0.380 ? "NEUTRAL" : "UNFAVORABLE",
       strength: hitterXSLG === null ? "UNKNOWN" : hitterXSLG >= 0.500 ? "STRONG" : hitterXSLG >= 0.430 ? "MODERATE" : "WEAK",
       narrative: "Hitter expected SLG (season). Derived from Statcast exit velocity and launch angle.",
@@ -911,8 +976,9 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
       const { primary: mechanism, secondary: secondaryMechanism } = classifyMechanism(
         hitterFeatures, player.battingOrder, player.bats, starter.throws,
       );
-      const hitterPA = n(hitterFeatures, "pa");
-      const pitcherBF = n(pitcherFeatures, "bf") ?? n(pitcherFeatures, "pa");
+      const hitterPA = resolveHitterMetric(hitterFeatures, "pa", null);
+      const pitcherBF = resolvePitcherMetric(pitcherFeatures, "bf", null)
+        ?? resolvePitcherMetric(pitcherFeatures, "pa", null);
       const counterEvidence = checkCounterEvidence(
         hitterFeatures, pitcherFeatures, bullpen,
         player.battingOrder, player.bats, starter.throws,
