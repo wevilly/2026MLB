@@ -10,3 +10,4 @@
 - [Bullpen availability date arithmetic](bullpen-availability-date-arithmetic.md) — calculate rest-day offsets in PostgreSQL and validate integer inputs before availability writes.
 - [Multi-artifact publishing](multi-artifact-publishing.md) — publishing the web artifact does not update a separately deployed API artifact; verify each production service independently.
 - [FantasyPros baseline enrichment](fantasypros-baseline-enrichment.md) — retain projected baseline rank and provenance when optional research adds its own ordinal evidence.
+- [Post-merge database hook](post-merge-database-hook.md) — a non-TTY Drizzle conflict can leave the post-merge schema hook partially applied and failed.
