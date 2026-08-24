@@ -209,11 +209,18 @@ function pair(
   const legs = [first, second].sort(compareCandidate);
   const stateTotal = legs.reduce((total, leg) => total + STATE_WEIGHT[leg.researchState], 0);
   const rankTotal = legs.reduce((total, leg) => total + (leg.researchRank ?? 10_000), 0);
-  const lineupEvidence = legs.every((leg) => leg.lineupState === "CONFIRMED")
-    ? "FantasyPros confirmed lineups"
-    : legs.every((leg) => leg.lineupState === "PROJECTED")
-      ? "FantasyPros projected lineups"
-      : "FantasyPros mixed confirmed/projected lineups";
+  // POSTED is a real state with a producer: data-foundation writes it from the
+  // MLB Stats API game feed, and the lineup source precedence in
+  // lineup-sources.ts now lets it reach here. It used to be declared on this
+  // type with nothing ever producing it, and pair() branched on only two of the
+  // four states.
+  const lineupEvidence = legs.every((leg) => leg.lineupState === "POSTED")
+    ? "MLB posted lineup cards"
+    : legs.every((leg) => leg.lineupState === "CONFIRMED")
+      ? "FantasyPros confirmed lineups"
+      : legs.every((leg) => leg.lineupState === "PROJECTED")
+        ? "FantasyPros projected lineups"
+        : `mixed lineup states (${[...new Set(legs.map((leg) => leg.lineupState))].sort().join(", ")})`;
   const confirmedStarter = legs.every((leg) => leg.starterState === "CONFIRMED");
   const arsenalAvailable = legs.filter((leg) => leg.arsenalStatus === "AVAILABLE").length;
   const bvpAvailable = legs.filter((leg) => leg.bvpStatus === "AVAILABLE").length;
@@ -303,8 +310,13 @@ function constructionIdentity(construction: RoundRobinConstruction) {
 function compareConstruction(a: RoundRobinConstruction, b: RoundRobinConstruction) {
   if (a.stateTotal !== b.stateTotal) return b.stateTotal - a.stateTotal;
   if (a.rankTotal !== b.rankTotal) return a.rankTotal - b.rankTotal;
+  // A submitted card is the most authoritative lineup there is, so POSTED ranks
+  // above CONFIRMED. It scored zero here while it was an unproduced state.
   const lineupFreshness = (lineupState: string) =>
-    lineupState === "CONFIRMED" ? 2 : lineupState === "PROJECTED" ? 1 : 0;
+    lineupState === "POSTED" ? 3
+      : lineupState === "CONFIRMED" ? 2
+        : lineupState === "PROJECTED" ? 1
+          : 0;
   const freshnessA = a.legs.reduce((total, leg) => total + lineupFreshness(leg.lineupState), 0);
   const freshnessB = b.legs.reduce((total, leg) => total + lineupFreshness(leg.lineupState), 0);
   if (freshnessA !== freshnessB) return freshnessB - freshnessA;

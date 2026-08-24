@@ -1016,6 +1016,36 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
      ORDER BY p.player_id, p.full_name LIMIT 100`,
     [`%${search}%`, effectiveDate, role],
   );
+  // Name collision protection.
+  //
+  // Resolving a player by name alone silently picked the first row. There are
+  // two players named Max Muncy on different clubs and more than one Fermin, so
+  // "the first row" is a coin flip that looks like an answer. When the caller
+  // supplied no playerId and the search names a player carried by more than one
+  // club, the collision is raised rather than resolved.
+  const normalize = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+  const exactNameMatches = profileCount.rows.filter(
+    (row) => normalize(row.full_name) === normalize(search),
+  );
+  const collidingClubs = new Set(exactNameMatches.map((row) => row.abbreviation ?? "UNKNOWN"));
+  if (playerId == null && exactNameMatches.length > 1 && collidingClubs.size > 1) {
+    return {
+      sourceStatus: "AMBIGUOUS PLAYER NAME",
+      searchResults: exactNameMatches.map((row) => ({
+        playerId: row.player_id,
+        name: row.full_name,
+        team: row.abbreviation ?? "NOT FOUND",
+        position: row.primary_position ?? "NOT FOUND",
+        role: role === "HITTER" ? "HITTER" : "PITCHER",
+      })),
+      profile: null,
+      notices: [
+        `${exactNameMatches.length} players named "${search.trim()}" are carried by different clubs `
+        + `(${[...collidingClubs].sort().join(", ")}). Select one by player id; this view will not guess.`,
+      ],
+    };
+  }
+
   const selectedId = playerId ?? profileCount.rows[0]?.player_id ?? null;
   if (!selectedId) {
     const hasRequestedAsOfDate = effectiveDate !== dateOnly(new Date());

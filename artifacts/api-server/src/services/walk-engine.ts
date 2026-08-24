@@ -36,6 +36,7 @@
  */
 
 import { pool } from "@workspace/db";
+import { conflictsFor, querySlateLineupPlayers } from "./lineup-sources";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
 
@@ -199,45 +200,6 @@ async function getSlateGames(slateDate: string): Promise<SlateGame[]> {
   return result.rows.map((r) => ({
     gamePk: Number(r.game_pk), venueId: r.venue_id,
     awayTeamId: r.away_team_id, homeTeamId: r.home_team_id,
-  }));
-}
-
-async function getSlateLineupPlayers(gamePks: number[]): Promise<LineupPlayer[]> {
-  if (gamePks.length === 0) return [];
-  const result = await pool.query<{
-    player_id: number; full_name: string; bats: string | null; batting_order: number;
-    game_pk: number; team_id: number; lineup_state: string; opp_team_id: number; venue_id: number | null;
-  }>(
-    `WITH best_lineup AS (
-       SELECT DISTINCT ON (game_pk, team_id)
-         lineup_snapshot_id, game_pk, team_id, state AS lineup_state
-       FROM lineup_snapshots
-       WHERE game_pk = ANY($1)
-         AND source_id = 'FANTASYPROS'
-         AND state IN ('CONFIRMED', 'PROJECTED')
-       ORDER BY game_pk, team_id,
-         CASE
-           WHEN state = 'CONFIRMED' THEN 1
-           ELSE 2
-         END,
-         observed_at DESC
-     )
-     SELECT le.player_id, p.full_name, p.bats, le.batting_order,
-            bl.game_pk::bigint, bl.team_id, bl.lineup_state,
-            CASE WHEN bl.team_id = g.away_team_id THEN g.home_team_id ELSE g.away_team_id END AS opp_team_id,
-            g.venue_id
-     FROM best_lineup bl
-     JOIN lineup_entries le ON le.lineup_snapshot_id = bl.lineup_snapshot_id
-     JOIN players p ON p.player_id = le.player_id
-     JOIN games g ON g.game_pk = bl.game_pk
-     WHERE le.player_id IS NOT NULL
-     ORDER BY bl.game_pk, le.batting_order`,
-    [gamePks],
-  );
-  return result.rows.map((r) => ({
-    playerId: r.player_id, playerName: r.full_name, bats: r.bats,
-    battingOrder: r.batting_order, gamePk: Number(r.game_pk), teamId: r.team_id,
-    lineupState: r.lineup_state, oppTeamId: r.opp_team_id, venueId: r.venue_id,
   }));
 }
 
@@ -878,10 +840,15 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
     }
 
     const gamePks = games.map((g) => g.gamePk);
-    const lineupPlayers = await getSlateLineupPlayers(gamePks);
+    const { players: lineupPlayers, resolved: resolvedLineups } = await querySlateLineupPlayers(gamePks);
 
     if (lineupPlayers.length === 0) {
       notes.push("No lineup entries found. Walk candidates require lineup data.");
+    }
+    if (resolvedLineups.conflicts.length > 0) {
+      notes.push(
+        `${resolvedLineups.conflicts.length} lineup source conflict(s) recorded; affected candidates carry a blocking evidence gap.`,
+      );
     }
 
     // Create ingest run — hoisted ID is visible to catch block for FAILED marking
@@ -939,6 +906,11 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
       if (starter.playerId === null)  missingData.push("Opposing starter identity unknown");
       else if (pitcherFeatures.size === 0) missingData.push("No season pitcher research data");
       if (player.venueId === null || parkFeatures.size === 0) missingData.push("Park factors unavailable");
+      // A disagreement between lineup feeds is a blocking evidence gap on this
+      // candidate, not something precedence quietly resolves.
+      for (const conflict of conflictsFor(resolvedLineups, player.gamePk, player.playerId)) {
+        missingData.push(conflict.detail);
+      }
       if (bullpen.status !== "CURRENT") {
         missingData.push(`Bullpen path ${bullpen.status.toLowerCase()}: ${bullpen.reason}`);
       } else if (bullpen.metricArmCount !== bullpen.armIds.length) {

@@ -73,6 +73,14 @@ import { ingestFantasyPros, ingestMlbOfficial } from "../services/data-foundatio
 import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFallback, researchHealth } from "../services/research-foundation";
 import { getBatterPitcherEvidence, refreshBatterPitcherSlate, type BvpMarket } from "../services/batter-pitcher-research";
 import { compareRoundRobinGame, type RoundRobinBoardId, type RoundRobinCandidate } from "../services/round-robin-comparison";
+import { LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter } from "../services/lineup-sources";
+
+/**
+ * Accepted (source, state) pairs for the Round Robin lineup read, in precedence
+ * order. array_position over sourceIds gives the query the same ordering the
+ * shared resolver applies.
+ */
+const ROUND_ROBIN_LINEUP_FILTER = lineupSourceFilter(LINEUP_SOURCE_PRECEDENCE);
 import { getBullpenRoom, refreshBullpen } from "../services/bullpen-foundation";
 import { runTBEngine } from "../services/tb-engine";
 import { runXBHEngine } from "../services/xbh-engine";
@@ -1070,18 +1078,28 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
        missing_stale_evidence: string | null; identity_resolved: boolean; side: "AWAY" | "HOME"; team: string;
        lineup_state: "POSTED" | "CONFIRMED" | "PROJECTED"; lineup_source: string;
     }>(
-      `WITH latest_lineup AS (
+      `WITH accepted AS (
+         SELECT * FROM unnest($2::text[], $3::text[]) AS s(source_id, state)
+       ),
+       latest_lineup AS (
+         -- One lineup per team, chosen by the documented source precedence in
+         -- lineup-sources.ts rather than by a source name written into this
+         -- query. A submitted MLB card outranks a FantasyPros report, which
+         -- outranks a projection.
          SELECT DISTINCT ON (ls.game_pk, ls.team_id)
             ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state, ls.source_id
          FROM lineup_snapshots ls
          JOIN games g ON g.game_pk = ls.game_pk
+         JOIN accepted a ON a.source_id = ls.source_id AND a.state = ls.state::text
          WHERE g.game_date = $1
-           AND ls.source_id = 'FANTASYPROS'
-           AND ls.state IN ('CONFIRMED', 'PROJECTED')
          ORDER BY ls.game_pk, ls.team_id,
-           CASE
-             WHEN ls.state = 'CONFIRMED' THEN 1
-             ELSE 2
+           array_position($2::text[], ls.source_id),
+           CASE ls.state::text
+             WHEN 'POSTED' THEN 1
+             WHEN 'CONFIRMED' THEN 2
+             WHEN 'UPDATED' THEN 3
+             WHEN 'PROJECTED' THEN 4
+             ELSE 9
            END,
            ls.observed_at DESC
        )
@@ -1107,7 +1125,7 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
        LEFT JOIN players p ON p.player_id = mrc.player_id
        WHERE mrc.slate_date = $1
        ORDER BY mrc.game_pk, side, mrc.research_rank ASC NULLS LAST, player_name`,
-      [date],
+      [date, ROUND_ROBIN_LINEUP_FILTER.sourceIds, ROUND_ROBIN_LINEUP_FILTER.states],
     );
 
     const candidates = await Promise.all(rows.rows.map(async (row) => {
