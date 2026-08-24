@@ -27,13 +27,20 @@
  */
 
 import { pool } from "@workspace/db";
+import { MARKET_TO_DB } from "./market-codes";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
+import { conflictsFor, querySlateLineupPlayers } from "./lineup-sources";
+import {
+  getSlateWeather,
+  weatherAdjustment,
+  type GameWeather,
+} from "./weather-foundation";
 
 // ── Source ID ─────────────────────────────────────────────────────────────────
 
 const TB_ENGINE_SOURCE = "TB_ENGINE";
-const MARKET = "TOTAL_BASES_2_PLUS";
+const MARKET = MARKET_TO_DB.TB;
 
 // ── Mechanism thresholds ──────────────────────────────────────────────────────
 
@@ -95,6 +102,12 @@ interface BullpenSummary extends BullpenRolePath {
   availableHighLeverage: number;
   avgXSLGAllowed: N;
   metricArmCount: number;
+  /**
+   * Fraction of the projected role path that carried an xslg_allowed research
+   * row. The average is computed over whatever arms have the metric, so the
+   * consumer needs the denominator to know how much of the path it describes.
+   */
+  metricCoverage: number;
 }
 
 interface TBCandidate {
@@ -111,6 +124,7 @@ interface TBCandidate {
   hitterFeatures: FeatureMap;
   pitcherFeatures: FeatureMap;
   parkFeatures: FeatureMap;
+  weather: GameWeather | null;
   bullpen: BullpenSummary;
   mechanism: TBMechanism;
   secondaryMechanism: TBMechanism | null;
@@ -148,6 +162,229 @@ const hk = (metricKey: string, pitcherHand: string | null) =>
 /** Key for pitcher features split by batter side */
 const pk = (metricKey: string, batterSide: string | null) =>
   batterSide ? `${metricKey}:${batterSide}` : metricKey;
+
+/**
+ * Composite total-bases park factor.
+ *
+ * buildParkEvidence carried the note "Park factors are context only, not used
+ * to gate or boost rank directly" and computeEvidenceScore read no park feature
+ * at all, so Coors Field and Oracle Park ranked identically for an otherwise
+ * identical hitter and matchup. The park research tables, the ingestion and the
+ * per-side splits were all built and then not used.
+ *
+ * The raw HR factor is the wrong input on its own. A total-bases outcome is a
+ * weighted mix of singles, doubles and home runs, so an HR-only factor
+ * materially misprices a park whose doubles factor diverges from its HR factor,
+ * which is precisely the interesting case.
+ *
+ * The weights approximate each component's share of total bases in a
+ * league-average run environment: singles are the largest share of hits but
+ * contribute one base each, doubles contribute two, home runs four. hits_factor
+ * stands in for the contact component because the park research tables publish
+ * no singles-only factor.
+ */
+export const TB_PARK_FACTOR_WEIGHTS = {
+  hits: 0.40,
+  doubles: 0.25,
+  homeRuns: 0.35,
+} as const;
+
+/** Park factors are published on a 100 = neutral scale. */
+const PARK_NEUTRAL = 100;
+
+/**
+ * Points of evidence score per 10 percent of park effect, and the hard cap.
+ *
+ * Park is a real effect but a second-order one. The cap is strictly below the
+ * pitcher matchup term's maximum of 3 points, so the park can never outweigh
+ * the starting pitcher.
+ */
+const PARK_SENSITIVITY = 1.0;
+export const PARK_MAX_ADJUSTMENT = 2.0;
+
+/**
+ * Composite factors beyond these are structural, not a nudge.
+ *
+ * The composite total-bases factor spans a much narrower range than the HR
+ * factor does, because singles and doubles vary far less across parks than home
+ * runs do. Roughly 92 to 116 covers the league, so these thresholds pick out the
+ * genuine outliers at each end rather than relabelling every hitter-friendly or
+ * pitcher-friendly park as structural.
+ */
+export const PARK_EXTREME_HIGH = 115;
+export const PARK_EXTREME_LOW = 92;
+
+/**
+ * Resolves a park metric, preferring the batter-side split.
+ *
+ * getParkFeatures already retrieves batter_side keyed rows and the code then
+ * read only the unsplit key.
+ */
+function resolveParkMetric(map: FeatureMap, metricKey: string, batterSide: string | null): N {
+  const split = batterSide ? n(map, `${metricKey}:${batterSide}`) : null;
+  return split ?? n(map, metricKey);
+}
+
+export type ParkContext = {
+  composite: N;
+  hitsFactor: N;
+  doublesFactor: N;
+  hrFactor: N;
+  usedBatterSideSplit: boolean;
+  adjustment: number;
+  environment: "EXTREME_HITTER_PARK" | "SUPPRESSIVE_PARK" | "NEUTRAL" | "UNKNOWN";
+};
+
+export function computeParkContext(park: FeatureMap, batterSide: string | null): ParkContext {
+  const hitsFactor = resolveParkMetric(park, "hits_factor", batterSide);
+  const doublesFactor = resolveParkMetric(park, "doubles_factor", batterSide);
+  const hrFactor = resolveParkMetric(park, "hr_factor", batterSide);
+
+  // Renormalise over whichever components are present so a missing factor does
+  // not silently pull the composite toward zero.
+  const components: Array<[N, number]> = [
+    [hitsFactor, TB_PARK_FACTOR_WEIGHTS.hits],
+    [doublesFactor, TB_PARK_FACTOR_WEIGHTS.doubles],
+    [hrFactor, TB_PARK_FACTOR_WEIGHTS.homeRuns],
+  ];
+  let weighted = 0;
+  let weight = 0;
+  for (const [value, componentWeight] of components) {
+    if (value === null) continue;
+    weighted += value * componentWeight;
+    weight += componentWeight;
+  }
+  const composite = weight > 0 ? weighted / weight : null;
+  const usedBatterSideSplit = Boolean(batterSide) && [
+    "hits_factor", "doubles_factor", "hr_factor",
+  ].some((key) => n(park, `${key}:${batterSide}`) !== null);
+
+  if (composite === null) {
+    return {
+      composite: null, hitsFactor, doublesFactor, hrFactor, usedBatterSideSplit,
+      adjustment: 0, environment: "UNKNOWN",
+    };
+  }
+  const raw = ((composite - PARK_NEUTRAL) / 10) * PARK_SENSITIVITY;
+  const adjustment = Math.max(-PARK_MAX_ADJUSTMENT, Math.min(PARK_MAX_ADJUSTMENT, raw));
+  const environment = composite >= PARK_EXTREME_HIGH
+    ? "EXTREME_HITTER_PARK"
+    : composite <= PARK_EXTREME_LOW
+      ? "SUPPRESSIVE_PARK"
+      : "NEUTRAL";
+  return {
+    composite: Number(composite.toFixed(4)),
+    hitsFactor, doublesFactor, hrFactor, usedBatterSideSplit,
+    adjustment: Number(adjustment.toFixed(4)),
+    environment,
+  };
+}
+
+/**
+ * Expected plate appearances by lineup slot.
+ *
+ * A HEURISTIC, not a fitted quantity. Real expected plate appearance by lineup
+ * slot is close to linear and well measured; the four-bucket step function this
+ * replaces threw away most of that resolution.
+ *
+ * Known limitation, deliberately not modelled here: team run environment shifts
+ * the whole curve, and once the modelling layer works this term is a candidate
+ * to be learned rather than hand-specified.
+ */
+export const EXPECTED_PLATE_APPEARANCES_BY_SLOT: readonly number[] = [
+  4.65, 4.55, 4.44, 4.34, 4.23, 4.13, 4.02, 3.92, 3.81,
+];
+export const EXPECTED_PA_IS_HEURISTIC = true;
+
+export function expectedPlateAppearances(battingOrder: number | null): N {
+  if (battingOrder === null) return null;
+  const index = Math.round(battingOrder) - 1;
+  if (index < 0 || index >= EXPECTED_PLATE_APPEARANCES_BY_SLOT.length) return null;
+  return EXPECTED_PLATE_APPEARANCES_BY_SLOT[index];
+}
+
+/**
+ * Scores opportunity on the continuous expected plate appearance value.
+ *
+ * Calibrated to reproduce the old endpoints exactly, +3 for the leadoff slot
+ * and -1 for the ninth, so the change is a gain in resolution between them
+ * rather than a change in overall weight.
+ */
+const PA_AT_LOWEST_SLOT = EXPECTED_PLATE_APPEARANCES_BY_SLOT[8];
+const PA_AT_HIGHEST_SLOT = EXPECTED_PLATE_APPEARANCES_BY_SLOT[0];
+const OPPORTUNITY_SPAN = 4;
+
+export function opportunityScore(battingOrder: number | null): number {
+  const expected = expectedPlateAppearances(battingOrder);
+  if (expected === null) return 0;
+  const slope = OPPORTUNITY_SPAN / (PA_AT_HIGHEST_SLOT - PA_AT_LOWEST_SLOT);
+  return Number(((expected - PA_AT_LOWEST_SLOT) * slope - 1).toFixed(4));
+}
+
+/**
+ * Metrics deliberately read unsplit, each with its reason.
+ *
+ * Anything not listed here resolves split-first with an unsplit fallback. Put
+ * a metric in one of these maps only with a stated justification: an
+ * unexplained unsplit read is how the same metric came to be resolved two
+ * different ways in this file.
+ */
+export const UNSPLIT_HITTER_METRICS = new Map<string, string>([
+  ["pa", "Season plate appearance count used as a sample denominator, not a rate."],
+]);
+
+export const UNSPLIT_PITCHER_METRICS = new Map<string, string>([
+  ["bf", "Season batters-faced count used as a sample denominator, not a rate."],
+  ["pa", "Season plate appearance count used as a sample denominator, not a rate."],
+]);
+
+/**
+ * The single hitter metric resolver.
+ *
+ * classifyMechanism read n(hitter, hk('iso', side)) ?? n(hitter, 'iso') while
+ * computeEvidenceScore read n(hitter, 'iso') with no split fallback, so the
+ * same player in the same pass could be classified POWER_ROUTE on his platoon
+ * split iso and then scored on his unsplit season iso. Every hitter metric
+ * read in this file now goes through here.
+ *
+ * splitOnly is for the reads that genuinely want the split value and nothing
+ * else, such as the "vs this pitcher hand" evidence fields, where falling back
+ * to the season line would mislabel the number.
+ */
+export function resolveHitterMetric(
+  map: FeatureMap,
+  metricKey: string,
+  pitcherHand: string | null,
+  options: { splitOnly?: boolean } = {},
+): N {
+  if (UNSPLIT_HITTER_METRICS.has(metricKey)) return n(map, metricKey);
+  const split = n(map, hk(metricKey, pitcherHand));
+  if (options.splitOnly) return pitcherHand ? split : null;
+  return split ?? n(map, metricKey);
+}
+
+/**
+ * An explicitly unsplit read, for the evidence fields that are labelled
+ * "season" and must show the season line rather than a platoon split. Named so
+ * that an unsplit read is always a deliberate choice with a visible reason,
+ * never an omission.
+ */
+function seasonHitterMetric(map: FeatureMap, metricKey: string): N {
+  return n(map, metricKey);
+}
+
+/** The single pitcher metric resolver. Same rule, keyed by batter side. */
+export function resolvePitcherMetric(
+  map: FeatureMap,
+  metricKey: string,
+  batterSide: string | null,
+  options: { splitOnly?: boolean } = {},
+): N {
+  if (UNSPLIT_PITCHER_METRICS.has(metricKey)) return n(map, metricKey);
+  const split = n(map, pk(metricKey, batterSide));
+  if (options.splitOnly) return batterSide ? split : null;
+  return split ?? n(map, metricKey);
+}
 
 /**
  * Resolve the effective batter side for a given batter's handedness and the
@@ -195,45 +432,6 @@ async function getSlateGames(slateDate: string): Promise<SlateGame[]> {
   return result.rows.map((r) => ({
     gamePk: Number(r.game_pk), venueId: r.venue_id,
     awayTeamId: r.away_team_id, homeTeamId: r.home_team_id,
-  }));
-}
-
-async function getSlateLineupPlayers(gamePks: number[]): Promise<LineupPlayer[]> {
-  if (gamePks.length === 0) return [];
-  const result = await pool.query<{
-    player_id: number; full_name: string; bats: string | null; batting_order: number;
-    game_pk: number; team_id: number; lineup_state: string; opp_team_id: number; venue_id: number | null;
-  }>(
-    `WITH best_lineup AS (
-       SELECT DISTINCT ON (game_pk, team_id)
-         lineup_snapshot_id, game_pk, team_id, state AS lineup_state
-       FROM lineup_snapshots
-       WHERE game_pk = ANY($1)
-         AND source_id = 'FANTASYPROS'
-         AND state IN ('CONFIRMED', 'PROJECTED')
-       ORDER BY game_pk, team_id,
-         CASE
-           WHEN state = 'CONFIRMED' THEN 1
-           ELSE 2
-         END,
-         observed_at DESC
-     )
-     SELECT le.player_id, p.full_name, p.bats, le.batting_order,
-            bl.game_pk::bigint, bl.team_id, bl.lineup_state,
-            CASE WHEN bl.team_id = g.away_team_id THEN g.home_team_id ELSE g.away_team_id END AS opp_team_id,
-            g.venue_id
-     FROM best_lineup bl
-     JOIN lineup_entries le ON le.lineup_snapshot_id = bl.lineup_snapshot_id
-     JOIN players p ON p.player_id = le.player_id
-     JOIN games g ON g.game_pk = bl.game_pk
-     WHERE le.player_id IS NOT NULL
-     ORDER BY bl.game_pk, le.batting_order`,
-    [gamePks],
-  );
-  return result.rows.map((r) => ({
-    playerId: r.player_id, playerName: r.full_name, bats: r.bats,
-    battingOrder: r.batting_order, gamePk: Number(r.game_pk), teamId: r.team_id,
-    lineupState: r.lineup_state, oppTeamId: r.opp_team_id, venueId: r.venue_id,
   }));
 }
 
@@ -315,7 +513,13 @@ async function getParkFeatures(venueId: number): Promise<FeatureMap> {
 async function getBullpenSummary(teamId: number, slateDate: string): Promise<BullpenSummary> {
   const path = await getBullpenRolePath(teamId, slateDate);
   if (path.status !== "CURRENT") {
-    return { ...path, availableHighLeverage: path.rolePath.length, avgXSLGAllowed: null, metricArmCount: 0 };
+    return {
+      ...path,
+      availableHighLeverage: path.rolePath.length,
+      avgXSLGAllowed: null,
+      metricArmCount: 0,
+      metricCoverage: 0,
+    };
   }
   const armIds = path.armIds;
 
@@ -340,11 +544,22 @@ async function getBullpenSummary(teamId: number, slateDate: string): Promise<Bul
       [armIds],
     );
     metricArmCount = Number(xslg.rows[0]?.metric_arm_count ?? 0);
-    avgXSLGAllowed = metricArmCount === armIds.length && xslg.rows[0]?.avg_xslg != null
+    // Average over the arms that actually have the metric, and report the
+    // denominator alongside it. Requiring metricArmCount to equal armIds.length
+    // meant one arm missing an xslg_allowed research row discarded the other
+    // two, which is a third-order gap deleting second-order evidence.
+    avgXSLGAllowed = metricArmCount > 0 && xslg.rows[0]?.avg_xslg != null
       ? Number(xslg.rows[0].avg_xslg)
       : null;
   }
-  return { ...path, availableHighLeverage: path.rolePath.length, avgXSLGAllowed, metricArmCount };
+  return {
+    ...path,
+    availableHighLeverage: path.rolePath.length,
+    avgXSLGAllowed,
+    metricArmCount,
+    /** Fraction of the projected role path that carried the metric. */
+    metricCoverage: armIds.length ? metricArmCount / armIds.length : 0,
+  };
 }
 
 // ── Classification logic ──────────────────────────────────────────────────────
@@ -356,12 +571,12 @@ function classifyMechanism(
   pitcherThrows: string | null,
 ): { primary: TBMechanism; secondary: TBMechanism | null } {
   const side = resolveBatterSide(bats, pitcherThrows);
-  const xslg = n(hitter, hk("xslg", side)) ?? n(hitter, "xslg");
-  const iso = n(hitter, hk("iso", side)) ?? n(hitter, "iso");
-  const barrel = n(hitter, "barrel_percent");
-  const hardHit = n(hitter, "hard_hit_percent");
-  const kPct = n(hitter, hk("k_percent", side)) ?? n(hitter, "k_percent");
-  const xba = n(hitter, hk("xba", side)) ?? n(hitter, "xba");
+  const xslg = resolveHitterMetric(hitter, "xslg", side);
+  const iso = resolveHitterMetric(hitter, "iso", side);
+  const barrel = resolveHitterMetric(hitter, "barrel_percent", side);
+  const hardHit = resolveHitterMetric(hitter, "hard_hit_percent", side);
+  const kPct = resolveHitterMetric(hitter, "k_percent", side);
+  const xba = resolveHitterMetric(hitter, "xba", side);
 
   let powerSignals = 0;
   if (xslg !== null && xslg >= POWER_XSLG) powerSignals++;
@@ -388,12 +603,13 @@ function checkCounterEvidence(
   pitcherThrows: string | null,
   hitterPA: N,
   pitcherBF: N,
+  weather: GameWeather | null = null,
 ): string[] {
   const counters: string[] = [];
   const effectiveBatterSide = resolveBatterSide(bats, pitcherThrows);
 
   // Pitcher K-rate counter
-  const pitcherK = n(pitcher, pk("k_percent", effectiveBatterSide)) ?? n(pitcher, "k_percent");
+  const pitcherK = resolvePitcherMetric(pitcher, "k_percent", effectiveBatterSide);
   if (pitcherK !== null && pitcherK >= HIGH_K_PITCHER) counters.push("HIGH_PITCHER_K_RATE");
 
   // Low-PA batting slot
@@ -411,6 +627,11 @@ function checkCounterEvidence(
     counters.push("STRONG_RELIEF_PATH");
   }
 
+  // Weather extremes. Encoded as flags rather than score nudges because their
+  // effect is not linear: a 15 mph wind blowing in does not suppress total
+  // bases three times as much as a 5 mph wind blowing in.
+  counters.push(...weatherAdjustment("TB", weather).flags);
+
   // Insufficient sample
   if ((hitterPA !== null && hitterPA < MIN_HITTER_PA) || (pitcherBF !== null && pitcherBF < MIN_PITCHER_BF)) {
     counters.push("INSUFFICIENT_SAMPLE");
@@ -426,24 +647,22 @@ function computeEvidenceScore(
   bats: string | null,
   pitcherThrows: string | null,
   counterEvidence: string[],
+  park: FeatureMap = new Map(),
+  weather: GameWeather | null = null,
 ): number {
   const side = resolveBatterSide(bats, pitcherThrows);
   const effectiveBatterSide = side;
 
-  const xslg = n(hitter, hk("xslg", side)) ?? n(hitter, "xslg");
-  const iso = n(hitter, "iso");
-  const barrel = n(hitter, "barrel_percent");
-  const pitcherXSLGAllowed = n(pitcher, pk("xslg_allowed", effectiveBatterSide)) ?? n(pitcher, "xslg_allowed");
+  const xslg = resolveHitterMetric(hitter, "xslg", side);
+  const iso = resolveHitterMetric(hitter, "iso", side);
+  const barrel = resolveHitterMetric(hitter, "barrel_percent", side);
+  const pitcherXSLGAllowed = resolvePitcherMetric(pitcher, "xslg_allowed", effectiveBatterSide);
 
   let score = 0;
 
-  // Batting order (PA opportunity)
-  if (battingOrder !== null) {
-    if (battingOrder <= 2) score += 3;
-    else if (battingOrder <= 4) score += 2;
-    else if (battingOrder <= 6) score += 1;
-    else score -= 1;
-  }
+  // Opportunity, scored on the continuous expected plate appearance value
+  // rather than a four-bucket step function on batting order.
+  score += opportunityScore(battingOrder);
 
   // Hitter xSLG
   if (xslg !== null) {
@@ -465,12 +684,25 @@ function computeEvidenceScore(
   if (barrel !== null && barrel >= 8.0) score += 1;
   if (iso !== null && iso >= 0.200) score += 1;
 
+  // Park, as a bounded second-order adjustment. Capped strictly below the
+  // pitcher matchup term's maximum of 3, so the venue can never outweigh the
+  // starting pitcher.
+  score += computeParkContext(park, side).adjustment;
+
+  // Weather, as a bounded second-order adjustment with market-specific
+  // coefficients. A closed roof contributes exactly zero and is distinguishable
+  // in the evidence from weather that is simply missing.
+  score += weatherAdjustment("TB", weather).adjustment;
+
   // Counter-evidence penalties
   for (const c of counterEvidence) {
     if (c === "HIGH_PITCHER_K_RATE") score -= 1.5;
     else if (c === "LOW_PA_SLOT") score -= 1.5;
     else if (c === "PLATOON_RISK") score -= 1.0;
     else if (c === "STRONG_RELIEF_PATH") score -= 0.5;
+    else if (c === "EXTREME_COLD") score -= 1.0;
+    else if (c === "STRONG_WIND_IN") score -= 1.0;
+    else if (c === "STRONG_WIND_OUT") score += 1.0;
     // INSUFFICIENT_SAMPLE: noted but no score penalty (data quality, not opponent quality)
   }
 
@@ -513,14 +745,23 @@ function assignCompetitionRanks(candidates: TBCandidate[]): void {
 // ── Evidence payload builders ─────────────────────────────────────────────────
 
 function buildOpportunityEvidence(c: TBCandidate): object {
+  const expectedPA = expectedPlateAppearances(c.battingOrder);
   return {
     battingOrder: c.battingOrder,
     lineupState: c.lineupState,
+    // The actual figure, not only the label. The label is retained because
+    // consumers read it, but it is now derived from the number rather than
+    // being the only thing the engine knows.
+    expectedPlateAppearances: expectedPA,
+    expectedPlateAppearancesBasis: "HEURISTIC",
+    expectedPlateAppearancesNote:
+      "Hand-specified expected plate appearances by lineup slot. A heuristic, not a fitted "
+      + "quantity, and it does not yet account for team run environment.",
     paOpportunity: c.battingOrder === null ? "UNKNOWN"
       : c.battingOrder <= 2 ? "HIGH"
         : c.battingOrder <= 4 ? "ABOVE_AVERAGE"
           : c.battingOrder <= 6 ? "AVERAGE" : "LOW",
-    seasonPA: n(c.hitterFeatures, "pa"),
+    seasonPA: seasonHitterMetric(c.hitterFeatures, "pa"),
   };
 }
 
@@ -534,11 +775,11 @@ function buildStarterMatchupEvidence(c: TBCandidate): object {
     hitterBats: c.hitterBats,
     effectivePlatoonSide: side,
     platoonDisfavored: isPlatoonDisfavored(c.hitterBats, c.starterThrows),
-    pitcherXSLGAllowed: n(c.pitcherFeatures, pk("xslg_allowed", side)) ?? n(c.pitcherFeatures, "xslg_allowed"),
-    pitcherKPct: n(c.pitcherFeatures, pk("k_percent", side)) ?? n(c.pitcherFeatures, "k_percent"),
-    pitcherHardHitPct: n(c.pitcherFeatures, pk("hard_hit_percent", side)) ?? n(c.pitcherFeatures, "hard_hit_percent"),
-    hitterXSLGvsPitcherHand: n(c.hitterFeatures, hk("xslg", side)),
-    hitterSLGvsPitcherHand: n(c.hitterFeatures, hk("slg", side)),
+    pitcherXSLGAllowed: resolvePitcherMetric(c.pitcherFeatures, "xslg_allowed", side),
+    pitcherKPct: resolvePitcherMetric(c.pitcherFeatures, "k_percent", side),
+    pitcherHardHitPct: resolvePitcherMetric(c.pitcherFeatures, "hard_hit_percent", side),
+    hitterXSLGvsPitcherHand: resolveHitterMetric(c.hitterFeatures, "xslg", side, { splitOnly: true }),
+    hitterSLGvsPitcherHand: resolveHitterMetric(c.hitterFeatures, "slg", side, { splitOnly: true }),
   };
 }
 
@@ -553,6 +794,10 @@ function buildBullpenPathEvidence(c: TBCandidate): object {
     rolePathArmCount: c.bullpen.availableHighLeverage,
     metricArmCount: c.bullpen.metricArmCount,
     metricCoverageComplete: c.bullpen.metricArmCount === c.bullpen.armIds.length,
+    // The denominator behind rolePathAvgXSLGAllowed. The average is taken over
+    // the arms that have the metric, so the consumer is told how much of the
+    // projected path it actually describes.
+    metricCoverage: Number(c.bullpen.metricCoverage.toFixed(4)),
     rolePathAvgXSLGAllowed: c.bullpen.avgXSLGAllowed,
     reliefPathFavorable: c.bullpen.avgXSLGAllowed !== null && c.bullpen.avgXSLGAllowed >= STRONG_RELIEF_XSLG_CEILING,
     note: c.bullpen.reason,
@@ -560,23 +805,40 @@ function buildBullpenPathEvidence(c: TBCandidate): object {
 }
 
 function buildParkEvidence(c: TBCandidate): object {
+  const side = resolveBatterSide(c.hitterBats, c.starterThrows);
+  const context = computeParkContext(c.parkFeatures, side);
   return {
-    hrFactor: n(c.parkFeatures, "hr_factor"),
-    doublesFactor: n(c.parkFeatures, "doubles_factor"),
-    note: "Park factors are context only — not used to gate or boost rank directly",
+    compositeTotalBasesFactor: context.composite,
+    compositeWeights: TB_PARK_FACTOR_WEIGHTS,
+    hitsFactor: context.hitsFactor,
+    doublesFactor: context.doublesFactor,
+    hrFactor: context.hrFactor,
+    batterSide: side,
+    usedBatterSideSplit: context.usedBatterSideSplit,
+    rankAdjustment: context.adjustment,
+    maxRankAdjustment: PARK_MAX_ADJUSTMENT,
+    environment: context.environment,
+    note: context.environment === "EXTREME_HITTER_PARK"
+      ? `Structural hitter park: composite total-bases factor ${context.composite}. `
+        + "This is an environment override, not a nudge."
+      : context.environment === "SUPPRESSIVE_PARK"
+        ? `Structural suppressive park: composite total-bases factor ${context.composite}. `
+          + "This is an environment override, not a nudge."
+        : "Park is a bounded ranking input: a composite total-bases factor "
+          + `worth at most ${PARK_MAX_ADJUSTMENT} points, which cannot outweigh the starting pitcher term.`,
   };
 }
 
 function buildRecentVsSeasonVsCareer(c: TBCandidate): object {
   return {
-    seasonSLG: n(c.hitterFeatures, "slg"),
-    seasonXSLG: n(c.hitterFeatures, "xslg"),
-    seasonISO: n(c.hitterFeatures, "iso"),
-    seasonXBA: n(c.hitterFeatures, "xba"),
-    seasonKPct: n(c.hitterFeatures, "k_percent"),
-    seasonHardHitPct: n(c.hitterFeatures, "hard_hit_percent"),
-    seasonBarrelPct: n(c.hitterFeatures, "barrel_percent"),
-    seasonPA: n(c.hitterFeatures, "pa"),
+    seasonSLG: seasonHitterMetric(c.hitterFeatures, "slg"),
+    seasonXSLG: seasonHitterMetric(c.hitterFeatures, "xslg"),
+    seasonISO: seasonHitterMetric(c.hitterFeatures, "iso"),
+    seasonXBA: seasonHitterMetric(c.hitterFeatures, "xba"),
+    seasonKPct: seasonHitterMetric(c.hitterFeatures, "k_percent"),
+    seasonHardHitPct: seasonHitterMetric(c.hitterFeatures, "hard_hit_percent"),
+    seasonBarrelPct: seasonHitterMetric(c.hitterFeatures, "barrel_percent"),
+    seasonPA: seasonHitterMetric(c.hitterFeatures, "pa"),
     window: "SEASON",
   };
 }
@@ -597,69 +859,117 @@ function buildCounterEvidenceJson(c: TBCandidate): object {
 
 // ── DB write ──────────────────────────────────────────────────────────────────
 
-async function writeCandidate(c: TBCandidate, ingestRunId: string): Promise<string> {
-  const result = await pool.query<{ candidate_id: string }>(
-    `INSERT INTO market_research_candidates
-       (slate_date, game_pk, player_id, market, research_rank, research_state,
-        primary_mechanism, secondary_mechanism,
-        opportunity_evidence, starter_matchup_evidence, bullpen_path_evidence,
-        park_evidence, recent_vs_season_vs_career, counter_evidence,
-        missing_stale_evidence, rank_semantics, ingest_run_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
-     ON CONFLICT (slate_date, market, player_id, game_pk) DO UPDATE SET
-       research_rank = EXCLUDED.research_rank,
-       research_state = EXCLUDED.research_state,
-       primary_mechanism = EXCLUDED.primary_mechanism,
-       secondary_mechanism = EXCLUDED.secondary_mechanism,
-        opportunity_evidence = CASE
-          WHEN market_research_candidates.opportunity_evidence->>'source' = 'FANTASYPROS'
-            THEN jsonb_build_object('baseline', market_research_candidates.opportunity_evidence, 'research', EXCLUDED.opportunity_evidence)
-          WHEN market_research_candidates.opportunity_evidence ? 'baseline'
-            THEN jsonb_set(market_research_candidates.opportunity_evidence, '{research}', EXCLUDED.opportunity_evidence, true)
-          ELSE EXCLUDED.opportunity_evidence
-        END,
-       starter_matchup_evidence = EXCLUDED.starter_matchup_evidence,
-       bullpen_path_evidence = EXCLUDED.bullpen_path_evidence,
-       park_evidence = EXCLUDED.park_evidence,
-       recent_vs_season_vs_career = EXCLUDED.recent_vs_season_vs_career,
-       counter_evidence = EXCLUDED.counter_evidence,
-       missing_stale_evidence = EXCLUDED.missing_stale_evidence,
-       ingest_run_id = EXCLUDED.ingest_run_id,
-       updated_at = now()
-     RETURNING candidate_id`,
-    [
-      c.slateDate, c.gamePk, c.playerId, MARKET,
-      c.researchRank, c.researchState,
-      c.mechanism, c.secondaryMechanism,
-      JSON.stringify(buildOpportunityEvidence(c)),
-      JSON.stringify(buildStarterMatchupEvidence(c)),
-      JSON.stringify(buildBullpenPathEvidence(c)),
-      JSON.stringify(buildParkEvidence(c)),
-      JSON.stringify(buildRecentVsSeasonVsCareer(c)),
-      JSON.stringify(buildCounterEvidenceJson(c)),
-      c.missingData.length > 0 ? c.missingData.join("; ") : null,
-      "RANK_DONT_GATE: ordinal rank with transparent feature evidence; ties surfaced not collapsed; no threshold or gate implied",
-      ingestRunId,
-    ],
-  );
+/**
+ * Anything that can run a query: the shared pool, or a client inside a
+ * transaction. Every write in this engine takes one so the whole slate can be
+ * written atomically.
+ */
+type Queryable = Pick<typeof pool, "query">;
 
-  const candidateId = result.rows[0].candidate_id;
-  await writeEvidenceBlocks(candidateId, c);
-  return candidateId;
+const RANK_SEMANTICS =
+  "RANK_DONT_GATE: ordinal rank with transparent feature evidence; ties surfaced not collapsed; no threshold or gate implied";
+
+const CANDIDATE_COLUMNS = 17;
+const CANDIDATE_CHUNK_ROWS = 200;
+
+function candidateValues(c: TBCandidate, ingestRunId: string) {
+  return [
+    c.slateDate, c.gamePk, c.playerId, MARKET,
+    c.researchRank, c.researchState,
+    c.mechanism, c.secondaryMechanism,
+    JSON.stringify(buildOpportunityEvidence(c)),
+    JSON.stringify(buildStarterMatchupEvidence(c)),
+    JSON.stringify(buildBullpenPathEvidence(c)),
+    JSON.stringify(buildParkEvidence(c)),
+    JSON.stringify(buildRecentVsSeasonVsCareer(c)),
+    JSON.stringify(buildCounterEvidenceJson(c)),
+    c.missingData.length > 0 ? c.missingData.join("; ") : null,
+    RANK_SEMANTICS,
+    ingestRunId,
+  ];
 }
 
-async function writeEvidenceBlocks(candidateId: string, c: TBCandidate): Promise<void> {
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  return chunks;
+}
+
+/**
+ * Upserts every candidate for the slate.
+ *
+ * Previously this was one INSERT per candidate plus roughly six evidence-block
+ * inserts per candidate, all issued sequentially on the shared pool. A ten-game
+ * slate is about 180 players and cost over a thousand sequential round trips,
+ * and a slow refresh that runs close to first pitch is a refresh that misses
+ * the freeze window.
+ */
+export async function writeCandidates(
+  executor: Queryable,
+  candidates: TBCandidate[],
+  ingestRunId: string,
+): Promise<Map<string, string>> {
+  const candidateIds = new Map<string, string>();
+  if (!candidates.length) return candidateIds;
+
+  for (const batch of chunk(candidates, CANDIDATE_CHUNK_ROWS)) {
+    const values: unknown[] = [];
+    const rowPlaceholders = batch.map((c, rowIndex) => {
+      values.push(...candidateValues(c, ingestRunId));
+      const base = rowIndex * CANDIDATE_COLUMNS;
+      return `(${Array.from({ length: CANDIDATE_COLUMNS }, (_, column) => `$${base + column + 1}`).join(",")})`;
+    });
+    const result = await executor.query<{ candidate_id: string; player_id: number; game_pk: string }>(
+      `INSERT INTO market_research_candidates
+         (slate_date, game_pk, player_id, market, research_rank, research_state,
+          primary_mechanism, secondary_mechanism,
+          opportunity_evidence, starter_matchup_evidence, bullpen_path_evidence,
+          park_evidence, recent_vs_season_vs_career, counter_evidence,
+          missing_stale_evidence, rank_semantics, ingest_run_id)
+       VALUES ${rowPlaceholders.join(",")}
+       ON CONFLICT (slate_date, market, player_id, game_pk) DO UPDATE SET
+         research_rank = EXCLUDED.research_rank,
+         research_state = EXCLUDED.research_state,
+         primary_mechanism = EXCLUDED.primary_mechanism,
+         secondary_mechanism = EXCLUDED.secondary_mechanism,
+          opportunity_evidence = CASE
+            WHEN market_research_candidates.opportunity_evidence->>'source' = 'FANTASYPROS'
+              THEN jsonb_build_object('baseline', market_research_candidates.opportunity_evidence, 'research', EXCLUDED.opportunity_evidence)
+            WHEN market_research_candidates.opportunity_evidence ? 'baseline'
+              THEN jsonb_set(market_research_candidates.opportunity_evidence, '{research}', EXCLUDED.opportunity_evidence, true)
+            ELSE EXCLUDED.opportunity_evidence
+          END,
+         starter_matchup_evidence = EXCLUDED.starter_matchup_evidence,
+         bullpen_path_evidence = EXCLUDED.bullpen_path_evidence,
+         park_evidence = EXCLUDED.park_evidence,
+         recent_vs_season_vs_career = EXCLUDED.recent_vs_season_vs_career,
+         counter_evidence = EXCLUDED.counter_evidence,
+         missing_stale_evidence = EXCLUDED.missing_stale_evidence,
+         ingest_run_id = EXCLUDED.ingest_run_id,
+         updated_at = now()
+       RETURNING candidate_id, player_id, game_pk::text AS game_pk`,
+      values,
+    );
+    for (const row of result.rows) {
+      candidateIds.set(`${row.player_id}:${Number(row.game_pk)}`, row.candidate_id);
+    }
+  }
+  return candidateIds;
+}
+
+type EvidenceBlock = {
+  blockType: string; metricKey: string; metricLabel: string;
+  value: N; unit: string | null; sampleSize: N;
+  direction: string; strength: string; narrative: string; rawEvidence: object;
+};
+
+/** Builds the evidence blocks for one candidate. Pure: it writes nothing. */
+export function buildEvidenceBlocks(c: TBCandidate): EvidenceBlock[] {
   const side = resolveBatterSide(c.hitterBats, c.starterThrows);
-  const pitcherXSLGAllowed = n(c.pitcherFeatures, pk("xslg_allowed", side)) ?? n(c.pitcherFeatures, "xslg_allowed");
-  const hitterXSLG = n(c.hitterFeatures, hk("xslg", side)) ?? n(c.hitterFeatures, "xslg");
+  const pitcherXSLGAllowed = resolvePitcherMetric(c.pitcherFeatures, "xslg_allowed", side);
+  const hitterXSLG = resolveHitterMetric(c.hitterFeatures, "xslg", side);
 
-  type Block = {
-    blockType: string; metricKey: string; metricLabel: string;
-    value: N; unit: string | null; sampleSize: N;
-    direction: string; strength: string; narrative: string; rawEvidence: object;
-  };
-
-  const blocks: Block[] = [
+  const blocks: EvidenceBlock[] = [
     {
       blockType: "OPPORTUNITY", metricKey: "batting_order", metricLabel: "Batting order slot",
       value: c.battingOrder, unit: "slot", sampleSize: null,
@@ -678,7 +988,7 @@ async function writeEvidenceBlocks(candidateId: string, c: TBCandidate): Promise
     },
     {
       blockType: "RECENT_VS_SEASON_VS_CAREER", metricKey: "season_xslg", metricLabel: "Season xSLG",
-      value: hitterXSLG, unit: "rate", sampleSize: n(c.hitterFeatures, "pa"),
+      value: hitterXSLG, unit: "rate", sampleSize: seasonHitterMetric(c.hitterFeatures, "pa"),
       direction: hitterXSLG === null ? "UNKNOWN" : hitterXSLG >= 0.450 ? "FAVORABLE" : hitterXSLG >= 0.380 ? "NEUTRAL" : "UNFAVORABLE",
       strength: hitterXSLG === null ? "UNKNOWN" : hitterXSLG >= 0.500 ? "STRONG" : hitterXSLG >= 0.430 ? "MODERATE" : "WEAK",
       narrative: "Hitter expected SLG (season). Derived from Statcast exit velocity and launch angle.",
@@ -694,14 +1004,67 @@ async function writeEvidenceBlocks(candidateId: string, c: TBCandidate): Promise
         : `Bullpen path unavailable: ${c.bullpen.reason}`,
       rawEvidence: buildBullpenPathEvidence(c),
     },
-    {
-      blockType: "PARK", metricKey: "park_hr_factor", metricLabel: "Park HR factor",
-      value: n(c.parkFeatures, "hr_factor"), unit: "factor", sampleSize: null,
-      direction: (() => { const v = n(c.parkFeatures, "hr_factor"); return v === null ? "UNKNOWN" : v >= 110 ? "FAVORABLE" : v >= 90 ? "NEUTRAL" : "UNFAVORABLE"; })(),
-      strength: "CONTEXT_ONLY",
-      narrative: "Park HR factor (Baseball Savant Statcast). Context only — not used to gate or boost rank.",
-      rawEvidence: buildParkEvidence(c),
-    },
+    (() => {
+      const weather = weatherAdjustment("TB", c.weather);
+      return {
+        blockType: "PARK",
+        metricKey: "weather_wind_out_component",
+        metricLabel: "Wind component along centre field",
+        value: c.weather?.windOutComponentMph ?? null,
+        unit: "mph",
+        sampleSize: null,
+        direction: weather.environment === "CLOSED_ROOF"
+          ? "NEUTRAL"
+          : c.weather?.windOutComponentMph == null
+            ? "UNKNOWN"
+            : c.weather.windOutComponentMph > 0 ? "FAVORABLE" : "UNFAVORABLE",
+        strength: weather.flags.length ? "STRUCTURAL_ENVIRONMENT" : "BOUNDED_RANK_INPUT",
+        narrative: `${weather.detail} Worth ${weather.adjustment} rank points`
+          + `${weather.flags.length ? `, plus flags ${weather.flags.join(", ")}` : ""}.`,
+        rawEvidence: {
+          environment: weather.environment,
+          temperatureF: c.weather?.temperatureF ?? null,
+          windSpeedMph: c.weather?.windSpeedMph ?? null,
+          windDirectionDegrees: c.weather?.windDirectionDegrees ?? null,
+          windOutComponentMph: c.weather?.windOutComponentMph ?? null,
+          windComponent: c.weather?.windComponent ?? "UNKNOWN",
+          roofState: c.weather?.roofState ?? "UNKNOWN",
+          weatherNeutral: c.weather?.weatherNeutral ?? false,
+          sourceFreshness: c.weather?.sourceFreshness ?? null,
+          retrievedAt: c.weather?.retrievedAt ?? null,
+          rankAdjustment: weather.adjustment,
+          flags: weather.flags,
+          note: weather.environment === "CLOSED_ROOF"
+            ? "A closed roof is neutral weather, which is a different fact from missing weather."
+            : weather.environment === "UNKNOWN"
+              ? "No usable weather observation. This is missing weather, not neutral weather."
+              : "Weather is a bounded ranking input with market-specific coefficients.",
+        },
+      };
+    })(),
+    (() => {
+      const side = resolveBatterSide(c.hitterBats, c.starterThrows);
+      const park = computeParkContext(c.parkFeatures, side);
+      return {
+        blockType: "PARK",
+        metricKey: "park_total_bases_factor",
+        metricLabel: "Composite total bases park factor",
+        value: park.composite,
+        unit: "factor",
+        sampleSize: null,
+        direction: park.composite === null
+          ? "UNKNOWN"
+          : park.composite >= 110 ? "FAVORABLE" : park.composite >= 90 ? "NEUTRAL" : "UNFAVORABLE",
+        strength: park.environment === "NEUTRAL" || park.environment === "UNKNOWN"
+          ? "BOUNDED_RANK_INPUT"
+          : "STRUCTURAL_ENVIRONMENT",
+        narrative: `Composite total bases park factor ${park.composite ?? "unavailable"}, weighted `
+          + `${TB_PARK_FACTOR_WEIGHTS.hits} hits / ${TB_PARK_FACTOR_WEIGHTS.doubles} doubles / `
+          + `${TB_PARK_FACTOR_WEIGHTS.homeRuns} home runs. Worth ${park.adjustment} rank points, `
+          + `bounded at ${PARK_MAX_ADJUSTMENT} so it cannot outweigh the starting pitcher.`,
+        rawEvidence: buildParkEvidence(c),
+      };
+    })(),
   ];
 
   if (c.counterEvidence.length > 0) {
@@ -725,19 +1088,54 @@ async function writeEvidenceBlocks(candidateId: string, c: TBCandidate): Promise
     });
   }
 
-  for (const b of blocks) {
-    await pool.query(
+  return blocks;
+}
+
+const EVIDENCE_BLOCK_COLUMNS = 12;
+const EVIDENCE_BLOCK_CHUNK_ROWS = 300;
+
+/**
+ * Writes every evidence block for the slate in as few statements as the
+ * parameter limit allows, instead of roughly six sequential inserts per
+ * candidate.
+ *
+ * Rows are deduplicated on (candidate_id, block_type, metric_key) first: a
+ * multi-row ON CONFLICT DO UPDATE cannot affect the same row twice, and a
+ * duplicate within one statement would abort the whole slate.
+ */
+export async function writeEvidenceBlocks(
+  executor: Queryable,
+  rows: Array<{ candidateId: string; block: EvidenceBlock }>,
+): Promise<number> {
+  const deduplicated = new Map<string, { candidateId: string; block: EvidenceBlock }>();
+  for (const row of rows) {
+    deduplicated.set(`${row.candidateId}:${row.block.blockType}:${row.block.metricKey}`, row);
+  }
+  const ordered = [...deduplicated.values()];
+  for (const batch of chunk(ordered, EVIDENCE_BLOCK_CHUNK_ROWS)) {
+    const values: unknown[] = [];
+    const placeholders = batch.map(({ candidateId, block }, rowIndex) => {
+      values.push(
+        candidateId, block.blockType, TB_ENGINE_SOURCE, block.metricKey, block.metricLabel,
+        block.value, block.unit, block.sampleSize, block.direction, block.strength,
+        block.narrative, JSON.stringify(block.rawEvidence),
+      );
+      const base = rowIndex * EVIDENCE_BLOCK_COLUMNS;
+      const columns = Array.from({ length: EVIDENCE_BLOCK_COLUMNS }, (_, column) => `$${base + column + 1}`);
+      return `(${columns.join(",")},now())`;
+    });
+    await executor.query(
       `INSERT INTO market_research_evidence_blocks
          (candidate_id, block_type, source_id, metric_key, metric_label,
           value, unit, sample_size, direction, strength, narrative, raw_evidence, retrieved_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,now())
+       VALUES ${placeholders.join(",")}
        ON CONFLICT (candidate_id, block_type, metric_key) DO UPDATE SET
          value = EXCLUDED.value, direction = EXCLUDED.direction, strength = EXCLUDED.strength,
          narrative = EXCLUDED.narrative, raw_evidence = EXCLUDED.raw_evidence, retrieved_at = EXCLUDED.retrieved_at`,
-      [candidateId, b.blockType, TB_ENGINE_SOURCE, b.metricKey, b.metricLabel,
-       b.value, b.unit, b.sampleSize, b.direction, b.strength, b.narrative, JSON.stringify(b.rawEvidence)],
+      values,
     );
   }
+  return ordered.length;
 }
 
 // ── Main engine entry point ───────────────────────────────────────────────────
@@ -749,10 +1147,14 @@ async function writeEvidenceBlocks(candidateId: string, c: TBCandidate): Promise
  * the current candidate set. This ensures stale candidates from removed lineup
  * entries do not persist on the market board between reruns.
  */
-async function reconcileSlateCandidates(slateDate: string, candidates: TBCandidate[]): Promise<number> {
+async function reconcileSlateCandidates(
+  executor: Queryable,
+  slateDate: string,
+  candidates: TBCandidate[],
+): Promise<number> {
   if (candidates.length === 0) {
     // No candidates this run — wipe all TB candidates for this slate
-    const result = await pool.query<{ count: string }>(
+    const result = await executor.query<{ count: string }>(
       `WITH deleted AS (
          DELETE FROM market_research_candidates
          WHERE slate_date = $1 AND market = 'TOTAL_BASES_2_PLUS'
@@ -768,7 +1170,7 @@ async function reconcileSlateCandidates(slateDate: string, candidates: TBCandida
   const playerIds = candidates.map((c) => c.playerId);
   const gamePks = candidates.map((c) => c.gamePk);
 
-  const result = await pool.query<{ count: string }>(
+  const result = await executor.query<{ count: string }>(
     `WITH eligible AS (
        SELECT unnest($2::integer[]) AS player_id,
               unnest($3::bigint[])  AS game_pk
@@ -802,7 +1204,7 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
       // Reconcile even with zero games: a previously-run slate whose games were
       // cancelled/removed must still have its stale candidates cleared so the
       // market board does not show output from an invalid game.
-      const staleRemoved = await reconcileSlateCandidates(slateDate, []);
+      const staleRemoved = await reconcileSlateCandidates(pool, slateDate, []);
       const noGamesNote = staleRemoved > 0
         ? `No games on this date; ${staleRemoved} stale TB candidate(s) from a prior run have been cleared.`
         : "No games found for this date; TB board is empty.";
@@ -814,10 +1216,15 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
     }
 
     const gamePks = games.map((g) => g.gamePk);
-    const lineupPlayers = await getSlateLineupPlayers(gamePks);
+    const { players: lineupPlayers, resolved: resolvedLineups } = await querySlateLineupPlayers(gamePks);
 
     if (lineupPlayers.length === 0) {
       notes.push("No lineup entries found. TB candidates require lineup data.");
+    }
+    if (resolvedLineups.conflicts.length > 0) {
+      notes.push(
+        `${resolvedLineups.conflicts.length} lineup source conflict(s) recorded; affected candidates carry a blocking evidence gap.`,
+      );
     }
 
     // Create ingest run — hoisted ID is visible to catch block for FAILED marking
@@ -834,6 +1241,9 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
     const pitcherCache = new Map<number, FeatureMap>();
     const parkCache = new Map<number, FeatureMap>();
     const bullpenCache = new Map<string, BullpenSummary>();
+    const bvpCache = new Map<string, Awaited<ReturnType<typeof getBatterPitcherEvidence>>>();
+    // One query for the whole slate rather than one per candidate.
+    const slateWeather = await getSlateWeather(slateDate);
 
     const candidates: TBCandidate[] = [];
 
@@ -873,27 +1283,48 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
       if (starter.playerId === null) missingData.push("Opposing starter identity unknown");
       else if (pitcherFeatures.size === 0) missingData.push("No season pitcher research data");
       if (player.venueId === null || parkFeatures.size === 0) missingData.push("Park factors unavailable");
-      if (bullpen.status !== "CURRENT") {
-        missingData.push(`Bullpen path ${bullpen.status.toLowerCase()}: ${bullpen.reason}`);
-      } else if (bullpen.metricArmCount !== bullpen.armIds.length) {
-        missingData.push(`Bullpen role-path xSLG research incomplete (${bullpen.metricArmCount}/${bullpen.armIds.length} arms)`);
+      // A disagreement between lineup feeds is a blocking evidence gap on this
+      // candidate, not something precedence quietly resolves.
+      for (const conflict of conflictsFor(resolvedLineups, player.gamePk, player.playerId)) {
+        missingData.push(conflict.detail);
       }
+      // Bullpen state is disclosed on the candidate's bullpen evidence block and
+      // is deliberately NOT written into missing_stale_evidence.
+      //
+      // getMarketResearchSelectionEligibility treats any non-empty
+      // missing_stale_evidence as a blocking gap, so writing bullpen state here
+      // made an incomplete or stale bullpen path a hard veto on selection
+      // through the back door, which is exactly the gate task 2.2 removed from
+      // sideResult. Task 3.4 makes the freshness signal honest, and an honest
+      // signal attached to a veto would eliminate most pairs on most slates.
 
       const { primary: mechanism, secondary: secondaryMechanism } = classifyMechanism(
         hitterFeatures, player.battingOrder, player.bats, starter.throws,
       );
-      const hitterPA = n(hitterFeatures, "pa");
-      const pitcherBF = n(pitcherFeatures, "bf") ?? n(pitcherFeatures, "pa");
+      const hitterPA = resolveHitterMetric(hitterFeatures, "pa", null);
+      const pitcherBF = resolvePitcherMetric(pitcherFeatures, "bf", null)
+        ?? resolvePitcherMetric(pitcherFeatures, "pa", null);
+      const gameWeather = slateWeather.get(player.gamePk) ?? null;
       const counterEvidence = checkCounterEvidence(
         hitterFeatures, pitcherFeatures, bullpen,
         player.battingOrder, player.bats, starter.throws,
-        hitterPA, pitcherBF,
+        hitterPA, pitcherBF, gameWeather,
       );
       const baseEvidenceScore = computeEvidenceScore(
         hitterFeatures, pitcherFeatures,
         player.battingOrder, player.bats, starter.throws, counterEvidence,
+        parkFeatures, gameWeather,
       );
-      const bvp = starter.playerId === null ? null : await getBatterPitcherEvidence(player.playerId, starter.playerId, slateDate, "TB");
+      // Cached by (batter, starter). The same starter faces every hitter in the
+      // opposing lineup, so this was one uncached lookup per candidate.
+      let bvp: Awaited<ReturnType<typeof getBatterPitcherEvidence>> | null = null;
+      if (starter.playerId !== null) {
+        const bvpKey = `${player.playerId}:${starter.playerId}`;
+        if (!bvpCache.has(bvpKey)) {
+          bvpCache.set(bvpKey, await getBatterPitcherEvidence(player.playerId, starter.playerId, slateDate, "TB"));
+        }
+        bvp = bvpCache.get(bvpKey) ?? null;
+      }
       const evidenceScore = baseEvidenceScore + (bvp?.rankAdjustment ?? 0);
       // Named matchup evidence orders otherwise-qualified candidates only; it must never
       // change the persisted research state or downstream selection eligibility.
@@ -905,6 +1336,7 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
         hitterBats: player.bats, starterPlayerId: starter.playerId,
         starterThrows: starter.throws, starterState: starter.starterState,
         hitterFeatures, pitcherFeatures, parkFeatures, bullpen,
+        weather: gameWeather,
         mechanism, secondaryMechanism, researchState, counterEvidence,
         evidenceScore, researchRank: null, missingData,
       });
@@ -912,19 +1344,42 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
 
     assignCompetitionRanks(candidates);
 
-    // Write current candidates (upsert)
+    // One transaction for the whole slate.
+    //
+    // These writes used to run in a bare loop on the shared pool with the
+    // reconcile after them and nothing wrapping any of it, so a failure partway
+    // through left a partially populated board alongside an ingest run marked
+    // FAILED. The next reader saw a board that looked real and was not.
+    // daily-market-board.ts already did this correctly; this engine did not.
     let candidatesWritten = 0;
-    for (const c of candidates) {
-      await writeCandidate(c, ingestRunId);
-      candidatesWritten++;
+    let evidenceBlocksWritten = 0;
+    let staleRemoved = 0;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const candidateIds = await writeCandidates(client, candidates, ingestRunId);
+      candidatesWritten = candidateIds.size;
+      const evidenceRows = candidates.flatMap((c) => {
+        const candidateId = candidateIds.get(`${c.playerId}:${c.gamePk}`);
+        if (!candidateId) return [];
+        return buildEvidenceBlocks(c).map((block) => ({ candidateId, block }));
+      });
+      evidenceBlocksWritten = await writeEvidenceBlocks(client, evidenceRows);
+      // Reconcile inside the same transaction and after the writes, so current
+      // candidates are protected from deletion and a failure rolls the removal
+      // back with everything else.
+      staleRemoved = await reconcileSlateCandidates(client, slateDate, candidates);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
     }
-
-    // Reconcile: remove TB candidates from prior runs that are no longer in this lineup.
-    // Must run after writes so current candidates are protected from deletion.
-    const staleRemoved = await reconcileSlateCandidates(slateDate, candidates);
     if (staleRemoved > 0) {
       notes.push(`Reconciliation removed ${staleRemoved} stale TB candidate(s) from this slate.`);
     }
+    notes.push(`Wrote ${candidatesWritten} candidate(s) and ${evidenceBlocksWritten} evidence block(s) in one transaction.`);
 
     const counts = {
       strong: candidates.filter((c) => c.researchState === "STRONG").length,

@@ -183,10 +183,22 @@ export const confidenceLabelEnum = pgEnum("confidence_label", [
   "NONE",
 ]);
 
+/**
+ * MODEL_REJECTED used to mean four different things: a corrupt or mismatched
+ * artifact, a market mismatch, a null feature vector, and a model that ran fine
+ * and returned a probability below the confirmation threshold. An operator
+ * cannot act on the last one while it is indistinguishable from the first.
+ *
+ * MODEL_DECLINED is the model running and declining. It is a legitimate model
+ * output and carries a populated calibrated_probability.
+ */
 export const confidenceBasisEnum = pgEnum("confidence_basis", [
   "RESEARCH_ONLY",
   "MODEL_CONFIRMED",
-  "MODEL_REJECTED",
+  "MODEL_DECLINED",
+  "ARTIFACT_INVALID",
+  "MARKET_MISMATCH",
+  "INSUFFICIENT_FEATURES",
 ]);
 
 export const researchWindowEnum = pgEnum("research_window", [
@@ -516,8 +528,70 @@ export const venues = pgTable("venues", {
   name: text("name").notNull(),
   timezone: text("timezone"),
   orientation: text("orientation"),
+  /** Coordinates, required to request a forecast for the venue. */
+  latitude: numeric("latitude"),
+  longitude: numeric("longitude"),
+  /**
+   * Compass bearing from home plate to centre field, in degrees. Wind speed
+   * alone is not usable: a 15 mph wind blowing in and a 15 mph wind blowing out
+   * have opposite signs, and the sign is only recoverable against this bearing.
+   */
+  orientationDegrees: integer("orientation_degrees"),
+  /** OPEN, DOME, RETRACTABLE or UNKNOWN. A dome is neutral weather, not missing weather. */
+  roofType: text("roof_type"),
   metadata: jsonb("metadata").notNull().default({}),
 });
+
+/**
+ * Per-game weather, stored append-only.
+ *
+ * Weather is forecast data and it changes. Each retrieval writes a new row, so
+ * a post-freeze weather change is visible AS a change rather than overwriting
+ * the pregame state that a frozen feature vector was built from.
+ *
+ * There was previously no weather ingestion, no weather table, no weather
+ * feature and no weather term in any scoring function: a 34 degree game with a
+ * 15 mph wind blowing in ranked identically to a 78 degree game with the same
+ * wind blowing out.
+ */
+export const gameWeatherObservations = pgTable("game_weather_observations", {
+  observationId: uuid("observation_id").primaryKey().defaultRandom(),
+  gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
+  venueId: integer("venue_id").references(() => venues.venueId),
+  slateDate: date("slate_date").notNull(),
+  /** The first-pitch time this forecast targets. */
+  forecastForUtc: timestamp("forecast_for_utc", { withTimezone: true }),
+  temperatureF: numeric("temperature_f"),
+  windSpeedMph: numeric("wind_speed_mph"),
+  /** Meteorological convention: the compass bearing the wind is coming FROM. */
+  windDirectionDegrees: integer("wind_direction_degrees"),
+  /** Signed wind component along home plate to centre field. Positive is blowing out. */
+  windOutComponentMph: numeric("wind_out_component_mph"),
+  /** OUT, IN, CROSS, CALM or UNKNOWN. */
+  windComponent: text("wind_component"),
+  precipitationProbability: numeric("precipitation_probability"),
+  humidityPercent: numeric("humidity_percent"),
+  /** OPEN, CLOSED, NONE for an open-air venue, or UNKNOWN. */
+  roofState: text("roof_state"),
+  /**
+   * True when the venue is playing under a closed roof. A closed roof means
+   * weather is NEUTRAL, which is a different fact from weather being MISSING,
+   * and the two must never be conflated.
+   */
+  weatherNeutral: boolean("weather_neutral").notNull().default(false),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  /** Upstream forecast issue time. Never the time this row was computed. */
+  sourceFreshness: timestamp("source_freshness", { withTimezone: true }),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Content hash, so an unchanged forecast does not append an identical row. */
+  observationChecksum: text("observation_checksum").notNull(),
+  raw: jsonb("raw").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  gameChecksumIdx: uniqueIndex("game_weather_game_source_checksum_idx")
+    .on(table.gamePk, table.sourceId, table.observationChecksum),
+  gameRetrievedIdx: index("game_weather_game_retrieved_idx").on(table.gamePk, table.retrievedAt),
+}));
 
 export const games = pgTable("games", {
   gamePk: bigint("game_pk", { mode: "number" }).primaryKey(),
@@ -1014,9 +1088,18 @@ export const bullpenAvailabilityObservations = pgTable(
     playerId: integer("player_id").notNull().references(() => players.playerId),
     teamId: integer("team_id").notNull().references(() => teams.teamId),
     slateDate: date("slate_date").notNull(),
+    /**
+     * Pitch counts for the three-day window. Null means the count is genuinely
+     * unknown, not that the reliever threw one pitch: a logged appearance with
+     * a null pitch_count used to be coerced to 1.
+     */
     d1Pitches: integer("d1_pitches"),
     d2Pitches: integer("d2_pitches"),
     d3Pitches: integer("d3_pitches"),
+    /** Whether an appearance was logged at all, independent of its pitch count. */
+    d1Appeared: boolean("d1_appeared").notNull().default(false),
+    d2Appeared: boolean("d2_appeared").notNull().default(false),
+    d3Appeared: boolean("d3_appeared").notNull().default(false),
     consecutiveDaysUsed: integer("consecutive_days_used").notNull().default(0),
     multiInningYesterday: boolean("multi_inning_yesterday").notNull().default(false),
     daysSinceLastUse: integer("days_since_last_use"),
@@ -1025,7 +1108,16 @@ export const bullpenAvailabilityObservations = pgTable(
     managerOverrideNote: text("manager_override_note"),
     finalState: bullpenAvailabilityStateEnum("final_state").notNull().default("UNKNOWN"),
     confidence: bullpenConfidenceEnum("confidence").notNull().default("UNKNOWN"),
+    /**
+     * Feed retrieval time of the most recent relief appearance this state was
+     * derived from. It used to be written as now(), which is computed_at under
+     * a second name, so the freshness gate that read it always passed. Null
+     * means the three-day window holds no observation of this bullpen at all,
+     * and the state is UNKNOWN rather than AVAILABLE.
+     */
     sourceFreshness: text("source_freshness"),
+    /** Game date of that most recent observation. */
+    sourceObservationGameDate: date("source_observation_game_date"),
     computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
@@ -1552,6 +1644,10 @@ export const snapshotCorrectionReasonEnum = pgEnum("snapshot_correction_reason",
   "IDENTITY_ERROR",
   "SOURCE_UNAVAILABLE",
   "HUMAN_CORRECTION",
+  /** A postponed or suspended game that later completed. Not an ingest failure. */
+  "GAME_RESUMPTION",
+  /** MLB revising its own numbers on a game that was already final. */
+  "OFFICIAL_STAT_CORRECTION",
 ]);
 
 /**
@@ -1649,7 +1745,24 @@ export const historicalOutcomes = pgTable("historical_outcomes", {
   doubles: integer("doubles"),
   triples: integer("triples"),
   homeRuns: integer("home_runs"),
+  /** MLB baseOnBalls, which includes intentional walks. */
   walks: integer("walks"),
+  /**
+   * Intentional walks and hit by pitch, persisted separately from walks
+   * regardless of which definition is active, so the walk settlement policy can
+   * change later and be re-graded historically without re-fetching any feed.
+   */
+  intentionalWalks: integer("intentional_walks"),
+  hitByPitch: integer("hit_by_pitch"),
+  /** The walk definition that produced outcome_value on this row. */
+  walkDefinition: text("walk_definition"),
+  /**
+   * True when the candidate reached the daily market board but never got a
+   * frozen feature snapshot. Such a row is a complete operational settle record
+   * and is deliberately excluded from model training, because it has no pregame
+   * feature vector to train on.
+   */
+  settledWithoutSnapshot: boolean("settled_without_snapshot").notNull().default(false),
   settlementState: settlementStateEnum("settlement_state").notNull().default("PENDING"),
   settledAt: timestamp("settled_at", { withTimezone: true }).notNull().defaultNow(),
   sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
@@ -1744,6 +1857,23 @@ export const dailyMarketBoard = pgTable("daily_market_board", {
   confidenceLabel: confidenceLabelEnum("confidence_label").notNull().default("NONE"),
   confidenceBasis: confidenceBasisEnum("confidence_basis").notNull().default("RESEARCH_ONLY"),
   calibratedProbability: numeric("calibrated_probability"),
+  /**
+   * Fraction of the model's frozen feature schema the inference vector
+   * supplied. Below the coverage floor no probability is emitted and the basis
+   * is INSUFFICIENT_FEATURES.
+   */
+  featureCoverage: numeric("feature_coverage"),
+  /**
+   * Features the model expected and this row did not supply. They were imputed
+   * with their stored training means, never with zero, and are listed here so a
+   * human can see that a probability came from a partial vector.
+   */
+  imputedFeatures: jsonb("imputed_features").notNull().default([]),
+  /**
+   * Feature keys present in the inference vector that the model has never seen.
+   * Recorded, not failed on: they mean the feature store has moved.
+   */
+  unknownFeatures: jsonb("unknown_features").notNull().default([]),
   boardFrozenAt: timestamp("board_frozen_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1765,10 +1895,34 @@ export const walkForwardRuns = pgTable("walk_forward_runs", {
   benchmarkBeat: boolean("benchmark_beat").notNull().default(false),
   benchmarkMethod: text("benchmark_method").notNull(),
   calibrationMethod: text("calibration_method").notNull(),
+  /** Ten-bin reliability curve. Five bins cannot resolve a 0.05 calibration error. */
   calibrationCurve: jsonb("calibration_curve").notNull().default([]),
-  calibrationError: numeric("calibration_error"),
+  /**
+   * Expected calibration error over the reliability bins. This is the quantity
+   * the acceptance gate reads. The column previously named calibration_error
+   * held the mean absolute distance between each prediction and its binary
+   * label, which is not a calibration measurement and rewarded overconfidence.
+   */
+  expectedCalibrationError: numeric("expected_calibration_error"),
+  /**
+   * The former calibration_error value, retained for continuity under a name
+   * that does not claim to measure calibration. Nothing gates on it.
+   */
+  meanAbsolutePredictionError: numeric("mean_absolute_prediction_error"),
+  /** Brier skill score of the model against the fold's training base rate. */
+  brierSkillScore: numeric("brier_skill_score"),
+  /** Standard deviation of the pooled predicted probabilities: the sharpness guard. */
+  predictionStdDev: numeric("prediction_std_dev"),
+  /** Brier margin the model had to beat, derived from the held-out row count. */
+  benchmarkMargin: numeric("benchmark_margin"),
+  /** Named reasons the run did not pass, empty on a PASS. */
+  failureReasons: jsonb("failure_reasons").notNull().default([]),
   calibrationPassed: boolean("calibration_passed").notNull().default(false),
-  /** Weighted fold-local calibration parameters for downstream inference. */
+  /**
+   * Deployment calibration fitted once on the pooled out-of-fold scores of the
+   * frozen artifact. Not an average of per-fold fits: those were fitted to
+   * differently scaled score distributions and averaging them is undefined.
+   */
   calibrationSlope: numeric("calibration_slope"),
   calibrationIntercept: numeric("calibration_intercept"),
   status: walkForwardStatusEnum("status").notNull(),

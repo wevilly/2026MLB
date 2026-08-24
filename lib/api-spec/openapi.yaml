@@ -960,6 +960,80 @@ paths:
                 properties:
                   error: { type: string }
                 required: [error]
+  /analyst/models/{versionId}/promote:
+    post:
+      operationId: promoteAnalystModel
+      tags: [analyst]
+      summary: Promote one validated candidate model to ACTIVE
+      description: |
+        Operator-initiated promotion. Refuses unless the version is a CANDIDATE with a
+        walk-forward acceptance whose run passed, met the expected calibration error
+        threshold, met the sharpness guard, beat its benchmark by the required margin,
+        and carries accepted calibration parameters. Retires whatever was ACTIVE for the
+        same market in the same transaction, so exactly one model per market is live.
+        Promotion is never performed by the orchestration pipeline.
+      parameters:
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The version is now ACTIVE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPromotionResult"
+        "400":
+          description: The version does not meet the promotion conditions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPromotionRefusal"
+        "404":
+          description: The version was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPromotionRefusal"
+  /analyst/models/{versionId}/demote:
+    post:
+      operationId: demoteAnalystModel
+      tags: [analyst]
+      summary: Return one market to research-only
+      description: |
+        The kill switch. Retires the ACTIVE model for its market, so the next board
+        refresh emits RESEARCH_ONLY rows for that market.
+      parameters:
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelDemotionInput"
+      responses:
+        "200":
+          description: The version is retired and the market is research-only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelDemotionResult"
+        "400":
+          description: The version is not ACTIVE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPromotionRefusal"
+        "404":
+          description: The version was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPromotionRefusal"
   /analyst/models/validate:
     post:
       operationId: validateAnalystModel
@@ -2305,6 +2379,47 @@ components:
         outcomeValue: { type: number }
         outcomeHit: { type: boolean }
       required: [outcomeId, outcomeValue, outcomeHit]
+    UnsettleableBoardCandidate:
+      type: object
+      properties:
+        playerId: { type: integer }
+        market: { type: string }
+        reason: { type: string }
+        gamePk: { type: integer }
+      required: [playerId, market, reason]
+    SettlementReconciliation:
+      type: object
+      description: |
+        Every board candidate either settled or appears by name in unsettleable
+        with the reason it did not. Settlement previously iterated only frozen
+        feature snapshots, so a candidate that reached the board without a
+        snapshot was never settled and vanished from the record silently.
+      properties:
+        boardCandidates: { type: integer, minimum: 0 }
+        settled: { type: integer, minimum: 0 }
+        settledWithoutSnapshot:
+          type: integer
+          minimum: 0
+          description: |
+            Settled from the board with no frozen snapshot. A complete
+            operational settle record, deliberately excluded from model
+            training because it has no pregame feature vector.
+        unsettleable:
+          type: array
+          items: { $ref: "#/components/schemas/UnsettleableBoardCandidate" }
+        totalBasesDiscrepancies:
+          type: array
+          description: |
+            Rows where the total bases computed from the components and the
+            total bases the feed reported disagree. Settled DISPUTED rather
+            than silently taking one of the two.
+          items: { type: string }
+        walkDefinition:
+          type: string
+          description: The walk definition applied to this settlement, e.g. BB+IBB (assumed).
+        walkDefinitionAssumed: { type: boolean }
+        walkDefinitionStatement: { type: string }
+      required: [boardCandidates, settled, settledWithoutSnapshot, unsettleable, totalBasesDiscrepancies, walkDefinition, walkDefinitionAssumed, walkDefinitionStatement]
     OfficialGameSettlementResult:
       type: object
       properties:
@@ -2315,6 +2430,7 @@ components:
         lines: { type: integer, minimum: 0 }
         outcomesWritten: { type: integer, minimum: 0 }
         corrections: { type: integer, minimum: 0 }
+        reconciliation: { $ref: "#/components/schemas/SettlementReconciliation" }
       required: [gamePk, slateDate, ingestRunId, state, lines, outcomesWritten, corrections]
     OfficialSettlementRefreshResult:
       type: object
@@ -2325,10 +2441,11 @@ components:
         gamesSettled: { type: integer, minimum: 0 }
         outcomesWritten: { type: integer, minimum: 0 }
         corrections: { type: integer, minimum: 0 }
+        reconciliation: { $ref: "#/components/schemas/SettlementReconciliation" }
         games:
           type: array
           items: { $ref: "#/components/schemas/OfficialGameSettlementResult" }
-      required: [source, slateDate, gamesFound, gamesSettled, outcomesWritten, corrections, games]
+      required: [source, slateDate, gamesFound, gamesSettled, outcomesWritten, corrections, reconciliation, games]
     ModelTrainingResult:
       type: object
       additionalProperties: false
@@ -2379,6 +2496,49 @@ components:
           items: { $ref: "#/components/schemas/ModelVersion" }
         total: { type: integer, minimum: 0 }
       required: [versions, total]
+    ModelDemotionInput:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          description: Why the market is being returned to research-only. Recorded on the audit event.
+    ModelPromotionRefusal:
+      type: object
+      additionalProperties: false
+      properties:
+        error: { type: string }
+        reason:
+          type: string
+          description: The single named condition that was not met.
+      required: [error, reason]
+    ModelPromotionResult:
+      type: object
+      additionalProperties: false
+      properties:
+        versionId: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        status: { type: string, enum: [ACTIVE] }
+        displacedVersionId: { type: ["string", "null"] }
+        displacedStatus: { type: ["string", "null"] }
+        walkForwardRunId: { type: string }
+        foldCount: { type: integer, minimum: 0 }
+        expectedCalibrationError: { type: number }
+        predictionStdDev: { type: number }
+        brierSkillScore: { type: ["number", "null"] }
+        calibrationSlope: { type: number }
+        calibrationIntercept: { type: number }
+        promotedAt: { type: string, format: date-time }
+      required: [versionId, market, status, displacedVersionId, displacedStatus, walkForwardRunId, foldCount, expectedCalibrationError, predictionStdDev, brierSkillScore, calibrationSlope, calibrationIntercept, promotedAt]
+    ModelDemotionResult:
+      type: object
+      additionalProperties: false
+      properties:
+        versionId: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        status: { type: string, enum: [RETIRED] }
+        demotedAt: { type: string, format: date-time }
+      required: [versionId, market, status, demotedAt]
     WalkForwardCalibrationPoint:
       type: object
       additionalProperties: false
@@ -2402,15 +2562,41 @@ components:
         benchmarkBeat: { type: boolean }
         benchmarkMethod: { type: string }
         calibrationMethod: { type: string }
+        benchmarkMargin:
+          type: ["number", "null"]
+          description: |
+            Brier margin the model had to beat, derived from the held-out row
+            count rather than being a fixed constant.
         calibrationCurve:
           type: array
+          description: Ten-bin reliability curve over the pooled out-of-fold probabilities.
           items: { $ref: "#/components/schemas/WalkForwardCalibrationPoint" }
-        calibrationError: { type: ["number", "null"] }
+        expectedCalibrationError:
+          type: ["number", "null"]
+          description: |
+            Expected calibration error over the reliability bins. This is the
+            quantity the acceptance gate reads.
+        expectedCalibrationErrorThreshold: { type: number }
+        meanAbsolutePredictionError:
+          type: ["number", "null"]
+          description: |
+            Mean absolute distance between each prediction and its binary label.
+            Reported for continuity with the field previously and wrongly named
+            calibrationError. Nothing gates on it.
+        brierSkillScore: { type: ["number", "null"] }
+        predictionStdDev:
+          type: ["number", "null"]
+          description: Standard deviation of the pooled predicted probabilities, the sharpness guard.
+        predictionStdDevThreshold: { type: number }
+        failureReasons:
+          type: array
+          description: Named reasons the run did not pass. Empty on a PASS.
+          items: { type: string }
         calibrationPassed: { type: boolean }
         calibrationSlope: { type: ["number", "null"] }
         calibrationIntercept: { type: ["number", "null"] }
         status: { type: string, enum: [PASS, FAIL, INCOMPLETE] }
-      required: [walkForwardRunId, versionId, market, foldCount, foldResults, overallMetric, benchmarkMetric, benchmarkBeat, benchmarkMethod, calibrationMethod, calibrationCurve, calibrationError, calibrationPassed, calibrationSlope, calibrationIntercept, status]
+      required: [walkForwardRunId, versionId, market, foldCount, foldResults, overallMetric, benchmarkMetric, benchmarkBeat, benchmarkMethod, benchmarkMargin, calibrationMethod, calibrationCurve, expectedCalibrationError, expectedCalibrationErrorThreshold, meanAbsolutePredictionError, brierSkillScore, predictionStdDev, predictionStdDevThreshold, failureReasons, calibrationPassed, calibrationSlope, calibrationIntercept, status]
     WalkForwardValidationList:
       type: object
       additionalProperties: false
@@ -2622,7 +2808,22 @@ components:
         geometry: { type: ["string", "null"] }
         runnerUpComparison: { type: ["string", "null"] }
         rejectedAlternatives: { type: array, items: { type: string } }
-      required: [constructionType, constructionLabel, side, legs, stateTotal, rankTotal, evidenceSummary, legCases, sharedMechanism, geometry, runnerUpComparison, rejectedAlternatives]
+        bullpenPathComplete:
+          type: boolean
+          description: |
+            Whether both legs carry a complete, fresh, distinct projected
+            7th/8th/9th bullpen path. A ranking input and a disclosure, never a
+            veto: an incomplete path no longer removes a candidate from
+            selection.
+        bullpenCaveat: { type: ["string", "null"] }
+        tieBroken:
+          type: boolean
+          description: True when this construction was chosen from an exactly tied set.
+        tiedWith:
+          type: array
+          description: The constructions this one tied with on evidence, before the tiebreak.
+          items: { type: string }
+      required: [constructionType, constructionLabel, side, legs, stateTotal, rankTotal, evidenceSummary, legCases, sharedMechanism, geometry, runnerUpComparison, rejectedAlternatives, bullpenPathComplete, bullpenCaveat, tieBroken, tiedWith]
     RoundRobinSideComparison:
       type: object
       properties:
@@ -2639,7 +2840,14 @@ components:
         unavailableReason: { type: ["string", "null"] }
         noPairCauses: { type: array, items: { type: string } }
         rejectedAlternatives: { type: array, items: { type: string } }
-      required: [side, team, evaluatedEligibleHitters, evaluatedIneligibleHitters, consideredConstructionTypes, bestConstruction, availabilityStatus, availabilityDetail, unavailableReason, noPairCauses, rejectedAlternatives]
+        bullpenDisclosures:
+          type: array
+          description: |
+            Bullpen states on this side that are not a complete fresh path.
+            Stated so the operator sees them; they never remove a candidate
+            from selection.
+          items: { type: string }
+      required: [side, team, evaluatedEligibleHitters, evaluatedIneligibleHitters, consideredConstructionTypes, bestConstruction, availabilityStatus, availabilityDetail, unavailableReason, noPairCauses, rejectedAlternatives, bullpenDisclosures]
     RoundRobinGameComparison:
       type: object
       properties:
@@ -2685,11 +2893,32 @@ components:
         primaryMechanism: { type: ["string", "null"] }
         modelPrediction: { type: ["number", "null"] }
         confidenceLabel: { type: string, enum: [FIRE, HALF, HOLD, NONE] }
-        confidenceBasis: { type: string, enum: [RESEARCH_ONLY, MODEL_CONFIRMED, MODEL_REJECTED] }
+        confidenceBasis:
+          type: string
+          description: |
+            Why the row carries the confidence it does. ARTIFACT_INVALID means
+            the ACTIVE artifact failed verification. MARKET_MISMATCH means the
+            artifact is for another market. INSUFFICIENT_FEATURES means the
+            inference vector did not cover enough of the model's frozen feature
+            schema for a probability to be emitted. MODEL_DECLINED means the
+            model ran and returned a probability below the confirmation
+            threshold, and carries that probability.
+          enum: [RESEARCH_ONLY, MODEL_CONFIRMED, MODEL_DECLINED, ARTIFACT_INVALID, MARKET_MISMATCH, INSUFFICIENT_FEATURES]
         calibratedProbability: { type: ["number", "null"] }
         modelVersionId: { type: ["string", "null"] }
+        featureCoverage:
+          type: ["number", "null"]
+          description: Fraction of the model's frozen feature schema this row supplied.
+        imputedFeatures:
+          type: array
+          description: Features the model expected that this row did not supply. Imputed with their training means.
+          items: { type: string }
+        unknownFeatures:
+          type: array
+          description: Feature keys this row supplied that the model has never seen.
+          items: { type: string }
         boardFrozenAt: { type: string }
-      required: [boardId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, modelPrediction, confidenceLabel, confidenceBasis, calibratedProbability, modelVersionId, boardFrozenAt]
+      required: [boardId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, modelPrediction, confidenceLabel, confidenceBasis, calibratedProbability, modelVersionId, featureCoverage, imputedFeatures, unknownFeatures, boardFrozenAt]
     DailyMarketBoard:
       type: object
       additionalProperties: false

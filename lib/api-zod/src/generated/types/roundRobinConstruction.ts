@@ -29,4 +29,17 @@ export interface RoundRobinConstruction {
   /** @nullable */
   runnerUpComparison: string | null;
   rejectedAlternatives: string[];
+  /**
+     * Whether both legs carry a complete, fresh, distinct projected
+     * 7th/8th/9th bullpen path. A ranking input and a disclosure, never a
+     * veto: an incomplete path no longer removes a candidate from
+     * selection.
+     */
+  bullpenPathComplete: boolean;
+  /** @nullable */
+  bullpenCaveat: string | null;
+  /** True when this construction was chosen from an exactly tied set. */
+  tieBroken: boolean;
+  /** The constructions this one tied with on evidence, before the tiebreak. */
+  tiedWith: string[];
 }

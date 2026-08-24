@@ -984,13 +984,18 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "sharedMechanism": zod.string(),
   "geometry": zod.string().nullable(),
   "runnerUpComparison": zod.string().nullable(),
-  "rejectedAlternatives": zod.array(zod.string())
+  "rejectedAlternatives": zod.array(zod.string()),
+  "bullpenPathComplete": zod.boolean().describe('Whether both legs carry a complete, fresh, distinct projected\n7th\/8th\/9th bullpen path. A ranking input and a disclosure, never a\nveto: an incomplete path no longer removes a candidate from\nselection.\n'),
+  "bullpenCaveat": zod.string().nullable(),
+  "tieBroken": zod.boolean().describe('True when this construction was chosen from an exactly tied set.'),
+  "tiedWith": zod.array(zod.string()).describe('The constructions this one tied with on evidence, before the tiebreak.')
 }),zod.null()]),
   "availabilityStatus": zod.string(),
   "availabilityDetail": zod.string().nullable(),
   "unavailableReason": zod.string().nullable(),
   "noPairCauses": zod.array(zod.string()),
-  "rejectedAlternatives": zod.array(zod.string())
+  "rejectedAlternatives": zod.array(zod.string()),
+  "bullpenDisclosures": zod.array(zod.string()).describe('Bullpen states on this side that are not a complete fresh path.\nStated so the operator sees them; they never remove a candidate\nfrom selection.\n')
 }),
   "home": zod.object({
   "side": zod.enum(['AWAY', 'HOME']),
@@ -1073,13 +1078,18 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "sharedMechanism": zod.string(),
   "geometry": zod.string().nullable(),
   "runnerUpComparison": zod.string().nullable(),
-  "rejectedAlternatives": zod.array(zod.string())
+  "rejectedAlternatives": zod.array(zod.string()),
+  "bullpenPathComplete": zod.boolean().describe('Whether both legs carry a complete, fresh, distinct projected\n7th\/8th\/9th bullpen path. A ranking input and a disclosure, never a\nveto: an incomplete path no longer removes a candidate from\nselection.\n'),
+  "bullpenCaveat": zod.string().nullable(),
+  "tieBroken": zod.boolean().describe('True when this construction was chosen from an exactly tied set.'),
+  "tiedWith": zod.array(zod.string()).describe('The constructions this one tied with on evidence, before the tiebreak.')
 }),zod.null()]),
   "availabilityStatus": zod.string(),
   "availabilityDetail": zod.string().nullable(),
   "unavailableReason": zod.string().nullable(),
   "noPairCauses": zod.array(zod.string()),
-  "rejectedAlternatives": zod.array(zod.string())
+  "rejectedAlternatives": zod.array(zod.string()),
+  "bullpenDisclosures": zod.array(zod.string()).describe('Bullpen states on this side that are not a complete fresh path.\nStated so the operator sees them; they never remove a candidate\nfrom selection.\n')
 }),
   "selectedSide": zod.union([zod.literal('AWAY'),zod.literal('HOME'),zod.literal(null)]).nullable(),
   "selectedConstruction": zod.union([zod.object({
@@ -1157,7 +1167,11 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "sharedMechanism": zod.string(),
   "geometry": zod.string().nullable(),
   "runnerUpComparison": zod.string().nullable(),
-  "rejectedAlternatives": zod.array(zod.string())
+  "rejectedAlternatives": zod.array(zod.string()),
+  "bullpenPathComplete": zod.boolean().describe('Whether both legs carry a complete, fresh, distinct projected\n7th\/8th\/9th bullpen path. A ranking input and a disclosure, never a\nveto: an incomplete path no longer removes a candidate from\nselection.\n'),
+  "bullpenCaveat": zod.string().nullable(),
+  "tieBroken": zod.boolean().describe('True when this construction was chosen from an exactly tied set.'),
+  "tiedWith": zod.array(zod.string()).describe('The constructions this one tied with on evidence, before the tiebreak.')
 }),zod.null()]),
   "comparisonStatus": zod.enum(['SELECTED', 'NO_COMPARISON', 'VALID_TIE']),
   "comparisonReason": zod.string(),
@@ -1535,12 +1549,24 @@ export const refreshOfficialSettlementResponseOutcomesWrittenMin = 0;
 
 export const refreshOfficialSettlementResponseCorrectionsMin = 0;
 
+export const refreshOfficialSettlementResponseReconciliationBoardCandidatesMin = 0;
+
+export const refreshOfficialSettlementResponseReconciliationSettledMin = 0;
+
+export const refreshOfficialSettlementResponseReconciliationSettledWithoutSnapshotMin = 0;
+
 
 export const refreshOfficialSettlementResponseGamesItemLinesMin = 0;
 
 export const refreshOfficialSettlementResponseGamesItemOutcomesWrittenMin = 0;
 
 export const refreshOfficialSettlementResponseGamesItemCorrectionsMin = 0;
+
+export const refreshOfficialSettlementResponseGamesItemReconciliationBoardCandidatesMin = 0;
+
+export const refreshOfficialSettlementResponseGamesItemReconciliationSettledMin = 0;
+
+export const refreshOfficialSettlementResponseGamesItemReconciliationSettledWithoutSnapshotMin = 0;
 
 
 
@@ -1551,6 +1577,21 @@ export const RefreshOfficialSettlementResponse = zod.object({
   "gamesSettled": zod.number().int().min(refreshOfficialSettlementResponseGamesSettledMin),
   "outcomesWritten": zod.number().int().min(refreshOfficialSettlementResponseOutcomesWrittenMin),
   "corrections": zod.number().int().min(refreshOfficialSettlementResponseCorrectionsMin),
+  "reconciliation": zod.object({
+  "boardCandidates": zod.number().int().min(refreshOfficialSettlementResponseReconciliationBoardCandidatesMin),
+  "settled": zod.number().int().min(refreshOfficialSettlementResponseReconciliationSettledMin),
+  "settledWithoutSnapshot": zod.number().int().min(refreshOfficialSettlementResponseReconciliationSettledWithoutSnapshotMin).describe('Settled from the board with no frozen snapshot. A complete\noperational settle record, deliberately excluded from model\ntraining because it has no pregame feature vector.\n'),
+  "unsettleable": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "market": zod.string(),
+  "reason": zod.string(),
+  "gamePk": zod.number().int().optional()
+})),
+  "totalBasesDiscrepancies": zod.array(zod.string()).describe('Rows where the total bases computed from the components and the\ntotal bases the feed reported disagree. Settled DISPUTED rather\nthan silently taking one of the two.\n'),
+  "walkDefinition": zod.string().describe('The walk definition applied to this settlement, e.g. BB+IBB (assumed).'),
+  "walkDefinitionAssumed": zod.boolean(),
+  "walkDefinitionStatement": zod.string()
+}).describe('Every board candidate either settled or appears by name in unsettleable\nwith the reason it did not. Settlement previously iterated only frozen\nfeature snapshots, so a candidate that reached the board without a\nsnapshot was never settled and vanished from the record silently.\n'),
   "games": zod.array(zod.object({
   "gamePk": zod.number().int().min(1),
   "slateDate": zod.coerce.date(),
@@ -1558,7 +1599,22 @@ export const RefreshOfficialSettlementResponse = zod.object({
   "state": zod.enum(['PENDING', 'SETTLED', 'POSTPONED', 'NO_ACTION', 'DISPUTED']),
   "lines": zod.number().int().min(refreshOfficialSettlementResponseGamesItemLinesMin),
   "outcomesWritten": zod.number().int().min(refreshOfficialSettlementResponseGamesItemOutcomesWrittenMin),
-  "corrections": zod.number().int().min(refreshOfficialSettlementResponseGamesItemCorrectionsMin)
+  "corrections": zod.number().int().min(refreshOfficialSettlementResponseGamesItemCorrectionsMin),
+  "reconciliation": zod.object({
+  "boardCandidates": zod.number().int().min(refreshOfficialSettlementResponseGamesItemReconciliationBoardCandidatesMin),
+  "settled": zod.number().int().min(refreshOfficialSettlementResponseGamesItemReconciliationSettledMin),
+  "settledWithoutSnapshot": zod.number().int().min(refreshOfficialSettlementResponseGamesItemReconciliationSettledWithoutSnapshotMin).describe('Settled from the board with no frozen snapshot. A complete\noperational settle record, deliberately excluded from model\ntraining because it has no pregame feature vector.\n'),
+  "unsettleable": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "market": zod.string(),
+  "reason": zod.string(),
+  "gamePk": zod.number().int().optional()
+})),
+  "totalBasesDiscrepancies": zod.array(zod.string()).describe('Rows where the total bases computed from the components and the\ntotal bases the feed reported disagree. Settled DISPUTED rather\nthan silently taking one of the two.\n'),
+  "walkDefinition": zod.string().describe('The walk definition applied to this settlement, e.g. BB+IBB (assumed).'),
+  "walkDefinitionAssumed": zod.boolean(),
+  "walkDefinitionStatement": zod.string()
+}).optional().describe('Every board candidate either settled or appears by name in unsettleable\nwith the reason it did not. Settlement previously iterated only frozen\nfeature snapshots, so a candidate that reached the board without a\nsnapshot was never settled and vanished from the record silently.\n')
 }))
 })
 
@@ -1578,12 +1634,24 @@ export const ingestOfficialSettlementsResponseOutcomesWrittenMin = 0;
 
 export const ingestOfficialSettlementsResponseCorrectionsMin = 0;
 
+export const ingestOfficialSettlementsResponseReconciliationBoardCandidatesMin = 0;
+
+export const ingestOfficialSettlementsResponseReconciliationSettledMin = 0;
+
+export const ingestOfficialSettlementsResponseReconciliationSettledWithoutSnapshotMin = 0;
+
 
 export const ingestOfficialSettlementsResponseGamesItemLinesMin = 0;
 
 export const ingestOfficialSettlementsResponseGamesItemOutcomesWrittenMin = 0;
 
 export const ingestOfficialSettlementsResponseGamesItemCorrectionsMin = 0;
+
+export const ingestOfficialSettlementsResponseGamesItemReconciliationBoardCandidatesMin = 0;
+
+export const ingestOfficialSettlementsResponseGamesItemReconciliationSettledMin = 0;
+
+export const ingestOfficialSettlementsResponseGamesItemReconciliationSettledWithoutSnapshotMin = 0;
 
 
 
@@ -1594,6 +1662,21 @@ export const IngestOfficialSettlementsResponse = zod.object({
   "gamesSettled": zod.number().int().min(ingestOfficialSettlementsResponseGamesSettledMin),
   "outcomesWritten": zod.number().int().min(ingestOfficialSettlementsResponseOutcomesWrittenMin),
   "corrections": zod.number().int().min(ingestOfficialSettlementsResponseCorrectionsMin),
+  "reconciliation": zod.object({
+  "boardCandidates": zod.number().int().min(ingestOfficialSettlementsResponseReconciliationBoardCandidatesMin),
+  "settled": zod.number().int().min(ingestOfficialSettlementsResponseReconciliationSettledMin),
+  "settledWithoutSnapshot": zod.number().int().min(ingestOfficialSettlementsResponseReconciliationSettledWithoutSnapshotMin).describe('Settled from the board with no frozen snapshot. A complete\noperational settle record, deliberately excluded from model\ntraining because it has no pregame feature vector.\n'),
+  "unsettleable": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "market": zod.string(),
+  "reason": zod.string(),
+  "gamePk": zod.number().int().optional()
+})),
+  "totalBasesDiscrepancies": zod.array(zod.string()).describe('Rows where the total bases computed from the components and the\ntotal bases the feed reported disagree. Settled DISPUTED rather\nthan silently taking one of the two.\n'),
+  "walkDefinition": zod.string().describe('The walk definition applied to this settlement, e.g. BB+IBB (assumed).'),
+  "walkDefinitionAssumed": zod.boolean(),
+  "walkDefinitionStatement": zod.string()
+}).describe('Every board candidate either settled or appears by name in unsettleable\nwith the reason it did not. Settlement previously iterated only frozen\nfeature snapshots, so a candidate that reached the board without a\nsnapshot was never settled and vanished from the record silently.\n'),
   "games": zod.array(zod.object({
   "gamePk": zod.number().int().min(1),
   "slateDate": zod.coerce.date(),
@@ -1601,7 +1684,22 @@ export const IngestOfficialSettlementsResponse = zod.object({
   "state": zod.enum(['PENDING', 'SETTLED', 'POSTPONED', 'NO_ACTION', 'DISPUTED']),
   "lines": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemLinesMin),
   "outcomesWritten": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemOutcomesWrittenMin),
-  "corrections": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemCorrectionsMin)
+  "corrections": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemCorrectionsMin),
+  "reconciliation": zod.object({
+  "boardCandidates": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemReconciliationBoardCandidatesMin),
+  "settled": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemReconciliationSettledMin),
+  "settledWithoutSnapshot": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemReconciliationSettledWithoutSnapshotMin).describe('Settled from the board with no frozen snapshot. A complete\noperational settle record, deliberately excluded from model\ntraining because it has no pregame feature vector.\n'),
+  "unsettleable": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "market": zod.string(),
+  "reason": zod.string(),
+  "gamePk": zod.number().int().optional()
+})),
+  "totalBasesDiscrepancies": zod.array(zod.string()).describe('Rows where the total bases computed from the components and the\ntotal bases the feed reported disagree. Settled DISPUTED rather\nthan silently taking one of the two.\n'),
+  "walkDefinition": zod.string().describe('The walk definition applied to this settlement, e.g. BB+IBB (assumed).'),
+  "walkDefinitionAssumed": zod.boolean(),
+  "walkDefinitionStatement": zod.string()
+}).optional().describe('Every board candidate either settled or appears by name in unsettleable\nwith the reason it did not. Settlement previously iterated only frozen\nfeature snapshots, so a candidate that reached the board without a\nsnapshot was never settled and vanished from the record silently.\n')
 }))
 })
 
@@ -1623,6 +1721,12 @@ export const settleOfficialGameResponseOutcomesWrittenMin = 0;
 
 export const settleOfficialGameResponseCorrectionsMin = 0;
 
+export const settleOfficialGameResponseReconciliationBoardCandidatesMin = 0;
+
+export const settleOfficialGameResponseReconciliationSettledMin = 0;
+
+export const settleOfficialGameResponseReconciliationSettledWithoutSnapshotMin = 0;
+
 
 
 export const SettleOfficialGameResponse = zod.object({
@@ -1632,7 +1736,22 @@ export const SettleOfficialGameResponse = zod.object({
   "state": zod.enum(['PENDING', 'SETTLED', 'POSTPONED', 'NO_ACTION', 'DISPUTED']),
   "lines": zod.number().int().min(settleOfficialGameResponseLinesMin),
   "outcomesWritten": zod.number().int().min(settleOfficialGameResponseOutcomesWrittenMin),
-  "corrections": zod.number().int().min(settleOfficialGameResponseCorrectionsMin)
+  "corrections": zod.number().int().min(settleOfficialGameResponseCorrectionsMin),
+  "reconciliation": zod.object({
+  "boardCandidates": zod.number().int().min(settleOfficialGameResponseReconciliationBoardCandidatesMin),
+  "settled": zod.number().int().min(settleOfficialGameResponseReconciliationSettledMin),
+  "settledWithoutSnapshot": zod.number().int().min(settleOfficialGameResponseReconciliationSettledWithoutSnapshotMin).describe('Settled from the board with no frozen snapshot. A complete\noperational settle record, deliberately excluded from model\ntraining because it has no pregame feature vector.\n'),
+  "unsettleable": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "market": zod.string(),
+  "reason": zod.string(),
+  "gamePk": zod.number().int().optional()
+})),
+  "totalBasesDiscrepancies": zod.array(zod.string()).describe('Rows where the total bases computed from the components and the\ntotal bases the feed reported disagree. Settled DISPUTED rather\nthan silently taking one of the two.\n'),
+  "walkDefinition": zod.string().describe('The walk definition applied to this settlement, e.g. BB+IBB (assumed).'),
+  "walkDefinitionAssumed": zod.boolean(),
+  "walkDefinitionStatement": zod.string()
+}).optional().describe('Every board candidate either settled or appears by name in unsettleable\nwith the reason it did not. Settlement previously iterated only frozen\nfeature snapshots, so a candidate that reached the board without a\nsnapshot was never settled and vanished from the record silently.\n')
 })
 
 
@@ -1854,6 +1973,61 @@ export const GetAnalystModelsResponse = zod.object({
 
 
 /**
+ * Operator-initiated promotion. Refuses unless the version is a CANDIDATE with a
+ * walk-forward acceptance whose run passed, met the expected calibration error
+ * threshold, met the sharpness guard, beat its benchmark by the required margin,
+ * and carries accepted calibration parameters. Retires whatever was ACTIVE for the
+ * same market in the same transaction, so exactly one model per market is live.
+ * Promotion is never performed by the orchestration pipeline.
+ * @summary Promote one validated candidate model to ACTIVE
+ */
+export const PromoteAnalystModelParams = zod.object({
+  "versionId": zod.coerce.string()
+})
+
+export const promoteAnalystModelResponseFoldCountMin = 0;
+
+
+
+export const PromoteAnalystModelResponse = zod.object({
+  "versionId": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "status": zod.enum(['ACTIVE']),
+  "displacedVersionId": zod.string().nullable(),
+  "displacedStatus": zod.string().nullable(),
+  "walkForwardRunId": zod.string(),
+  "foldCount": zod.number().int().min(promoteAnalystModelResponseFoldCountMin),
+  "expectedCalibrationError": zod.number(),
+  "predictionStdDev": zod.number(),
+  "brierSkillScore": zod.number().nullable(),
+  "calibrationSlope": zod.number(),
+  "calibrationIntercept": zod.number(),
+  "promotedAt": zod.coerce.date()
+})
+
+
+/**
+ * The kill switch. Retires the ACTIVE model for its market, so the next board
+ * refresh emits RESEARCH_ONLY rows for that market.
+ * @summary Return one market to research-only
+ */
+export const DemoteAnalystModelParams = zod.object({
+  "versionId": zod.coerce.string()
+})
+
+export const DemoteAnalystModelBody = zod.object({
+  "reason": zod.string().optional().describe('Why the market is being returned to research-only. Recorded on the audit event.')
+}).strict()
+
+export const DemoteAnalystModelResponse = zod.object({
+  "versionId": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "status": zod.enum(['RETIRED']),
+  "demotedAt": zod.coerce.date()
+})
+
+
+/**
  * Evaluates a model using only frozen snapshots and official settled outcomes
  * dated before each fold's test date. The run compares out-of-sample Brier skill
  * with a market-specific historical base-rate benchmark and performs fold-local
@@ -1885,13 +2059,20 @@ export const ValidateAnalystModelResponse = zod.object({
   "benchmarkBeat": zod.boolean(),
   "benchmarkMethod": zod.string(),
   "calibrationMethod": zod.string(),
+  "benchmarkMargin": zod.number().nullable().describe('Brier margin the model had to beat, derived from the held-out row\ncount rather than being a fixed constant.\n'),
   "calibrationCurve": zod.array(zod.object({
   "bucket": zod.number().int().min(validateAnalystModelResponseCalibrationCurveItemBucketMin),
   "count": zod.number().int().min(validateAnalystModelResponseCalibrationCurveItemCountMin),
   "predictedProbability": zod.number().nullable(),
   "observedRate": zod.number().nullable()
-})),
-  "calibrationError": zod.number().nullable(),
+})).describe('Ten-bin reliability curve over the pooled out-of-fold probabilities.'),
+  "expectedCalibrationError": zod.number().nullable().describe('Expected calibration error over the reliability bins. This is the\nquantity the acceptance gate reads.\n'),
+  "expectedCalibrationErrorThreshold": zod.number(),
+  "meanAbsolutePredictionError": zod.number().nullable().describe('Mean absolute distance between each prediction and its binary label.\nReported for continuity with the field previously and wrongly named\ncalibrationError. Nothing gates on it.\n'),
+  "brierSkillScore": zod.number().nullable(),
+  "predictionStdDev": zod.number().nullable().describe('Standard deviation of the pooled predicted probabilities, the sharpness guard.'),
+  "predictionStdDevThreshold": zod.number(),
+  "failureReasons": zod.array(zod.string()).describe('Named reasons the run did not pass. Empty on a PASS.'),
   "calibrationPassed": zod.boolean(),
   "calibrationSlope": zod.number().nullable(),
   "calibrationIntercept": zod.number().nullable(),
@@ -1930,13 +2111,20 @@ export const GetAnalystModelValidationResponse = zod.object({
   "benchmarkBeat": zod.boolean(),
   "benchmarkMethod": zod.string(),
   "calibrationMethod": zod.string(),
+  "benchmarkMargin": zod.number().nullable().describe('Brier margin the model had to beat, derived from the held-out row\ncount rather than being a fixed constant.\n'),
   "calibrationCurve": zod.array(zod.object({
   "bucket": zod.number().int().min(getAnalystModelValidationResponseRunsItemOneCalibrationCurveItemBucketMin),
   "count": zod.number().int().min(getAnalystModelValidationResponseRunsItemOneCalibrationCurveItemCountMin),
   "predictedProbability": zod.number().nullable(),
   "observedRate": zod.number().nullable()
-})),
-  "calibrationError": zod.number().nullable(),
+})).describe('Ten-bin reliability curve over the pooled out-of-fold probabilities.'),
+  "expectedCalibrationError": zod.number().nullable().describe('Expected calibration error over the reliability bins. This is the\nquantity the acceptance gate reads.\n'),
+  "expectedCalibrationErrorThreshold": zod.number(),
+  "meanAbsolutePredictionError": zod.number().nullable().describe('Mean absolute distance between each prediction and its binary label.\nReported for continuity with the field previously and wrongly named\ncalibrationError. Nothing gates on it.\n'),
+  "brierSkillScore": zod.number().nullable(),
+  "predictionStdDev": zod.number().nullable().describe('Standard deviation of the pooled predicted probabilities, the sharpness guard.'),
+  "predictionStdDevThreshold": zod.number(),
+  "failureReasons": zod.array(zod.string()).describe('Named reasons the run did not pass. Empty on a PASS.'),
   "calibrationPassed": zod.boolean(),
   "calibrationSlope": zod.number().nullable(),
   "calibrationIntercept": zod.number().nullable(),
@@ -2010,9 +2198,12 @@ export const GetAnalystDailyMarketBoardResponse = zod.object({
   "primaryMechanism": zod.string().nullable(),
   "modelPrediction": zod.number().nullable(),
   "confidenceLabel": zod.enum(['FIRE', 'HALF', 'HOLD', 'NONE']),
-  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_REJECTED']),
+  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_DECLINED', 'ARTIFACT_INVALID', 'MARKET_MISMATCH', 'INSUFFICIENT_FEATURES']).describe('Why the row carries the confidence it does. ARTIFACT_INVALID means\nthe ACTIVE artifact failed verification. MARKET_MISMATCH means the\nartifact is for another market. INSUFFICIENT_FEATURES means the\ninference vector did not cover enough of the model\'s frozen feature\nschema for a probability to be emitted. MODEL_DECLINED means the\nmodel ran and returned a probability below the confirmation\nthreshold, and carries that probability.\n'),
   "calibratedProbability": zod.number().nullable(),
   "modelVersionId": zod.string().nullable(),
+  "featureCoverage": zod.number().nullable().describe('Fraction of the model\'s frozen feature schema this row supplied.'),
+  "imputedFeatures": zod.array(zod.string()).describe('Features the model expected that this row did not supply. Imputed with their training means.'),
+  "unknownFeatures": zod.array(zod.string()).describe('Feature keys this row supplied that the model has never seen.'),
   "boardFrozenAt": zod.string()
 }).describe('One persisted confidence record. Model values are generated only by a\nverified ACTIVE artifact with accepted calibration; no betting fields are\npart of this contract.\n')),
   "total": zod.number().int().min(getAnalystDailyMarketBoardResponseTotalMin),
@@ -2077,9 +2268,12 @@ export const GetAnalystDailyBoardGameSummaryResponse = zod.object({
   "primaryMechanism": zod.string().nullable(),
   "modelPrediction": zod.number().nullable(),
   "confidenceLabel": zod.enum(['FIRE', 'HALF', 'HOLD', 'NONE']),
-  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_REJECTED']),
+  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_DECLINED', 'ARTIFACT_INVALID', 'MARKET_MISMATCH', 'INSUFFICIENT_FEATURES']).describe('Why the row carries the confidence it does. ARTIFACT_INVALID means\nthe ACTIVE artifact failed verification. MARKET_MISMATCH means the\nartifact is for another market. INSUFFICIENT_FEATURES means the\ninference vector did not cover enough of the model\'s frozen feature\nschema for a probability to be emitted. MODEL_DECLINED means the\nmodel ran and returned a probability below the confirmation\nthreshold, and carries that probability.\n'),
   "calibratedProbability": zod.number().nullable(),
   "modelVersionId": zod.string().nullable(),
+  "featureCoverage": zod.number().nullable().describe('Fraction of the model\'s frozen feature schema this row supplied.'),
+  "imputedFeatures": zod.array(zod.string()).describe('Features the model expected that this row did not supply. Imputed with their training means.'),
+  "unknownFeatures": zod.array(zod.string()).describe('Feature keys this row supplied that the model has never seen.'),
   "boardFrozenAt": zod.string()
 }).describe('One persisted confidence record. Model values are generated only by a\nverified ACTIVE artifact with accepted calibration; no betting fields are\npart of this contract.\n'))
 })),
@@ -2866,3 +3060,5 @@ export const RefreshBullpenResponse = zod.object({
   "teamsComputed": zod.number().int(),
   "error": zod.string().nullable()
 })
+
+

@@ -36,13 +36,16 @@
  */
 
 import { pool } from "@workspace/db";
+import { MARKET_TO_DB } from "./market-codes";
+import { conflictsFor, querySlateLineupPlayers } from "./lineup-sources";
+import { getSlateWeather, weatherAdjustment, type GameWeather } from "./weather-foundation";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
 
 // ── Source / market constants ─────────────────────────────────────────────────
 
 const WALK_ENGINE_SOURCE = "WALK_ENGINE";
-const MARKET = "BATTER_WALK";
+const MARKET = MARKET_TO_DB.WALK;
 
 // ── Mechanism thresholds ──────────────────────────────────────────────────────
 
@@ -199,45 +202,6 @@ async function getSlateGames(slateDate: string): Promise<SlateGame[]> {
   return result.rows.map((r) => ({
     gamePk: Number(r.game_pk), venueId: r.venue_id,
     awayTeamId: r.away_team_id, homeTeamId: r.home_team_id,
-  }));
-}
-
-async function getSlateLineupPlayers(gamePks: number[]): Promise<LineupPlayer[]> {
-  if (gamePks.length === 0) return [];
-  const result = await pool.query<{
-    player_id: number; full_name: string; bats: string | null; batting_order: number;
-    game_pk: number; team_id: number; lineup_state: string; opp_team_id: number; venue_id: number | null;
-  }>(
-    `WITH best_lineup AS (
-       SELECT DISTINCT ON (game_pk, team_id)
-         lineup_snapshot_id, game_pk, team_id, state AS lineup_state
-       FROM lineup_snapshots
-       WHERE game_pk = ANY($1)
-         AND source_id = 'FANTASYPROS'
-         AND state IN ('CONFIRMED', 'PROJECTED')
-       ORDER BY game_pk, team_id,
-         CASE
-           WHEN state = 'CONFIRMED' THEN 1
-           ELSE 2
-         END,
-         observed_at DESC
-     )
-     SELECT le.player_id, p.full_name, p.bats, le.batting_order,
-            bl.game_pk::bigint, bl.team_id, bl.lineup_state,
-            CASE WHEN bl.team_id = g.away_team_id THEN g.home_team_id ELSE g.away_team_id END AS opp_team_id,
-            g.venue_id
-     FROM best_lineup bl
-     JOIN lineup_entries le ON le.lineup_snapshot_id = bl.lineup_snapshot_id
-     JOIN players p ON p.player_id = le.player_id
-     JOIN games g ON g.game_pk = bl.game_pk
-     WHERE le.player_id IS NOT NULL
-     ORDER BY bl.game_pk, le.batting_order`,
-    [gamePks],
-  );
-  return result.rows.map((r) => ({
-    playerId: r.player_id, playerName: r.full_name, bats: r.bats,
-    battingOrder: r.batting_order, gamePk: Number(r.game_pk), teamId: r.team_id,
-    lineupState: r.lineup_state, oppTeamId: r.opp_team_id, venueId: r.venue_id,
   }));
 }
 
@@ -422,6 +386,7 @@ function checkCounterEvidence(
   pitcherThrows: string | null,
   hitterPA: N,
   pitcherBF: N,
+  weather: GameWeather | null = null,
 ): string[] {
   const counters: string[] = [];
   const side = resolveBatterSide(bats, pitcherThrows);
@@ -449,6 +414,12 @@ function checkCounterEvidence(
     counters.push("INSUFFICIENT_SAMPLE");
   }
 
+
+  // Weather extremes. Flags rather than score nudges: their effect is not
+  // linear, and the coefficients that suppress total bases and home runs are
+  // not the coefficients that apply to walks.
+  counters.push(...weatherAdjustment("WALK", weather).flags);
+
   return counters;
 }
 
@@ -460,6 +431,7 @@ function computeEvidenceScore(
   bats: string | null,
   pitcherThrows: string | null,
   counterEvidence: string[],
+  weather: GameWeather | null = null,
 ): number {
   const side = resolveBatterSide(bats, pitcherThrows);
 
@@ -519,6 +491,12 @@ function computeEvidenceScore(
     else if (c === "FIRST_PITCH_STRIKE_HEAVY") score -= 1;
     // INSUFFICIENT_SAMPLE: noted but no score penalty (data quality flag)
   }
+
+
+  // Weather, as a bounded second-order adjustment with WALK-specific
+  // coefficients. A closed roof contributes exactly zero and is distinguishable
+  // in the evidence from weather that is simply missing.
+  score += weatherAdjustment("WALK", weather).adjustment;
 
   return score;
 }
@@ -647,8 +625,18 @@ function buildCounterEvidenceJson(c: WALKCandidate): object {
 
 // ── DB write ──────────────────────────────────────────────────────────────────
 
-async function writeCandidate(c: WALKCandidate, ingestRunId: string): Promise<string> {
-  const result = await pool.query<{ candidate_id: string }>(
+/**
+ * Anything that can run a query: the shared pool, or a client inside a
+ * transaction. The slate write path takes one so it can be made atomic.
+ */
+type Queryable = Pick<typeof pool, "query">;
+
+async function writeCandidate(
+  executor: Queryable,
+  c: WALKCandidate,
+  ingestRunId: string,
+): Promise<string> {
+  const result = await executor.query<{ candidate_id: string }>(
     `INSERT INTO market_research_candidates
        (slate_date, game_pk, player_id, market, research_rank, research_state,
         primary_mechanism, secondary_mechanism,
@@ -694,11 +682,15 @@ async function writeCandidate(c: WALKCandidate, ingestRunId: string): Promise<st
   );
 
   const candidateId = result.rows[0].candidate_id;
-  await writeEvidenceBlocks(candidateId, c);
+  await writeEvidenceBlocks(executor, candidateId, c);
   return candidateId;
 }
 
-async function writeEvidenceBlocks(candidateId: string, c: WALKCandidate): Promise<void> {
+async function writeEvidenceBlocks(
+  executor: Queryable,
+  candidateId: string,
+  c: WALKCandidate,
+): Promise<void> {
   const side = resolveBatterSide(c.hitterBats, c.starterThrows);
   const hitterBBPct  = n(c.hitterFeatures, hk("bb_percent", side)) ?? n(c.hitterFeatures, "bb_percent");
   const pitcherBBPct = n(c.pitcherFeatures, pk("bb_percent", side)) ?? n(c.pitcherFeatures, "bb_percent");
@@ -785,7 +777,7 @@ async function writeEvidenceBlocks(candidateId: string, c: WALKCandidate): Promi
   }
 
   for (const b of blocks) {
-    await pool.query(
+    await executor.query(
       `INSERT INTO market_research_evidence_blocks
          (candidate_id, block_type, source_id, metric_key, metric_label,
           value, unit, sample_size, direction, strength, narrative, raw_evidence, retrieved_at)
@@ -801,9 +793,13 @@ async function writeEvidenceBlocks(candidateId: string, c: WALKCandidate): Promi
 
 // ── Main engine entry point ───────────────────────────────────────────────────
 
-async function reconcileSlateCandidates(slateDate: string, candidates: WALKCandidate[]): Promise<number> {
+async function reconcileSlateCandidates(
+  executor: Queryable,
+  slateDate: string,
+  candidates: WALKCandidate[],
+): Promise<number> {
   if (candidates.length === 0) {
-    const result = await pool.query<{ count: string }>(
+    const result = await executor.query<{ count: string }>(
       `WITH deleted AS (
          DELETE FROM market_research_candidates
          WHERE slate_date = $1 AND market = 'BATTER_WALK'
@@ -817,7 +813,7 @@ async function reconcileSlateCandidates(slateDate: string, candidates: WALKCandi
   const playerIds = candidates.map((c) => c.playerId);
   const gamePks   = candidates.map((c) => c.gamePk);
 
-  const result = await pool.query<{ count: string }>(
+  const result = await executor.query<{ count: string }>(
     `WITH eligible AS (
        SELECT unnest($2::integer[]) AS player_id,
               unnest($3::bigint[])  AS game_pk
@@ -848,7 +844,7 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
 
     const games = await getSlateGames(slateDate);
     if (games.length === 0) {
-      const staleRemoved = await reconcileSlateCandidates(slateDate, []);
+      const staleRemoved = await reconcileSlateCandidates(pool, slateDate, []);
       const noGamesNote = staleRemoved > 0
         ? `No games on this date; ${staleRemoved} stale WALK candidate(s) from a prior run have been cleared.`
         : "No games found for this date; Walk board is empty.";
@@ -860,10 +856,15 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
     }
 
     const gamePks = games.map((g) => g.gamePk);
-    const lineupPlayers = await getSlateLineupPlayers(gamePks);
+    const { players: lineupPlayers, resolved: resolvedLineups } = await querySlateLineupPlayers(gamePks);
 
     if (lineupPlayers.length === 0) {
       notes.push("No lineup entries found. Walk candidates require lineup data.");
+    }
+    if (resolvedLineups.conflicts.length > 0) {
+      notes.push(
+        `${resolvedLineups.conflicts.length} lineup source conflict(s) recorded; affected candidates carry a blocking evidence gap.`,
+      );
     }
 
     // Create ingest run — hoisted ID is visible to catch block for FAILED marking
@@ -880,6 +881,8 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
     const pitcherCache = new Map<number, FeatureMap>();
     const parkCache    = new Map<number, FeatureMap>();
     const bullpenCache = new Map<string, BullpenWalkSummary>();
+    // One query for the whole slate rather than one per candidate.
+    const slateWeather = await getSlateWeather(slateDate);
 
     const candidates: WALKCandidate[] = [];
 
@@ -921,25 +924,36 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
       if (starter.playerId === null)  missingData.push("Opposing starter identity unknown");
       else if (pitcherFeatures.size === 0) missingData.push("No season pitcher research data");
       if (player.venueId === null || parkFeatures.size === 0) missingData.push("Park factors unavailable");
-      if (bullpen.status !== "CURRENT") {
-        missingData.push(`Bullpen path ${bullpen.status.toLowerCase()}: ${bullpen.reason}`);
-      } else if (bullpen.metricArmCount !== bullpen.armIds.length) {
-        missingData.push(`Bullpen role-path BB% research incomplete (${bullpen.metricArmCount}/${bullpen.armIds.length} arms)`);
+      // A disagreement between lineup feeds is a blocking evidence gap on this
+      // candidate, not something precedence quietly resolves.
+      for (const conflict of conflictsFor(resolvedLineups, player.gamePk, player.playerId)) {
+        missingData.push(conflict.detail);
       }
+      // Bullpen state is disclosed on the candidate's bullpen evidence block and
+      // is deliberately NOT written into missing_stale_evidence.
+      //
+      // getMarketResearchSelectionEligibility treats any non-empty
+      // missing_stale_evidence as a blocking gap, so writing bullpen state here
+      // made an incomplete or stale bullpen path a hard veto on selection
+      // through the back door, which is exactly the gate task 2.2 removed from
+      // sideResult. Task 3.4 makes the freshness signal honest, and an honest
+      // signal attached to a veto would eliminate most pairs on most slates.
 
       const { primary: mechanism, secondary: secondaryMechanism } = classifyMechanism(
         hitterFeatures, bullpen, player.bats, starter.throws,
       );
       const hitterPA  = n(hitterFeatures, "pa");
       const pitcherBF = n(pitcherFeatures, "bf") ?? n(pitcherFeatures, "pa");
+      const gameWeather = slateWeather.get(player.gamePk) ?? null;
       const counterEvidence = checkCounterEvidence(
         hitterFeatures, pitcherFeatures,
         player.bats, starter.throws,
-        hitterPA, pitcherBF,
+        hitterPA, pitcherBF, gameWeather,
       );
       const baseEvidenceScore = computeEvidenceScore(
         hitterFeatures, pitcherFeatures, bullpen,
         player.battingOrder, player.bats, starter.throws, counterEvidence,
+        gameWeather,
       );
       const bvp = starter.playerId === null ? null : await getBatterPitcherEvidence(player.playerId, starter.playerId, slateDate, "WALK");
       const evidenceScore = baseEvidenceScore + (bvp?.rankAdjustment ?? 0);
@@ -961,13 +975,31 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
 
     assignCompetitionRanks(candidates);
 
+    // One transaction for the whole slate.
+    //
+    // These writes previously ran in a bare loop on the shared pool with the
+    // reconcile after them and nothing wrapping any of it, so a failure partway
+    // through left a partially populated board next to an ingest run marked
+    // FAILED, and the next reader saw a board that looked real and was not.
     let candidatesWritten = 0;
-    for (const c of candidates) {
-      await writeCandidate(c, ingestRunId);
-      candidatesWritten++;
+    let staleRemoved = 0;
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const c of candidates) {
+        await writeCandidate(client, c, ingestRunId);
+        candidatesWritten++;
+      }
+      // After the writes, so current candidates are protected from deletion,
+      // and inside the transaction, so a failure rolls the removal back too.
+      staleRemoved = await reconcileSlateCandidates(client, slateDate, candidates);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
     }
-
-    const staleRemoved = await reconcileSlateCandidates(slateDate, candidates);
     if (staleRemoved > 0) {
       notes.push(`Reconciliation removed ${staleRemoved} stale WALK candidate(s) from this slate.`);
     }

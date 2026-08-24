@@ -106,6 +106,10 @@ import type {
   LateScratchDetection,
   MarketPostmortem,
   MarketResearch,
+  ModelDemotionInput,
+  ModelDemotionResult,
+  ModelPromotionRefusal,
+  ModelPromotionResult,
   ModelTrainingResult,
   ModelVersionList,
   OfficialGameSettlementResult,
@@ -3518,6 +3522,157 @@ export function useGetAnalystModels<TData = Awaited<ReturnType<typeof getAnalyst
 
 
 
+
+export const getPromoteAnalystModelUrl = (versionId: string,) => {
+
+
+
+
+  return `/api/analyst/models/${versionId}/promote`
+}
+
+/**
+ * Operator-initiated promotion. Refuses unless the version is a CANDIDATE with a
+ * walk-forward acceptance whose run passed, met the expected calibration error
+ * threshold, met the sharpness guard, beat its benchmark by the required margin,
+ * and carries accepted calibration parameters. Retires whatever was ACTIVE for the
+ * same market in the same transaction, so exactly one model per market is live.
+ * Promotion is never performed by the orchestration pipeline.
+ * @summary Promote one validated candidate model to ACTIVE
+ */
+export const promoteAnalystModel = async (versionId: string, options?: Parameters<typeof customFetch>[1]): Promise<ModelPromotionResult> => {
+
+  return customFetch<ModelPromotionResult>(getPromoteAnalystModelUrl(versionId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getPromoteAnalystModelMutationOptions = <TError = ErrorType<ModelPromotionRefusal>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof promoteAnalystModel>>, TError,{versionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof promoteAnalystModel>>, TError,{versionId: string}, TContext> => {
+
+const mutationKey = ['promoteAnalystModel'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof promoteAnalystModel>>, {versionId: string}> = (props) => {
+          const {versionId} = props ?? {};
+
+          return  promoteAnalystModel(versionId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PromoteAnalystModelMutationResult = NonNullable<Awaited<ReturnType<typeof promoteAnalystModel>>>
+
+    export type PromoteAnalystModelMutationError = ErrorType<ModelPromotionRefusal>
+
+    /**
+ * @summary Promote one validated candidate model to ACTIVE
+ */
+export const usePromoteAnalystModel = <TError = ErrorType<ModelPromotionRefusal>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof promoteAnalystModel>>, TError,{versionId: string}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof promoteAnalystModel>>,
+        TError,
+        {versionId: string},
+        TContext
+      > => {
+      return useMutation(getPromoteAnalystModelMutationOptions(options));
+    }
+
+export const getDemoteAnalystModelUrl = (versionId: string,) => {
+
+
+
+
+  return `/api/analyst/models/${versionId}/demote`
+}
+
+/**
+ * The kill switch. Retires the ACTIVE model for its market, so the next board
+ * refresh emits RESEARCH_ONLY rows for that market.
+ * @summary Return one market to research-only
+ */
+export const demoteAnalystModel = async (versionId: string,
+    modelDemotionInput?: ModelDemotionInput, options?: Parameters<typeof customFetch>[1]): Promise<ModelDemotionResult> => {
+
+  return customFetch<ModelDemotionResult>(getDemoteAnalystModelUrl(versionId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(modelDemotionInput)
+  }
+);}
+
+
+
+
+
+export const getDemoteAnalystModelMutationOptions = <TError = ErrorType<ModelPromotionRefusal>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof demoteAnalystModel>>, TError,{versionId: string;data?: BodyType<ModelDemotionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof demoteAnalystModel>>, TError,{versionId: string;data?: BodyType<ModelDemotionInput>}, TContext> => {
+
+const mutationKey = ['demoteAnalystModel'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof demoteAnalystModel>>, {versionId: string;data?: BodyType<ModelDemotionInput>}> = (props) => {
+          const {versionId,data} = props ?? {};
+
+          return  demoteAnalystModel(versionId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DemoteAnalystModelMutationResult = NonNullable<Awaited<ReturnType<typeof demoteAnalystModel>>>
+    export type DemoteAnalystModelMutationBody = BodyType<ModelDemotionInput> | undefined
+    export type DemoteAnalystModelMutationError = ErrorType<ModelPromotionRefusal>
+
+    /**
+ * @summary Return one market to research-only
+ */
+export const useDemoteAnalystModel = <TError = ErrorType<ModelPromotionRefusal>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof demoteAnalystModel>>, TError,{versionId: string;data?: BodyType<ModelDemotionInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof demoteAnalystModel>>,
+        TError,
+        {versionId: string;data?: BodyType<ModelDemotionInput>},
+        TContext
+      > => {
+      return useMutation(getDemoteAnalystModelMutationOptions(options));
+    }
 
 export const getValidateAnalystModelUrl = (params: ValidateAnalystModelParams,) => {
   const normalizedParams = new URLSearchParams();

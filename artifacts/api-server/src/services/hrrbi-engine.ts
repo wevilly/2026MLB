@@ -5,8 +5,9 @@
  * does not create a probability, price, or recommendation.
  */
 import { pool } from "@workspace/db";
+import { HRRBI_DB_MARKET } from "./market-codes";
 
-const MARKET = "HITS_RUNS_RBI_2_PLUS";
+const MARKET = HRRBI_DB_MARKET;
 
 export type HRRBIEngineResult = {
   market: "H_R_RBI";

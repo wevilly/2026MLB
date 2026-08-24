@@ -8,9 +8,10 @@
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {
-    "push": "drizzle-kit push --config ./drizzle.config.ts && node scripts/apply-immutability.mjs",
-    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts && node scripts/apply-immutability.mjs",
-    "apply-immutability": "node scripts/apply-immutability.mjs"
+    "push": "node scripts/pre-push-migrations.mjs && drizzle-kit push --config ./drizzle.config.ts && node scripts/apply-immutability.mjs",
+    "push-force": "node scripts/pre-push-migrations.mjs && drizzle-kit push --force --config ./drizzle.config.ts && node scripts/apply-immutability.mjs",
+    "apply-immutability": "node scripts/apply-immutability.mjs",
+    "pre-push-migrations": "node scripts/pre-push-migrations.mjs"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",

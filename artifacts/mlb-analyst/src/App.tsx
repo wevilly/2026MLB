@@ -1413,6 +1413,21 @@ const MARKET_LABELS: Record<string, string> = {
   HR: 'Home Run',
 };
 
+/**
+ * What each confidence basis means, in the operator's words. The old
+ * MODEL_REJECTED value collapsed a corrupt artifact, a market mismatch, a
+ * partial feature vector and a model that simply declined into one label, so
+ * the interface could not tell the operator which had happened.
+ */
+const CONFIDENCE_BASIS_NOTES: Record<string, string> = {
+  RESEARCH_ONLY: 'Research evidence only - no model probability exists for this row.',
+  MODEL_CONFIRMED: 'The model ran and confirmed this research row.',
+  MODEL_DECLINED: 'The model ran and declined this row. The probability shown is the model output.',
+  ARTIFACT_INVALID: 'The active model artifact failed verification. No probability was computed.',
+  MARKET_MISMATCH: 'The active model is for a different market. No probability was computed.',
+  INSUFFICIENT_FEATURES: 'Too little of the model feature set was present to emit a probability.',
+};
+
 const RESEARCH_STATE_TONE: Record<string, Tone> = {
   STRONG: 'good',
   POSITIVE: 'good',
@@ -2214,11 +2229,13 @@ function MarketBoardPage() {
                       <Badge tone={board.readiness.usable && entry.confidenceBasis === 'MODEL_CONFIRMED' ? 'good' : 'warn'}>{board.readiness.usable && entry.confidenceBasis === 'MODEL_CONFIRMED' ? 'VALIDATED MODEL' : 'RESEARCH ONLY'}</Badge>
                     </td>
                     <td className="text-xs">
-                      {entry.confidenceBasis === 'MODEL_CONFIRMED'
-                        ? 'Accepted validation contract on record.'
-                        : entry.confidenceBasis === 'MODEL_REJECTED'
-                          ? 'Model validation did not confirm this research row.'
-                          : 'Research evidence only — no probability or confidence guidance.'}
+                      {CONFIDENCE_BASIS_NOTES[entry.confidenceBasis] ?? CONFIDENCE_BASIS_NOTES.RESEARCH_ONLY}
+                      {entry.imputedFeatures.length > 0 ? (
+                        <div className="mt-1 opacity-70">
+                          {entry.imputedFeatures.length} feature(s) imputed from training means
+                          {entry.featureCoverage === null ? '' : ` - ${Math.round(entry.featureCoverage * 100)}% coverage`}
+                        </div>
+                      ) : null}
                     </td>
                   </tr>
                 ))}

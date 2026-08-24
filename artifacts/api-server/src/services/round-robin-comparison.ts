@@ -64,6 +64,17 @@ export type RoundRobinConstruction = {
   geometry: string | null;
   runnerUpComparison: string | null;
   rejectedAlternatives: string[];
+  /**
+   * Whether both legs carry a complete, fresh, distinct projected 7th/8th/9th
+   * bullpen path. This is a ranking input and a disclosure, never a veto.
+   */
+  bullpenPathComplete: boolean;
+  /** Stated caveat when the bullpen path is not complete. Null when it is. */
+  bullpenCaveat: string | null;
+  /** True when this construction was chosen from an exactly tied set. */
+  tieBroken: boolean;
+  /** The constructions this one tied with on evidence, before the tiebreak. */
+  tiedWith: string[];
 };
 
 export type RoundRobinSideComparison = {
@@ -78,6 +89,11 @@ export type RoundRobinSideComparison = {
   unavailableReason: string | null;
   noPairCauses: RoundRobinNoPairCause[];
   rejectedAlternatives: string[];
+  /**
+   * Bullpen states on this side that are not a complete fresh path. Stated so
+   * the operator sees them; they never remove a candidate from selection.
+   */
+  bullpenDisclosures: string[];
 };
 
 export type RoundRobinGameComparison = {
@@ -117,12 +133,29 @@ function compareCandidate(a: RoundRobinCandidate, b: RoundRobinCandidate) {
   return a.playerName.localeCompare(b.playerName);
 }
 
-type BullpenPathIssue = {
-  status: "STALE" | "MISSING" | "ROLE_INCOMPLETE";
-  reason: string;
+/**
+ * Bullpen path disclosure.
+ *
+ * RANK, DON'T GATE. This used to be a hard eligibility filter: any candidate
+ * without a complete, distinct, fresh projected 7th/8th/9th arm path was
+ * removed from selection entirely, which meant a single missing reliever
+ * observation returned NO_LEGAL_CONSTRUCTION for a whole game even when both
+ * hitters and the starting pitcher matchup were fully researched. A
+ * third-order input was vetoing a first-order decision: for a 2+ total bases
+ * prop the starter and the hitter's own profile dominate, and the projected
+ * eighth-inning arm does not.
+ *
+ * Nothing about the bullpen makes a candidate ineligible any more. If a
+ * specific bullpen state is ever believed to be disqualifying, it must be
+ * justified with settled data before being reinstated, not assumed.
+ */
+export type BullpenPathDisclosure = {
+  status: "CURRENT" | "STALE" | "MISSING" | "ROLE_INCOMPLETE";
+  complete: boolean;
+  reason: string | null;
 };
 
-function bullpenPathIssue(candidate: RoundRobinCandidate): BullpenPathIssue | null {
+export function bullpenPathDisclosure(candidate: RoundRobinCandidate): BullpenPathDisclosure {
   const status = candidate.bullpenPathEvidence.status;
   const reason = candidate.bullpenPathEvidence.reason;
   const readableReason = typeof reason === "string" && reason.trim()
@@ -146,21 +179,23 @@ function bullpenPathIssue(candidate: RoundRobinCandidate): BullpenPathIssue | nu
       )
       && new Set(rolePath.map((arm) => arm.slot)).size === 3
       && new Set(rolePath.map((arm) => arm.playerId)).size === 3;
-    if (completeDistinctPath) return null;
+    if (completeDistinctPath) return { status: "CURRENT", complete: true, reason: null };
     return {
       status: "ROLE_INCOMPLETE",
+      complete: false,
       reason: "CURRENT bullpen evidence is missing a complete, distinct projected 7th/8th/9th arm path.",
     };
   }
-  if (status === "STALE") return { status, reason: readableReason };
+  if (status === "STALE") return { status: "STALE", complete: false, reason: readableReason };
   if (status === "MISSING" || status === "ROLE_INCOMPLETE") {
-    return { status, reason: readableReason };
+    return { status: status as "MISSING" | "ROLE_INCOMPLETE", complete: false, reason: readableReason };
   }
   // Candidate rows created before the role-path contract stored only a generic
-  // bullpen average. They must not silently remain usable after this safety gate.
+  // bullpen average. That is disclosed, not disqualifying.
   return {
     status: "MISSING",
-    reason: "Bullpen path status is missing; generic bullpen evidence cannot be used for Round Robin selection.",
+    complete: false,
+    reason: "Bullpen path status is missing; only generic bullpen evidence is recorded for this candidate.",
   };
 }
 
@@ -174,11 +209,18 @@ function pair(
   const legs = [first, second].sort(compareCandidate);
   const stateTotal = legs.reduce((total, leg) => total + STATE_WEIGHT[leg.researchState], 0);
   const rankTotal = legs.reduce((total, leg) => total + (leg.researchRank ?? 10_000), 0);
-  const lineupEvidence = legs.every((leg) => leg.lineupState === "CONFIRMED")
-    ? "FantasyPros confirmed lineups"
-    : legs.every((leg) => leg.lineupState === "PROJECTED")
-      ? "FantasyPros projected lineups"
-      : "FantasyPros mixed confirmed/projected lineups";
+  // POSTED is a real state with a producer: data-foundation writes it from the
+  // MLB Stats API game feed, and the lineup source precedence in
+  // lineup-sources.ts now lets it reach here. It used to be declared on this
+  // type with nothing ever producing it, and pair() branched on only two of the
+  // four states.
+  const lineupEvidence = legs.every((leg) => leg.lineupState === "POSTED")
+    ? "MLB posted lineup cards"
+    : legs.every((leg) => leg.lineupState === "CONFIRMED")
+      ? "FantasyPros confirmed lineups"
+      : legs.every((leg) => leg.lineupState === "PROJECTED")
+        ? "FantasyPros projected lineups"
+        : `mixed lineup states (${[...new Set(legs.map((leg) => leg.lineupState))].sort().join(", ")})`;
   const confirmedStarter = legs.every((leg) => leg.starterState === "CONFIRMED");
   const arsenalAvailable = legs.filter((leg) => leg.arsenalStatus === "AVAILABLE").length;
   const bvpAvailable = legs.filter((leg) => leg.bvpStatus === "AVAILABLE").length;
@@ -186,6 +228,14 @@ function pair(
   const sharedMechanism = mechanismNames.length === 2 && mechanismNames[0] === mechanismNames[1]
     ? `Shared mechanism: ${mechanismNames[0]}`
     : "Shared mechanism: complementary market evidence across both legs";
+  const bullpenByLeg = new Map(legs.map((leg) => [leg.candidateId, bullpenPathDisclosure(leg)]));
+  const bullpenPathComplete = legs.every((leg) => bullpenByLeg.get(leg.candidateId)!.complete);
+  const bullpenCaveat = bullpenPathComplete
+    ? null
+    : `Bullpen path incomplete: ${[...new Set(legs
+      .map((leg) => bullpenByLeg.get(leg.candidateId)!)
+      .filter((disclosure) => !disclosure.complete)
+      .map((disclosure) => `${disclosure.status} - ${disclosure.reason}`))].join(" ")}`;
   const legCases = legs.map((leg) => ({
     candidateId: leg.candidateId,
     caseFor: `${leg.playerName}: ${leg.primaryMechanism ?? "market-specific evidence"} with ordinal rank ${leg.researchRank ?? "unranked"}.`,
@@ -195,6 +245,11 @@ function pair(
     missingOrStale: leg.evidenceFreshness === "CURRENT"
       ? "No stale evidence flag."
       : `${leg.evidenceFreshness} evidence: ${leg.selectionBlockReason ?? "review required"}.`,
+    // The bullpen state is stated on every surfaced pair rather than being the
+    // reason no pair exists.
+    bullpenPath: bullpenByLeg.get(leg.candidateId)!.complete
+      ? "Complete projected 7th/8th/9th path."
+      : `${bullpenByLeg.get(leg.candidateId)!.status}: ${bullpenByLeg.get(leg.candidateId)!.reason}`,
   }));
   const [firstLeg, secondLeg] = legs;
   const firstOrder = typeof firstLeg.opportunityEvidence.battingOrder === "number"
@@ -218,28 +273,100 @@ function pair(
     legs,
     stateTotal,
     rankTotal,
-    evidenceSummary: `${lineupEvidence} · ${confirmedStarter ? "confirmed starters" : "starter context"} · ${arsenalAvailable}/2 arsenal comparisons · ${bvpAvailable}/2 named-pair contexts`,
+    evidenceSummary: [
+      lineupEvidence,
+      confirmedStarter ? "confirmed starters" : "starter context",
+      `${arsenalAvailable}/2 arsenal comparisons`,
+      `${bvpAvailable}/2 named-pair contexts`,
+      bullpenPathComplete ? "complete bullpen path" : "bullpen path incomplete",
+    ].join(" · "),
     legCases,
     sharedMechanism,
     geometry,
     runnerUpComparison: null,
     rejectedAlternatives: [],
+    bullpenPathComplete,
+    bullpenCaveat,
+    tieBroken: false,
+    tiedWith: [],
   };
 }
 
+/** A stable, human-readable identity for one construction. */
+function constructionIdentity(construction: RoundRobinConstruction) {
+  return `${construction.constructionLabel}: ${construction.legs.map((leg) => leg.playerName).join(" + ")}`;
+}
+
+/**
+ * The evidence comparator. Returns 0 for a genuine tie, which is what lets
+ * decision() surface VALID_TIE across the two sides rather than silently
+ * preferring one. Do not add a cosmetic tiebreak here: that would make the
+ * cross-side tie unreachable and quietly delete the surfaced-ties contract.
+ *
+ * Bullpen path completeness is a term here, at the bottom of the order. That
+ * is the correct weight for it: it separates two otherwise identical
+ * constructions and nothing more.
+ */
 function compareConstruction(a: RoundRobinConstruction, b: RoundRobinConstruction) {
   if (a.stateTotal !== b.stateTotal) return b.stateTotal - a.stateTotal;
   if (a.rankTotal !== b.rankTotal) return a.rankTotal - b.rankTotal;
+  // A submitted card is the most authoritative lineup there is, so POSTED ranks
+  // above CONFIRMED. It scored zero here while it was an unproduced state.
   const lineupFreshness = (lineupState: string) =>
-    lineupState === "CONFIRMED" ? 2 : lineupState === "PROJECTED" ? 1 : 0;
+    lineupState === "POSTED" ? 3
+      : lineupState === "CONFIRMED" ? 2
+        : lineupState === "PROJECTED" ? 1
+          : 0;
   const freshnessA = a.legs.reduce((total, leg) => total + lineupFreshness(leg.lineupState), 0);
   const freshnessB = b.legs.reduce((total, leg) => total + lineupFreshness(leg.lineupState), 0);
   if (freshnessA !== freshnessB) return freshnessB - freshnessA;
+  const bullpenA = a.bullpenPathComplete ? 1 : 0;
+  const bullpenB = b.bullpenPathComplete ? 1 : 0;
+  if (bullpenA !== bullpenB) return bullpenB - bullpenA;
   return 0;
 }
 
-function best(pairs: RoundRobinConstruction[]) {
-  return pairs.sort(compareConstruction)[0] ?? null;
+/**
+ * The within-side ordering. Identical to the evidence comparator, then an
+ * explicit alphabetical tiebreak on the combined leg names, which is the same
+ * tiebreak tb-engine's assignCompetitionRanks already uses.
+ *
+ * The tiebreak lives here rather than in compareConstruction so that a genuine
+ * evidence tie is still visible as one, and so the choice among tied
+ * constructions is a stated rule rather than whichever pair the nested loops in
+ * uniquePairs happened to build first.
+ */
+function compareConstructionDeterministic(a: RoundRobinConstruction, b: RoundRobinConstruction) {
+  const evidence = compareConstruction(a, b);
+  if (evidence) return evidence;
+  return constructionIdentity(a).localeCompare(constructionIdentity(b));
+}
+
+export type BestConstructionResult = {
+  /** Every construction that tied on evidence at the top. Never fewer than one when any exist. */
+  tied: RoundRobinConstruction[];
+  /** The single construction chosen, with the applied tiebreak recorded on it. */
+  winner: RoundRobinConstruction | null;
+  /** The full ordering, used to derive rejected alternatives without mutating the input. */
+  ordered: RoundRobinConstruction[];
+};
+
+/**
+ * Returns the tied set explicitly rather than an arbitrary member of it.
+ *
+ * The previous implementation sorted the caller's array in place and took
+ * element zero, so a tie was resolved by whichever pair the nested loops built
+ * first, and rejectedAlternatives worked only because that in-place mutation
+ * happened to leave the array sorted.
+ */
+function best(pairs: RoundRobinConstruction[]): BestConstructionResult {
+  if (!pairs.length) return { tied: [], winner: null, ordered: [] };
+  const ordered = [...pairs].sort(compareConstructionDeterministic);
+  const tied = ordered.filter((construction) => compareConstruction(construction, ordered[0]) === 0);
+  const winner = ordered[0];
+  winner.tieBroken = tied.length > 1;
+  winner.tiedWith = tied.slice(1).map(constructionIdentity);
+  return { tied, winner, ordered };
 }
 
 function uniquePairs(
@@ -280,40 +407,36 @@ function pairCandidates(board: RoundRobinBoardId, side: RoundRobinSide, eligible
 
 function sideResult(board: RoundRobinBoardId, side: RoundRobinSide, team: string, candidates: RoundRobinCandidate[]): RoundRobinSideComparison {
   const own = candidates.filter((candidate) => candidate.side === side);
-  const ownBullpenIssues = own
-    .map((candidate) => ({ candidate, issue: bullpenPathIssue(candidate) }))
-    .filter((item): item is { candidate: RoundRobinCandidate; issue: BullpenPathIssue } => item.issue !== null);
+  // Bullpen state is no longer part of eligibility. It is computed here only so
+  // the incomplete cases can be disclosed on the surfaced pair.
+  const ownBullpenDisclosures = own
+    .map((candidate) => bullpenPathDisclosure(candidate))
+    .filter((disclosure) => !disclosure.complete);
   const eligible = candidates.filter((candidate) =>
     candidate.selectable
       && candidate.starterState !== "UNKNOWN"
-      && candidate.starterState !== "TBD"
-      && bullpenPathIssue(candidate) === null,
+      && candidate.starterState !== "TBD",
   );
   const constructions = pairCandidates(board, side, eligible);
-  const bestConstruction = best(constructions);
+  const { winner: bestConstruction, ordered } = best(constructions);
   const causes: RoundRobinNoPairCause[] = [];
   if (!bestConstruction) {
     if (!own.length) causes.push("MISSING_MARKET_CANDIDATES");
     if (own.some((candidate) => ["UNKNOWN", "TBD"].includes(candidate.starterState))) causes.push("STARTER_UNCERTAINTY");
-    if (own.some((candidate) => candidate.selectionBlockReason === "STALE" || candidate.selectionBlockReason === "INCOMPLETE_EVIDENCE" || bullpenPathIssue(candidate) !== null)) {
+    // STALE_OR_INCOMPLETE_RESEARCH is no longer reachable from bullpen state
+    // alone. Only the candidate's own selection block reason can produce it.
+    if (own.some((candidate) => candidate.selectionBlockReason === "STALE" || candidate.selectionBlockReason === "INCOMPLETE_EVIDENCE")) {
       causes.push("STALE_OR_INCOMPLETE_RESEARCH");
     }
     if (own.some((candidate) => candidate.selectionBlockReason === "UNRESOLVED_IDENTITY")) causes.push("IDENTITY_CONFLICT");
     if (!causes.length) causes.push("NO_LEGAL_SAME_TEAM_PAIR");
   }
-  const bullpenReason = ownBullpenIssues.length > 0
-    ? [...new Set(ownBullpenIssues.map((item) =>
-      `${item.issue.status === "STALE" ? "Stale" : "Incomplete"} bullpen path: ${item.issue.reason}`,
-    ))].join(" ")
-    : null;
   const unavailableReason = !bestConstruction
       ? own.length === 0
         ? "No projected or posted hitters were found for this team."
-        : bullpenReason
-          ? `No complete legal pair remains because ${bullpenReason}`
-          : own.some((candidate) => candidate.evidenceFreshness !== "CURRENT" && candidate.evidenceFreshnessDetail)
-            ? `No complete legal pair remains because ${own.filter((candidate) => candidate.evidenceFreshness !== "CURRENT").map((candidate) => candidate.evidenceFreshnessDetail).filter(Boolean).join(" ")}`
-            : "No complete legal pair remains after identity, freshness, starter, and evidence safety gates."
+        : own.some((candidate) => candidate.evidenceFreshness !== "CURRENT" && candidate.evidenceFreshnessDetail)
+          ? `No complete legal pair remains because ${own.filter((candidate) => candidate.evidenceFreshness !== "CURRENT").map((candidate) => candidate.evidenceFreshnessDetail).filter(Boolean).join(" ")}`
+          : "No complete legal pair remains after identity, freshness, starter, and evidence safety gates."
       : null;
   const availabilityStatus: RoundRobinAvailabilityStatus = bestConstruction
     ? "AVAILABLE"
@@ -322,6 +445,10 @@ function sideResult(board: RoundRobinBoardId, side: RoundRobinSide, team: string
         : causes.includes("IDENTITY_CONFLICT") ? "UNRESOLVED_IDENTITY"
           : causes.includes("STALE_OR_INCOMPLETE_RESEARCH") ? "STALE_OR_INCOMPLETE_RESEARCH"
             : "NO_LEGAL_CONSTRUCTION";
+  // Disclosed on an available side as a caveat, never as a reason for absence.
+  const availabilityDetail = bestConstruction
+    ? bestConstruction.bullpenCaveat
+    : unavailableReason;
   return {
     side,
     team,
@@ -329,16 +456,20 @@ function sideResult(board: RoundRobinBoardId, side: RoundRobinSide, team: string
     evaluatedIneligibleHitters: own.filter((candidate) =>
       !candidate.selectable
         || candidate.starterState === "UNKNOWN"
-        || candidate.starterState === "TBD"
-        || bullpenPathIssue(candidate) !== null,
+        || candidate.starterState === "TBD",
     ).length,
     consideredConstructionTypes: [...new Set(constructions.map((construction) => construction.constructionType))],
     bestConstruction,
     availabilityStatus,
-    availabilityDetail: unavailableReason,
+    availabilityDetail,
     unavailableReason,
     noPairCauses: causes,
-    rejectedAlternatives: constructions.slice(1).map((construction) => `${construction.constructionLabel}: retained as runner-up audit alternative.`),
+    // Derived from an explicitly sorted copy rather than from a sort side
+    // effect on the caller's array.
+    rejectedAlternatives: ordered.slice(1).map((construction) => `${construction.constructionLabel}: retained as runner-up audit alternative.`),
+    bullpenDisclosures: [...new Set(ownBullpenDisclosures.map(
+      (disclosure) => `${disclosure.status}: ${disclosure.reason}`,
+    ))],
   };
 }
 

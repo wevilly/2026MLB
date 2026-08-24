@@ -945,6 +945,44 @@ export interface WriteHistoricalOutcomeResult {
   outcomeHit: boolean;
 }
 
+export interface UnsettleableBoardCandidate {
+  playerId: number;
+  market: string;
+  reason: string;
+  gamePk?: number;
+}
+
+/**
+ * Every board candidate either settled or appears by name in unsettleable
+ * with the reason it did not. Settlement previously iterated only frozen
+ * feature snapshots, so a candidate that reached the board without a
+ * snapshot was never settled and vanished from the record silently.
+ */
+export interface SettlementReconciliation {
+  /** @minimum 0 */
+  boardCandidates: number;
+  /** @minimum 0 */
+  settled: number;
+  /**
+     * Settled from the board with no frozen snapshot. A complete
+     * operational settle record, deliberately excluded from model
+     * training because it has no pregame feature vector.
+     * @minimum 0
+     */
+  settledWithoutSnapshot: number;
+  unsettleable: UnsettleableBoardCandidate[];
+  /**
+     * Rows where the total bases computed from the components and the
+     * total bases the feed reported disagree. Settled DISPUTED rather
+     * than silently taking one of the two.
+     */
+  totalBasesDiscrepancies: string[];
+  /** The walk definition applied to this settlement, e.g. BB+IBB (assumed). */
+  walkDefinition: string;
+  walkDefinitionAssumed: boolean;
+  walkDefinitionStatement: string;
+}
+
 export type OfficialGameSettlementResultState = typeof OfficialGameSettlementResultState[keyof typeof OfficialGameSettlementResultState];
 
 
@@ -968,6 +1006,7 @@ export interface OfficialGameSettlementResult {
   outcomesWritten: number;
   /** @minimum 0 */
   corrections: number;
+  reconciliation?: SettlementReconciliation;
 }
 
 export type OfficialSettlementRefreshResultSource = typeof OfficialSettlementRefreshResultSource[keyof typeof OfficialSettlementRefreshResultSource];
@@ -988,6 +1027,7 @@ export interface OfficialSettlementRefreshResult {
   outcomesWritten: number;
   /** @minimum 0 */
   corrections: number;
+  reconciliation: SettlementReconciliation;
   games: OfficialGameSettlementResult[];
 }
 
@@ -1076,6 +1116,78 @@ export interface ModelVersionList {
   total: number;
 }
 
+export interface ModelDemotionInput {
+  /** Why the market is being returned to research-only. Recorded on the audit event. */
+  reason?: string;
+}
+
+export interface ModelPromotionRefusal {
+  error: string;
+  /** The single named condition that was not met. */
+  reason: string;
+}
+
+export type ModelPromotionResultMarket = typeof ModelPromotionResultMarket[keyof typeof ModelPromotionResultMarket];
+
+
+export const ModelPromotionResultMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type ModelPromotionResultStatus = typeof ModelPromotionResultStatus[keyof typeof ModelPromotionResultStatus];
+
+
+export const ModelPromotionResultStatus = {
+  ACTIVE: 'ACTIVE',
+} as const;
+
+export interface ModelPromotionResult {
+  versionId: string;
+  market: ModelPromotionResultMarket;
+  status: ModelPromotionResultStatus;
+  /** @nullable */
+  displacedVersionId: string | null;
+  /** @nullable */
+  displacedStatus: string | null;
+  walkForwardRunId: string;
+  /** @minimum 0 */
+  foldCount: number;
+  expectedCalibrationError: number;
+  predictionStdDev: number;
+  /** @nullable */
+  brierSkillScore: number | null;
+  calibrationSlope: number;
+  calibrationIntercept: number;
+  promotedAt: string;
+}
+
+export type ModelDemotionResultMarket = typeof ModelDemotionResultMarket[keyof typeof ModelDemotionResultMarket];
+
+
+export const ModelDemotionResultMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type ModelDemotionResultStatus = typeof ModelDemotionResultStatus[keyof typeof ModelDemotionResultStatus];
+
+
+export const ModelDemotionResultStatus = {
+  RETIRED: 'RETIRED',
+} as const;
+
+export interface ModelDemotionResult {
+  versionId: string;
+  market: ModelDemotionResultMarket;
+  status: ModelDemotionResultStatus;
+  demotedAt: string;
+}
+
 export interface WalkForwardCalibrationPoint {
   /** @minimum 0 */
   bucket: number;
@@ -1122,9 +1234,38 @@ export interface WalkForwardValidationResult {
   benchmarkBeat: boolean;
   benchmarkMethod: string;
   calibrationMethod: string;
+  /**
+     * Brier margin the model had to beat, derived from the held-out row
+     * count rather than being a fixed constant.
+     * @nullable
+     */
+  benchmarkMargin: number | null;
+  /** Ten-bin reliability curve over the pooled out-of-fold probabilities. */
   calibrationCurve: WalkForwardCalibrationPoint[];
+  /**
+     * Expected calibration error over the reliability bins. This is the
+     * quantity the acceptance gate reads.
+     * @nullable
+     */
+  expectedCalibrationError: number | null;
+  expectedCalibrationErrorThreshold: number;
+  /**
+     * Mean absolute distance between each prediction and its binary label.
+     * Reported for continuity with the field previously and wrongly named
+     * calibrationError. Nothing gates on it.
+     * @nullable
+     */
+  meanAbsolutePredictionError: number | null;
   /** @nullable */
-  calibrationError: number | null;
+  brierSkillScore: number | null;
+  /**
+     * Standard deviation of the pooled predicted probabilities, the sharpness guard.
+     * @nullable
+     */
+  predictionStdDev: number | null;
+  predictionStdDevThreshold: number;
+  /** Named reasons the run did not pass. Empty on a PASS. */
+  failureReasons: string[];
   calibrationPassed: boolean;
   /** @nullable */
   calibrationSlope: number | null;
@@ -1570,6 +1711,19 @@ export interface RoundRobinConstruction {
   /** @nullable */
   runnerUpComparison: string | null;
   rejectedAlternatives: string[];
+  /**
+     * Whether both legs carry a complete, fresh, distinct projected
+     * 7th/8th/9th bullpen path. A ranking input and a disclosure, never a
+     * veto: an incomplete path no longer removes a candidate from
+     * selection.
+     */
+  bullpenPathComplete: boolean;
+  /** @nullable */
+  bullpenCaveat: string | null;
+  /** True when this construction was chosen from an exactly tied set. */
+  tieBroken: boolean;
+  /** The constructions this one tied with on evidence, before the tiebreak. */
+  tiedWith: string[];
 }
 
 export type RoundRobinSideComparisonSide = typeof RoundRobinSideComparisonSide[keyof typeof RoundRobinSideComparisonSide];
@@ -1606,6 +1760,12 @@ export interface RoundRobinSideComparison {
   unavailableReason: string | null;
   noPairCauses: string[];
   rejectedAlternatives: string[];
+  /**
+     * Bullpen states on this side that are not a complete fresh path.
+     * Stated so the operator sees them; they never remove a candidate
+     * from selection.
+     */
+  bullpenDisclosures: string[];
 }
 
 /**
@@ -1697,13 +1857,25 @@ export const DailyMarketBoardEntryConfidenceLabel = {
   NONE: 'NONE',
 } as const;
 
+/**
+ * Why the row carries the confidence it does. ARTIFACT_INVALID means
+ * the ACTIVE artifact failed verification. MARKET_MISMATCH means the
+ * artifact is for another market. INSUFFICIENT_FEATURES means the
+ * inference vector did not cover enough of the model's frozen feature
+ * schema for a probability to be emitted. MODEL_DECLINED means the
+ * model ran and returned a probability below the confirmation
+ * threshold, and carries that probability.
+ */
 export type DailyMarketBoardEntryConfidenceBasis = typeof DailyMarketBoardEntryConfidenceBasis[keyof typeof DailyMarketBoardEntryConfidenceBasis];
 
 
 export const DailyMarketBoardEntryConfidenceBasis = {
   RESEARCH_ONLY: 'RESEARCH_ONLY',
   MODEL_CONFIRMED: 'MODEL_CONFIRMED',
-  MODEL_REJECTED: 'MODEL_REJECTED',
+  MODEL_DECLINED: 'MODEL_DECLINED',
+  ARTIFACT_INVALID: 'ARTIFACT_INVALID',
+  MARKET_MISMATCH: 'MARKET_MISMATCH',
+  INSUFFICIENT_FEATURES: 'INSUFFICIENT_FEATURES',
 } as const;
 
 /**
@@ -1726,11 +1898,29 @@ export interface DailyMarketBoardEntry {
   /** @nullable */
   modelPrediction: number | null;
   confidenceLabel: DailyMarketBoardEntryConfidenceLabel;
+  /**
+     * Why the row carries the confidence it does. ARTIFACT_INVALID means
+     * the ACTIVE artifact failed verification. MARKET_MISMATCH means the
+     * artifact is for another market. INSUFFICIENT_FEATURES means the
+     * inference vector did not cover enough of the model's frozen feature
+     * schema for a probability to be emitted. MODEL_DECLINED means the
+     * model ran and returned a probability below the confirmation
+     * threshold, and carries that probability.
+     */
   confidenceBasis: DailyMarketBoardEntryConfidenceBasis;
   /** @nullable */
   calibratedProbability: number | null;
   /** @nullable */
   modelVersionId: string | null;
+  /**
+     * Fraction of the model's frozen feature schema this row supplied.
+     * @nullable
+     */
+  featureCoverage: number | null;
+  /** Features the model expected that this row did not supply. Imputed with their training means. */
+  imputedFeatures: string[];
+  /** Feature keys this row supplied that the model has never seen. */
+  unknownFeatures: string[];
   boardFrozenAt: string;
 }
 
@@ -3078,3 +3268,4 @@ team?: string;
 export type RefreshBullpenParams = {
 date?: string;
 };
+

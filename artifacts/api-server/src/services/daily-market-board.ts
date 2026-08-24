@@ -1,26 +1,39 @@
 import { pool } from "@workspace/db";
 import { verifyModelArtifact } from "../lib/model-artifact-storage";
-import { flattenNumbers } from "./model-training";
+import {
+  DB_TO_MARKET,
+  MARKET_TO_DB,
+  type DbModelMarket,
+  type ModelMarket,
+} from "./market-codes";
+import {
+  MIN_FEATURE_COVERAGE,
+  MODEL_CONFIRMATION_THRESHOLD,
+  MODEL_FIRE_THRESHOLD,
+  applyCalibration,
+  parseModelArtifact,
+  scoreArtifact,
+  trainableVector,
+  type ModelArtifact,
+} from "./model-math";
 
 type JsonObject = Record<string, unknown>;
-export type BoardMarket = "TB" | "XBH" | "WALK" | "HR";
-type DbMarket = "TOTAL_BASES_2_PLUS" | "EXTRA_BASE_HIT" | "BATTER_WALK" | "HOME_RUN";
+export type BoardMarket = ModelMarket;
+type DbMarket = DbModelMarket;
 
-const DB_TO_MARKET: Record<DbMarket, BoardMarket> = {
-  TOTAL_BASES_2_PLUS: "TB",
-  EXTRA_BASE_HIT: "XBH",
-  BATTER_WALK: "WALK",
-  HOME_RUN: "HR",
-};
+/**
+ * Research states that must never appear on the materialized board.
+ *
+ * The predicate lives here, once, and is used by both the candidate SELECT and
+ * the reconcile DELETE in populateDailyMarketBoard. Writing it twice is what
+ * let a BLOCKED candidate keep its board row: the SELECT excluded it while the
+ * DELETE still found a matching candidate row and spared the board row.
+ */
+export const BOARD_EXCLUDED_RESEARCH_STATES = ["BLOCKED"] as const;
 
-const MARKET_TO_DB: Record<BoardMarket, DbMarket> = {
-  TB: "TOTAL_BASES_2_PLUS",
-  XBH: "EXTRA_BASE_HIT",
-  WALK: "BATTER_WALK",
-  HR: "HOME_RUN",
-};
-
-const MARKET_THRESHOLDS: Record<BoardMarket, number> = { TB: 2, XBH: 1, WALK: 1, HR: 1 };
+const EXCLUDED_RESEARCH_STATES_SQL = BOARD_EXCLUDED_RESEARCH_STATES
+  .map((state) => `'${state}'`)
+  .join(", ");
 
 type ActiveModel = {
   versionId: string;
@@ -34,51 +47,11 @@ type ActiveModel = {
   calibrationIntercept: number;
 };
 
-type Artifact = {
-  schemaVersion: number;
-  market: BoardMarket;
-  algorithm: string;
-  featureSetHash: string;
-  featureNames: string[];
-  coefficients: Record<string, number>;
-  intercept: number;
-};
-
 export class DailyMarketBoardValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "DailyMarketBoardValidationError";
   }
-}
-
-function sigmoid(value: number) {
-  const bounded = Math.max(-30, Math.min(30, value));
-  return 1 / (1 + Math.exp(-bounded));
-}
-
-function parseArtifact(raw: string, model: ActiveModel): Artifact {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new DailyMarketBoardValidationError("The ACTIVE model artifact is not valid JSON.");
-  }
-  if (!parsed || typeof parsed !== "object") {
-    throw new DailyMarketBoardValidationError("The ACTIVE model artifact has an invalid shape.");
-  }
-  const artifact = parsed as Partial<Artifact>;
-  if (
-    artifact.schemaVersion !== 1
-    || artifact.market !== DB_TO_MARKET[model.market]
-    || artifact.algorithm !== model.algorithm
-    || artifact.featureSetHash !== model.featureSetHash
-    || !Array.isArray(artifact.featureNames)
-    || !artifact.coefficients
-    || typeof artifact.intercept !== "number"
-  ) {
-    throw new DailyMarketBoardValidationError("The ACTIVE model artifact identity does not match its database version.");
-  }
-  return artifact as Artifact;
 }
 
 async function loadActiveModels() {
@@ -103,7 +76,7 @@ async function loadActiveModels() {
        AND calibration_intercept IS NOT NULL
      ORDER BY market, trained_at DESC`,
   );
-  const models = new Map<DbMarket, { model: ActiveModel; artifact: Artifact }>();
+  const models = new Map<DbMarket, { model: ActiveModel; artifact: ModelArtifact }>();
   const rejectedModels = new Map<DbMarket, ActiveModel>();
   for (const row of result.rows) {
     const model: ActiveModel = {
@@ -119,70 +92,126 @@ async function loadActiveModels() {
     };
     try {
       const raw = await verifyModelArtifact(model.artifactKey, model.artifactGeneration, model.artifactContentHash);
-      models.set(model.market, { model, artifact: parseArtifact(raw, model) });
+      const artifact = parseModelArtifact(raw, {
+        market: DB_TO_MARKET[model.market],
+        algorithm: model.algorithm,
+        featureSetHash: model.featureSetHash,
+      });
+      models.set(model.market, { model, artifact });
     } catch {
-      // A missing, corrupt, or mismatched artifact must remain visible as a
-      // rejected model context rather than being silently treated as absent.
+      // A missing, corrupt, or mismatched artifact must remain visible as an
+      // invalid model context rather than being silently treated as absent.
       rejectedModels.set(model.market, model);
     }
   }
   return { models, rejectedModels };
 }
 
-function confidenceFor(
+export type BoardConfidence = {
+  modelVersionId: string | null;
+  modelPrediction: number | null;
+  calibratedProbability: number | null;
+  confidenceLabel: "FIRE" | "HALF" | "HOLD" | "NONE";
+  confidenceBasis:
+    | "RESEARCH_ONLY"
+    | "MODEL_CONFIRMED"
+    | "MODEL_DECLINED"
+    | "ARTIFACT_INVALID"
+    | "MARKET_MISMATCH"
+    | "INSUFFICIENT_FEATURES";
+  featureCoverage: number | null;
+  imputedFeatures: string[];
+  unknownFeatures: string[];
+};
+
+/**
+ * Decides what the board may say about a candidate.
+ *
+ * Every branch that used to collapse into MODEL_REJECTED now has its own
+ * value. A corrupt artifact, a market mismatch, a partial feature vector and a
+ * model that ran and returned a low probability are four different facts, and
+ * an operator cannot act on the fourth if it is indistinguishable from the
+ * first.
+ *
+ * The scoring and calibration arithmetic is imported, not written here. The
+ * walk-forward validator calls the same two functions on the same artifact, so
+ * the probability measured during validation is the probability served.
+ */
+export function confidenceFor(
   market: BoardMarket,
   researchState: string,
-  model: { model: ActiveModel; artifact: Artifact } | undefined,
+  model: { model: ActiveModel; artifact: ModelArtifact } | undefined,
   rejectedModel: ActiveModel | undefined,
   features: JsonObject | null,
-) {
+): BoardConfidence {
+  const empty = {
+    modelPrediction: null,
+    calibratedProbability: null,
+    confidenceLabel: "NONE" as const,
+    featureCoverage: null,
+    imputedFeatures: [],
+    unknownFeatures: [],
+  };
   if (rejectedModel) {
-    return {
-      modelVersionId: rejectedModel.versionId,
-      modelPrediction: null,
-      calibratedProbability: null,
-      confidenceLabel: "NONE",
-      confidenceBasis: "MODEL_REJECTED",
-    } as const;
+    return { ...empty, modelVersionId: rejectedModel.versionId, confidenceBasis: "ARTIFACT_INVALID" };
   }
   if (!model) {
-    return {
-      modelVersionId: null,
-      modelPrediction: null,
-      calibratedProbability: null,
-      confidenceLabel: "NONE",
-      confidenceBasis: "RESEARCH_ONLY",
-    } as const;
+    return { ...empty, modelVersionId: null, confidenceBasis: "RESEARCH_ONLY" };
   }
-  if (!features || model.artifact.market !== market) {
+  if (model.artifact.market !== market) {
+    return { ...empty, modelVersionId: model.model.versionId, confidenceBasis: "MARKET_MISMATCH" };
+  }
+  if (!features) {
+    return {
+      ...empty,
+      modelVersionId: model.model.versionId,
+      confidenceBasis: "INSUFFICIENT_FEATURES",
+      featureCoverage: 0,
+      imputedFeatures: [...model.artifact.featureNames],
+    };
+  }
+
+  const vector = trainableVector(features);
+  const score = scoreArtifact(model.artifact, vector);
+  if (score.coverage < MIN_FEATURE_COVERAGE) {
+    // Below the coverage floor the probability would be produced mostly from
+    // imputed training means. That is not a model output and is not labelled
+    // as one.
     return {
       modelVersionId: model.model.versionId,
       modelPrediction: null,
       calibratedProbability: null,
       confidenceLabel: "NONE",
-      confidenceBasis: "MODEL_REJECTED",
-    } as const;
+      confidenceBasis: "INSUFFICIENT_FEATURES",
+      featureCoverage: Number(score.coverage.toFixed(6)),
+      imputedFeatures: score.imputedFeatures,
+      unknownFeatures: score.unknownFeatures,
+    };
   }
-  const vector = flattenNumbers(features);
-  const prediction = model.artifact.featureNames.reduce(
-    (sum, name) => sum + (model.artifact.coefficients[name] ?? 0) * (vector[name] ?? 0),
-    model.artifact.intercept,
+
+  const probability = applyCalibration(
+    score.rawScore,
+    model.model.calibrationSlope,
+    model.model.calibrationIntercept,
   );
-  const margin = prediction - MARKET_THRESHOLDS[market];
-  const probability = sigmoid(model.model.calibrationSlope * margin + model.model.calibrationIntercept);
-  const confirmed = probability >= 0.55;
-  const confidenceLabel = researchState === "STRONG" && probability >= 0.65
+  const confirmed = probability >= MODEL_CONFIRMATION_THRESHOLD;
+  const confidenceLabel = researchState === "STRONG" && probability >= MODEL_FIRE_THRESHOLD
     ? "FIRE"
     : confirmed && ["STRONG", "POSITIVE"].includes(researchState)
       ? "HALF"
       : "HOLD";
   return {
     modelVersionId: model.model.versionId,
-    modelPrediction: Number(prediction.toFixed(6)),
+    modelPrediction: Number(score.rawScore.toFixed(6)),
     calibratedProbability: Number(probability.toFixed(6)),
     confidenceLabel,
-    confidenceBasis: confirmed ? "MODEL_CONFIRMED" : "MODEL_REJECTED",
-  } as const;
+    // The model ran. A probability below the confirmation threshold is the
+    // model declining, not the model being rejected.
+    confidenceBasis: confirmed ? "MODEL_CONFIRMED" : "MODEL_DECLINED",
+    featureCoverage: Number(score.coverage.toFixed(6)),
+    imputedFeatures: score.imputedFeatures,
+    unknownFeatures: score.unknownFeatures,
+  };
 }
 
 export async function populateDailyMarketBoard(slateDate: string, market: BoardMarket | null = null) {
@@ -228,12 +257,19 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
       WHERE mrc.slate_date = $1
         AND mrc.market <> 'HITS_RUNS_RBI_2_PLUS'
         AND ($2::market_type IS NULL OR mrc.market = $2::market_type)
-        AND mrc.research_state <> 'BLOCKED'
+        AND mrc.research_state NOT IN (${EXCLUDED_RESEARCH_STATES_SQL})
       ORDER BY mrc.market, mrc.research_rank ASC NULLS LAST, mrc.player_id`,
     [slateDate, dbMarket],
     );
     // Reconcile the materialized board with the current research universe before
-    // upserting. A removed scratch/candidate cannot remain visible after refresh.
+    // upserting. A removed candidate cannot remain visible after refresh, and
+    // neither can one whose research state has moved into an excluded state.
+    //
+    // The NOT EXISTS subquery repeats the SELECT's state predicate through the
+    // same constant. Before that, a BLOCKED candidate still satisfied the
+    // EXISTS check and kept its board row alive forever: detectLateScratches
+    // set the state and called this function expecting the row to disappear,
+    // and it did not.
     await client.query(
       `DELETE FROM daily_market_board dmb
         WHERE dmb.slate_date = $1
@@ -244,6 +280,7 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
                AND mrc.market = dmb.market
                AND mrc.player_id = dmb.player_id
                AND mrc.game_pk = dmb.game_pk
+               AND mrc.research_state NOT IN (${EXCLUDED_RESEARCH_STATES_SQL})
           )`,
       [slateDate, dbMarket],
     );
@@ -262,9 +299,9 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
       `INSERT INTO daily_market_board
          (slate_date, game_pk, player_id, market, research_rank, research_state, primary_mechanism,
           snapshot_id, model_version_id, model_prediction, confidence_label, confidence_basis,
-          calibrated_probability, board_frozen_at)
+          calibrated_probability, feature_coverage, imputed_features, unknown_features, board_frozen_at)
        VALUES ($1, $2, $3, $4, $5, $6::research_state, $7, $8, $9, $10, $11::confidence_label,
-               $12::confidence_basis, $13, now())
+               $12::confidence_basis, $13, $14, $15, $16, now())
        ON CONFLICT (slate_date, market, player_id, game_pk) DO UPDATE SET
          research_rank = EXCLUDED.research_rank,
          research_state = EXCLUDED.research_state,
@@ -275,6 +312,9 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
          confidence_label = EXCLUDED.confidence_label,
          confidence_basis = EXCLUDED.confidence_basis,
          calibrated_probability = EXCLUDED.calibrated_probability,
+         feature_coverage = EXCLUDED.feature_coverage,
+         imputed_features = EXCLUDED.imputed_features,
+         unknown_features = EXCLUDED.unknown_features,
          board_frozen_at = EXCLUDED.board_frozen_at,
          updated_at = now()`,
       [
@@ -282,9 +322,46 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
         candidate.research_state, candidate.primary_mechanism, candidate.snapshot_id,
         confidence.modelVersionId, confidence.modelPrediction, confidence.confidenceLabel,
         confidence.confidenceBasis, confidence.calibratedProbability,
+        confidence.featureCoverage,
+        JSON.stringify(confidence.imputedFeatures),
+        JSON.stringify(confidence.unknownFeatures),
       ],
       );
     }
+    // Post-refresh invariant. The set of (player_id, game_pk, market) on the
+    // board must be exactly the set of non-excluded candidates for the slate.
+    // Anything else means the SELECT and the reconcile DELETE have drifted
+    // again, and a refresh that leaves a stale row is worse than a refresh
+    // that fails.
+    const invariant = await client.query<{ orphaned: string; missing: string }>(
+      `WITH expected AS (
+         SELECT mrc.player_id, mrc.game_pk, mrc.market
+           FROM market_research_candidates mrc
+          WHERE mrc.slate_date = $1
+            AND mrc.market <> 'HITS_RUNS_RBI_2_PLUS'
+            AND ($2::market_type IS NULL OR mrc.market = $2::market_type)
+            AND mrc.research_state NOT IN (${EXCLUDED_RESEARCH_STATES_SQL})
+       ),
+       actual AS (
+         SELECT dmb.player_id, dmb.game_pk, dmb.market
+           FROM daily_market_board dmb
+          WHERE dmb.slate_date = $1
+            AND ($2::market_type IS NULL OR dmb.market = $2::market_type)
+       )
+       SELECT
+         (SELECT count(*)::text FROM (SELECT * FROM actual EXCEPT SELECT * FROM expected) o) AS orphaned,
+         (SELECT count(*)::text FROM (SELECT * FROM expected EXCEPT SELECT * FROM actual) m) AS missing`,
+      [slateDate, dbMarket],
+    );
+    const orphaned = Number(invariant.rows[0]?.orphaned ?? 0);
+    const missing = Number(invariant.rows[0]?.missing ?? 0);
+    if (orphaned || missing) {
+      throw new DailyMarketBoardValidationError(
+        `Daily market board refresh for ${slateDate} left ${orphaned} board row(s) with no eligible `
+        + `candidate and ${missing} eligible candidate(s) with no board row.`,
+      );
+    }
+
     await client.query("COMMIT");
     return {
       slateDate,
@@ -292,6 +369,8 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
       candidatesFound: candidates.rows.length,
       modeledRows,
       researchOnlyRows: candidates.rows.length - modeledRows,
+      boardRowsOrphaned: orphaned,
+      candidatesMissingBoardRow: missing,
     };
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
@@ -308,11 +387,13 @@ export async function queryDailyMarketBoard(slateDate: string, market: BoardMark
     market: DbMarket; research_rank: number | null; research_state: string; primary_mechanism: string | null;
     model_prediction: string | null; confidence_label: string; confidence_basis: string;
     calibrated_probability: string | null; model_version_id: string | null; board_frozen_at: string;
+    feature_coverage: string | null; imputed_features: unknown; unknown_features: unknown;
   }>(
     `SELECT dmb.board_id, dmb.slate_date::text, dmb.game_pk::bigint, dmb.player_id,
             COALESCE(p.full_name, 'Unknown') AS player_name, dmb.market, dmb.research_rank,
             dmb.research_state, dmb.primary_mechanism, dmb.model_prediction, dmb.confidence_label,
             dmb.confidence_basis, dmb.calibrated_probability, dmb.model_version_id,
+            dmb.feature_coverage, dmb.imputed_features, dmb.unknown_features,
             dmb.board_frozen_at::text
        FROM daily_market_board dmb
        JOIN players p ON p.player_id = dmb.player_id
@@ -336,6 +417,15 @@ export async function queryDailyMarketBoard(slateDate: string, market: BoardMark
     confidenceBasis: row.confidence_basis,
     calibratedProbability: row.calibrated_probability === null ? null : Number(row.calibrated_probability),
     modelVersionId: row.model_version_id,
+    // Which of the model's frozen features this row did not supply, and what
+    // fraction it did supply. A probability produced from a partial vector is
+    // visible as such rather than looking like a complete one.
+    featureCoverage: row.feature_coverage === null ? null : Number(row.feature_coverage),
+    imputedFeatures: Array.isArray(row.imputed_features) ? (row.imputed_features as string[]) : [],
+    // Keys the feature store now produces that the model has never seen. Not a
+    // failure, but a signal that the feature store has moved and the model is
+    // becoming stale.
+    unknownFeatures: Array.isArray(row.unknown_features) ? (row.unknown_features as string[]) : [],
     boardFrozenAt: row.board_frozen_at,
   }));
 }

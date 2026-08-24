@@ -130,40 +130,134 @@ test("unsafe rows remain evaluated but cannot enter a selected construction", ()
   assert.equal(result.selectedSide, null);
 });
 
+/**
+ * Task 2.2. Bullpen state is a ranked disclosure, not a veto.
+ *
+ * These cases used to assert the opposite: that any bullpen state short of a
+ * complete fresh 7th/8th/9th path removed the candidate from selection
+ * entirely and returned no pair for the game. That was a third-order input
+ * vetoing a first-order decision, and it is the behaviour the remediation plan
+ * removes. Each case now asserts that the pair IS surfaced and that the
+ * bullpen state is stated on it.
+ */
 for (const [status, reason, expected] of [
-  ["STALE", "Projected 9th arm has stale source freshness.", /Stale bullpen path: Projected 9th arm has stale source freshness/],
-  ["MISSING", "No leverage map exists for this bullpen.", /Incomplete bullpen path: No leverage map exists for this bullpen/],
-  ["ROLE_INCOMPLETE", "Projected 8th arm is unavailable.", /Incomplete bullpen path: Projected 8th arm is unavailable/],
+  ["STALE", "Projected 9th arm has stale source freshness.", /STALE.*stale source freshness/],
+  ["MISSING", "No leverage map exists for this bullpen.", /MISSING.*No leverage map exists/],
+  ["ROLE_INCOMPLETE", "Projected 8th arm is unavailable.", /ROLE_INCOMPLETE.*Projected 8th arm is unavailable/],
 ] as const) {
-  test(`Round Robin blocks a ${status.toLowerCase()} bullpen path with its precise reason`, () => {
+  test(`Round Robin surfaces a pair with a stated caveat for a ${status.toLowerCase()} bullpen path`, () => {
     const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
       candidate({ candidateId: `${status}-tb`, playerId: 1, market: "TB", bullpenPathEvidence: { status, reason } }),
       candidate({ candidateId: `${status}-walk`, playerId: 2, market: "WALK", bullpenPathEvidence: { status, reason } }),
     ]);
-    assert.equal(result.selectedSide, null);
-    assert.match(result.away.unavailableReason ?? "", expected);
-    assert.equal(result.away.evaluatedIneligibleHitters, 2);
+    assert.equal(result.selectedSide, "AWAY");
+    assert.notEqual(result.away.bestConstruction, null);
+    assert.equal(result.away.availabilityStatus, "AVAILABLE");
+    assert.equal(result.away.unavailableReason, null);
+    assert.equal(result.away.evaluatedIneligibleHitters, 0);
+    assert.equal(result.away.bestConstruction!.bullpenPathComplete, false);
+    assert.match(result.away.bestConstruction!.bullpenCaveat ?? "", expected);
+    assert.match(result.away.bestConstruction!.evidenceSummary, /bullpen path incomplete/);
+    for (const legCase of result.away.bestConstruction!.legCases) {
+      assert.match((legCase as { bullpenPath: string }).bullpenPath, expected);
+    }
+    assert.ok(result.away.bullpenDisclosures.some((disclosure) => expected.test(disclosure)));
   });
 }
 
-test("Round Robin blocks legacy generic bullpen payloads", () => {
+test("a legacy generic bullpen payload is disclosed, not disqualifying", () => {
   const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
     candidate({ candidateId: "legacy-tb", playerId: 1, market: "TB", bullpenPathEvidence: {} }),
     candidate({ candidateId: "legacy-walk", playerId: 2, market: "WALK", bullpenPathEvidence: {} }),
   ]);
-  assert.equal(result.selectedSide, null);
-  assert.match(result.away.unavailableReason ?? "", /generic bullpen evidence cannot be used/);
+  assert.equal(result.selectedSide, "AWAY");
+  assert.match(result.away.bestConstruction?.bullpenCaveat ?? "", /only generic bullpen evidence is recorded/);
 });
 
-test("Round Robin blocks a malformed CURRENT bullpen payload", () => {
+test("a malformed CURRENT bullpen payload is disclosed, not disqualifying", () => {
   const malformedCurrent = { status: "CURRENT", rolePath: [{ slot: "9TH", playerId: 901, role: "CLOSER" }] };
   const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
     candidate({ candidateId: "malformed-tb", playerId: 1, market: "TB", bullpenPathEvidence: malformedCurrent }),
     candidate({ candidateId: "malformed-walk", playerId: 2, market: "WALK", bullpenPathEvidence: malformedCurrent }),
   ]);
-  assert.equal(result.selectedSide, null);
-  assert.match(result.away.unavailableReason ?? "", /complete, distinct projected 7th\/8th\/9th arm path/);
+  assert.equal(result.selectedSide, "AWAY");
+  assert.match(result.away.bestConstruction?.bullpenCaveat ?? "", /complete, distinct projected 7th\/8th\/9th arm path/);
 });
+
+test("a game with fully researched hitters and no bullpen leverage map at all still returns a pair", () => {
+  const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+    candidate({
+      candidateId: "no-bullpen-tb", playerId: 1, market: "TB", researchState: "STRONG",
+      starterState: "CONFIRMED", lineupState: "CONFIRMED",
+      bullpenPathEvidence: { status: "MISSING", reason: "No leverage map exists for this bullpen." },
+    }),
+    candidate({
+      candidateId: "no-bullpen-walk", playerId: 2, market: "WALK", researchState: "STRONG",
+      starterState: "CONFIRMED", lineupState: "CONFIRMED",
+      bullpenPathEvidence: { status: "MISSING", reason: "No leverage map exists for this bullpen." },
+    }),
+  ]);
+  assert.notEqual(result.away.bestConstruction, null);
+  assert.notEqual(result.away.availabilityStatus, "NO_LEGAL_CONSTRUCTION");
+  assert.notEqual(result.away.availabilityStatus, "STALE_OR_INCOMPLETE_RESEARCH");
+  assert.ok(!result.noPairCauses.includes("STALE_OR_INCOMPLETE_RESEARCH"));
+  assert.equal(result.away.bestConstruction!.bullpenPathComplete, false);
+  assert.ok(result.away.availabilityDetail?.includes("Bullpen path incomplete"));
+});
+
+test("bullpen completeness separates two otherwise identical constructions", () => {
+  const complete = {
+    status: "CURRENT",
+    rolePath: [
+      { slot: "7TH", playerId: 701, role: "SETUP" },
+      { slot: "8TH", playerId: 801, role: "PRIMARY_SETUP" },
+      { slot: "9TH", playerId: 901, role: "CLOSER" },
+    ],
+  };
+  const incomplete = { status: "MISSING", reason: "No leverage map exists for this bullpen." };
+  const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+    candidate({ candidateId: "away-tb", playerId: 1, market: "TB", side: "AWAY", team: "AWAY", bullpenPathEvidence: incomplete }),
+    candidate({ candidateId: "away-walk", playerId: 2, market: "WALK", side: "AWAY", team: "AWAY", bullpenPathEvidence: incomplete }),
+    candidate({ candidateId: "home-tb", playerId: 3, market: "TB", side: "HOME", team: "HOME", bullpenPathEvidence: complete }),
+    candidate({ candidateId: "home-walk", playerId: 4, market: "WALK", side: "HOME", team: "HOME", bullpenPathEvidence: complete }),
+  ]);
+  assert.equal(result.comparisonStatus, "SELECTED");
+  assert.equal(result.selectedSide, "HOME");
+});
+
+/** Task 2.4. Within-side ties are broken by a stated rule and reported. */
+test("a within-side tie is broken deterministically and reported", () => {
+  const build = () => compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+    candidate({ candidateId: "z-tb", playerId: 1, playerName: "Zeta Hitter", market: "TB" }),
+    candidate({ candidateId: "a-tb", playerId: 3, playerName: "Alpha Hitter", market: "TB" }),
+    candidate({ candidateId: "z-walk", playerId: 2, playerName: "Zephyr Walker", market: "WALK" }),
+    candidate({ candidateId: "a-walk", playerId: 4, playerName: "Able Walker", market: "WALK" }),
+  ]);
+  const first = build();
+  const second = build();
+  const winner = first.away.bestConstruction!;
+  assert.deepEqual(
+    winner.legs.map((leg) => leg.playerName),
+    second.away.bestConstruction!.legs.map((leg) => leg.playerName),
+    "the same winner on repeated runs",
+  );
+  assert.equal(winner.tieBroken, true, "the operator must be told a coin flip occurred");
+  assert.ok(winner.tiedWith.length > 0);
+});
+
+test("a non-tied side reports no tie and keeps its rejected alternatives", () => {
+  const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+    candidate({ candidateId: "strong-tb", playerId: 1, market: "TB", researchState: "STRONG", researchRank: 1 }),
+    candidate({ candidateId: "strong-walk", playerId: 2, market: "WALK", researchState: "STRONG", researchRank: 1 }),
+    candidate({ candidateId: "weak-walk", playerId: 3, market: "WALK", researchState: "NEGATIVE", researchRank: 40 }),
+  ]);
+  const winner = result.away.bestConstruction!;
+  assert.equal(winner.tieBroken, false);
+  assert.deepEqual(winner.tiedWith, []);
+  assert.equal(result.away.rejectedAlternatives.length, 1);
+  assert.ok(winner.legs.some((leg) => leg.candidateId === "strong-walk"));
+});
+
 test("missing market research remains distinct from a route-level missing lineup signal", () => {
   const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [], {
     lineupSource: "FANTASYPROS,MISSING",
