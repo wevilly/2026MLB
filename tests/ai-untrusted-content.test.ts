@@ -112,6 +112,67 @@ describe("S3 - prohibited betting content cannot enter through a bettor pick", (
     assert.equal(prohibitedBettingTermInProse("under the lights the vig is fine"), "vig");
   });
 
+  test("the betting sense of line, total and unit is caught by phrase", async () => {
+    const { prohibitedBettingTermInProse } = await guard as {
+      prohibitedBettingTermInProse: (value: string) => string | null;
+    };
+    // These three cannot be tokens: total_bases is the core market, a bare
+    // `unit` metric key exists, and "line drive" is ordinary baseball prose.
+    for (const text of [
+      "the line moved overnight",
+      "watch for line movement before first pitch",
+      "the game total is too high",
+      "team total looks soft",
+      "half unit here",
+      "two units on this one",
+      "taking the over under",
+      "priced badly at the book",
+    ]) {
+      assert.notEqual(
+        prohibitedBettingTermInProse(text), null,
+        `"${text}" is betting content and must be rejected`,
+      );
+    }
+  });
+
+  test("the domain vocabulary those phrases protect still passes", async () => {
+    const { prohibitedBettingTermInProse, prohibitedBettingTerm } = await guard as {
+      prohibitedBettingTermInProse: (value: string) => string | null;
+      prohibitedBettingTerm: (value: string) => string | null;
+    };
+    for (const text of [
+      "elite line drive rate against righties",
+      "his batting line has improved",
+      "he is first in the line up tonight",
+      "the lineup is out",
+      "total bases is the market here",
+      "by the book approach from the manager",
+    ]) {
+      assert.equal(
+        prohibitedBettingTermInProse(text), null,
+        `"${text}" is baseball, not pricing, and must be allowed`,
+      );
+    }
+    // The feature store depends on these three surviving as structured keys.
+    for (const key of ["total_bases", "park_total_bases_factor", "unit", "current_lineups", "line_drive_percent"]) {
+      assert.equal(
+        prohibitedBettingTerm(key), null,
+        `${key} is a real key in this schema and must not be rejected`,
+      );
+    }
+  });
+
+  test("chalk and book are rejected where they are unambiguous", async () => {
+    const { prohibitedBettingTerm, prohibitedBettingTermInProse } = await guard as {
+      prohibitedBettingTerm: (value: string) => string | null;
+      prohibitedBettingTermInProse: (value: string) => string | null;
+    };
+    assert.equal(prohibitedBettingTermInProse("chalk play tonight"), "chalk");
+    assert.equal(prohibitedBettingTerm("book"), "book");
+    // "juiced" is the baseball form and must not catch on the "juice" token.
+    assert.equal(prohibitedBettingTermInProse("the juiced ball era"), null);
+  });
+
   test("structured fields keep the full vocabulary, including the comparators", async () => {
     const { prohibitedBettingTerm } = await guard as {
       prohibitedBettingTerm: (value: string) => string | null;

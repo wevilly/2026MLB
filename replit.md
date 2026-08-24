@@ -161,6 +161,14 @@ The two rows in that table without a trigger are a known gap, not a decision.
   the set of (player, game, market) rows on `daily_market_board` must equal the
   set of non-BLOCKED candidates. The refresh fails loudly rather than leaving a
   stale row.
+- **Slate readiness names FantasyPros, but counts the MLB schedule.** The slate
+  behind `phase2aReady` and `slateState` is `count(*) FROM games`, the ingested
+  MLB schedule. Commit 7b1171a swapped the source badge consulted when it is
+  empty to FantasyPros and reworded the diagnostics to match, so a failure of
+  MLB ingestion is currently reported as a FantasyPros problem. The slate is
+  NOT single-source; the wording is just wrong about which source it means.
+  That commit also removed `officialEmptySlate`, so a genuine MLB-published
+  off-day now reports as a missing slate rather than READY.
 - **Lineups have a documented source precedence and conflict detection.** A
   submitted MLB card outranks a FantasyPros report, which outranks a projection.
   Precedence supplies the roster; it never resolves a disagreement. A disputed

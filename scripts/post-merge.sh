@@ -36,6 +36,20 @@ pnpm install --frozen-lockfile
 #
 # The output is teed rather than streamed straight through, because of the
 # failure mode handled below.
+# ── capture what the push is about to destroy ───────────────────────────────
+#
+# M6 in pre-push-migrations.mjs normalises the stored empty strings in
+# players.bats and players.throws to NULL, which is irreversible. The
+# data-health counters count null and empty together, so the combined figure
+# survives; the split does not, and the split is the only evidence separating
+# handedness the S1 bug destroyed from handedness that was never collected.
+#
+# Recorded here rather than left to a remembered manual step, because this is
+# the run that destroys it. Best effort: a merge must not fail over a census.
+echo "post-merge: recording the handedness census before it is normalised away."
+node lib/db/scripts/handedness-census.mjs || \
+  echo "post-merge: census unavailable, continuing. The empty/null split may be lost." >&2
+
 push_log="$(mktemp)"
 trap 'rm -f "$push_log"' EXIT
 

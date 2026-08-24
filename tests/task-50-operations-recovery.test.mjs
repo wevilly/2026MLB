@@ -44,11 +44,38 @@ test("selected-date readiness and operator controls remain wired through contrac
     readFile("artifacts/mlb-analyst/src/pages/round-robin-page.tsx", "utf8"),
   ]);
   assert.match(routes, /selectedDate: date/);
-  // The slate source moved from the official MLB schedule to FantasyPros, and
-  // the officialEmptySlate concept was removed with it, so phase2aReady now
-  // reads the baseline directly. That was a deliberate change; this assertion
-  // simply never ran to notice it, because the file was in no test script.
+  // Changed by 7b1171a "Expand data foundation service and refactor analyst
+  // routes" (Replit Agent, 2026-08-24), which this assertion never ran to
+  // notice because the file was in no test script.
+  //
+  // The SLATE ITSELF DID NOT MOVE TO FANTASYPROS. The count behind it is still
+  // `SELECT count(*) FROM games WHERE game_date = $1`, which is the ingested
+  // MLB schedule, before and after that commit. What changed is narrower:
+  //
+  //   - officialEmptySlate was removed. It had let an MLB-published empty
+  //     slate report READY. Without it a genuine off-day now reports as a
+  //     missing slate. See the readiness note below.
+  //   - the source badge consulted when the slate is empty swapped from
+  //     "MLB Official" to "FantasyPros", and the diagnostic wording with it,
+  //     so a failure of MLB ingestion is now described as a FantasyPros
+  //     problem while the count it describes comes from the MLB schedule.
+  //   - phase2aReady changed meaning: it asserted research coverage
+  //     (phaseTwoReady: handedness and park), and now asserts that games and
+  //     baseline candidates exist. phaseTwoReady still gates
+  //     optionalEnrichmentReady, so research coverage is still checked, but
+  //     phase2aReady no longer claims it.
+  //
+  // Task 2.7 gave LINEUP ingestion a second source and a real POSTED state,
+  // and the precedence in replit.md (a submitted MLB card outranks a
+  // FantasyPros report, which outranks a projection) is about lineups. That
+  // layer is untouched here. The two changes above sit above it, at slate
+  // readiness reporting, and neither makes the slate single-source.
   assert.match(routes, /phase2aReady: baselineReady/);
+
+  // The slate count is the MLB schedule, not a FantasyPros feed. If this ever
+  // fails, the slate really has become single-source and Task 2.7's premise
+  // needs revisiting one layer up.
+  assert.match(routes, /AS games FROM games WHERE game_date = \$1/);
   assert.match(routes, /readinessDiagnostics/);
   assert.match(routes, /router\.get\("\/analyst\/ai\/operator-session"/);
   assert.match(routes, /operations_operator_approval/);
