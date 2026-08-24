@@ -1854,6 +1854,61 @@ export const GetAnalystModelsResponse = zod.object({
 
 
 /**
+ * Operator-initiated promotion. Refuses unless the version is a CANDIDATE with a
+ * walk-forward acceptance whose run passed, met the expected calibration error
+ * threshold, met the sharpness guard, beat its benchmark by the required margin,
+ * and carries accepted calibration parameters. Retires whatever was ACTIVE for the
+ * same market in the same transaction, so exactly one model per market is live.
+ * Promotion is never performed by the orchestration pipeline.
+ * @summary Promote one validated candidate model to ACTIVE
+ */
+export const PromoteAnalystModelParams = zod.object({
+  "versionId": zod.coerce.string()
+})
+
+export const promoteAnalystModelResponseFoldCountMin = 0;
+
+
+
+export const PromoteAnalystModelResponse = zod.object({
+  "versionId": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "status": zod.enum(['ACTIVE']),
+  "displacedVersionId": zod.string().nullable(),
+  "displacedStatus": zod.string().nullable(),
+  "walkForwardRunId": zod.string(),
+  "foldCount": zod.number().int().min(promoteAnalystModelResponseFoldCountMin),
+  "expectedCalibrationError": zod.number(),
+  "predictionStdDev": zod.number(),
+  "brierSkillScore": zod.number().nullable(),
+  "calibrationSlope": zod.number(),
+  "calibrationIntercept": zod.number(),
+  "promotedAt": zod.coerce.date()
+})
+
+
+/**
+ * The kill switch. Retires the ACTIVE model for its market, so the next board
+ * refresh emits RESEARCH_ONLY rows for that market.
+ * @summary Return one market to research-only
+ */
+export const DemoteAnalystModelParams = zod.object({
+  "versionId": zod.coerce.string()
+})
+
+export const DemoteAnalystModelBody = zod.object({
+  "reason": zod.string().optional().describe('Why the market is being returned to research-only. Recorded on the audit event.')
+}).strict()
+
+export const DemoteAnalystModelResponse = zod.object({
+  "versionId": zod.string(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "status": zod.enum(['RETIRED']),
+  "demotedAt": zod.coerce.date()
+})
+
+
+/**
  * Evaluates a model using only frozen snapshots and official settled outcomes
  * dated before each fold's test date. The run compares out-of-sample Brier skill
  * with a market-specific historical base-rate benchmark and performs fold-local

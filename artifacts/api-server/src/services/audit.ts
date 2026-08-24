@@ -9,8 +9,16 @@ export type AuditEventInput = {
   metadata?: Record<string, unknown>;
 };
 
-export async function recordAuditEvent(input: AuditEventInput) {
-  await pool.query(
+/** Anything with a query method: the shared pool, or a client inside a transaction. */
+export type AuditExecutor = { query: (sql: string, values: unknown[]) => Promise<unknown> };
+
+/**
+ * Writes one audit event. Pass a transaction client as the executor when the
+ * event must land in the same transaction as the change it describes, as
+ * model promotion does.
+ */
+export async function recordAuditEvent(input: AuditEventInput, executor: AuditExecutor = pool) {
+  await executor.query(
     `INSERT INTO audit_events (actor, request_id, action, resource_type, resource_id, metadata)
      VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
     [

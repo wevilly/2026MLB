@@ -14,6 +14,9 @@ import { populateDailyMarketBoard } from "./daily-market-board";
 import { recordAuditEvent } from "./audit";
 import { createMarketPostmortem, settleOfficialDate } from "./settlement";
 import { invalidateCache } from "./cache";
+import { MODEL_MARKETS } from "./market-codes";
+import { trainMarketModel } from "./model-training";
+import { validateModelVersion } from "./walk-forward-validation";
 
 export type OrchestrationTrigger = "SCHEDULED" | "OPERATOR";
 export type RunStepStatus = "PENDING" | "RUNNING" | "SUCCESS" | "WARNING" | "FAILED" | "CANCELLED";
@@ -28,7 +31,7 @@ export type RunStep = {
 const STEP_NAMES = [
   "fantasypros_ingest", "fantasypros_baseline", "research_refresh", "bullpen_refresh",
   "tb_engine", "xbh_engine", "walk_engine", "hr_engine", "hrrbi_engine", "market_board",
-  "health_check", "feature_snapshot_freeze",
+  "model_training", "health_check", "feature_snapshot_freeze",
 ] as const;
 
 const activeRuns = new Set<string>();
@@ -38,6 +41,44 @@ let schedulerStarted = false;
 // FantasyPros baseline while optional research was unavailable. Only work that
 // is still executing may block an operator-triggered refresh.
 const QUALIFYING_RUN_STATUSES = ["RUNNING"] as const;
+
+/**
+ * Trains and validates each market, tolerating per-market failure. One market
+ * without enough settled history must not stop the other three from
+ * accumulating validation runs.
+ */
+async function trainAndValidateMarkets() {
+  const outcomes: Array<Record<string, unknown>> = [];
+  for (const market of MODEL_MARKETS) {
+    try {
+      const trained = await trainMarketModel(market);
+      try {
+        const validated = await validateModelVersion(trained.versionId);
+        outcomes.push({
+          market,
+          versionId: trained.versionId,
+          validation: validated.status,
+          foldCount: validated.foldCount,
+          expectedCalibrationError: validated.expectedCalibrationError,
+        });
+      } catch (error) {
+        outcomes.push({
+          market,
+          versionId: trained.versionId,
+          validation: "ERROR",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    } catch (error) {
+      outcomes.push({
+        market,
+        training: "ERROR",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { markets: outcomes, promoted: false, note: "Promotion is operator-initiated and is never performed here." };
+}
 
 function currentEasternDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -222,6 +263,15 @@ async function executeRun(runId: string, slateDate: string) {
     await runStep(runId, steps, "hr_engine", () => runHREngine(slateDate), true);
     await runStep(runId, steps, "hrrbi_engine", () => runHRRBIEngine(slateDate), true);
     await runStep(runId, steps, "market_board", () => populateDailyMarketBoard(slateDate), true);
+    // Train and validate every market on each run. The pipeline never trained
+    // or validated anything, which is why the model tables were stale and no
+    // version had ever accumulated validation history.
+    //
+    // This step writes CANDIDATE versions and walk-forward runs only. It does
+    // NOT promote: promotion is operator-initiated through
+    // POST /analyst/models/:versionId/promote and stays that way until at
+    // least two weeks of validation history exist.
+    await runStep(runId, steps, "model_training", () => trainAndValidateMarkets(), true);
     if (await cancellationRequested(runId)) {
       markPendingSkipped(steps, "Skipped because the run was interrupted");
       await finaliseRun(runId, slateDate, steps, "CANCELLED");

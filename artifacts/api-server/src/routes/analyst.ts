@@ -22,7 +22,10 @@ import {
   RefreshMarketResearchHRResponse,
   WriteFeatureStoreOutcomeBody,
   TrainAnalystModelResponse,
+  DemoteAnalystModelBody,
+  DemoteAnalystModelResponse,
   GetAnalystModelsResponse,
+  PromoteAnalystModelResponse,
   ValidateAnalystModelResponse,
   GetAnalystModelValidationResponse,
   GetAnalystDailyMarketBoardResponse,
@@ -103,6 +106,11 @@ import {
   validateModelVersion,
   WalkForwardValidationError,
 } from "../services/walk-forward-validation";
+import {
+  demoteModelVersion,
+  ModelPromotionError,
+  promoteModelVersion,
+} from "../services/model-promotion";
 import {
   DailyMarketBoardValidationError,
   type BoardMarket,
@@ -1850,6 +1858,50 @@ router.get("/analyst/models/validation", async (req, res, next) => {
   } catch (error) {
     if (error instanceof WalkForwardValidationError) {
       res.status(400).json({ error: error.message });
+      return;
+    }
+    next(error);
+  }
+});
+
+/**
+ * The only production path to ACTIVE.
+ *
+ * Deliberately operator-initiated and deliberately not reachable from the
+ * orchestration pipeline: promotion stays a human decision until at least two
+ * weeks of validation history exist.
+ */
+router.post("/analyst/models/:versionId/promote", async (req, res, next) => {
+  try {
+    const result = await promoteModelVersion(req.params.versionId, {
+      actor: typeof req.headers["x-operator"] === "string" ? req.headers["x-operator"] : "OPERATOR",
+      requestId: typeof req.headers["x-request-id"] === "string" ? req.headers["x-request-id"] : null,
+    });
+    res.json(PromoteAnalystModelResponse.parse(result));
+  } catch (error) {
+    if (error instanceof ModelPromotionError) {
+      res.status(error.reason === "VERSION_NOT_FOUND" ? 404 : 400)
+        .json({ error: error.message, reason: error.reason });
+      return;
+    }
+    next(error);
+  }
+});
+
+/** The kill switch. One call returns a market to research-only. */
+router.post("/analyst/models/:versionId/demote", async (req, res, next) => {
+  try {
+    const body = DemoteAnalystModelBody.parse(req.body ?? {});
+    const result = await demoteModelVersion(req.params.versionId, {
+      actor: typeof req.headers["x-operator"] === "string" ? req.headers["x-operator"] : "OPERATOR",
+      requestId: typeof req.headers["x-request-id"] === "string" ? req.headers["x-request-id"] : null,
+      reason: body.reason ?? null,
+    });
+    res.json(DemoteAnalystModelResponse.parse(result));
+  } catch (error) {
+    if (error instanceof ModelPromotionError) {
+      res.status(error.reason === "VERSION_NOT_FOUND" ? 404 : 400)
+        .json({ error: error.message, reason: error.reason });
       return;
     }
     next(error);

@@ -1076,6 +1076,78 @@ export interface ModelVersionList {
   total: number;
 }
 
+export interface ModelDemotionInput {
+  /** Why the market is being returned to research-only. Recorded on the audit event. */
+  reason?: string;
+}
+
+export interface ModelPromotionRefusal {
+  error: string;
+  /** The single named condition that was not met. */
+  reason: string;
+}
+
+export type ModelPromotionResultMarket = typeof ModelPromotionResultMarket[keyof typeof ModelPromotionResultMarket];
+
+
+export const ModelPromotionResultMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type ModelPromotionResultStatus = typeof ModelPromotionResultStatus[keyof typeof ModelPromotionResultStatus];
+
+
+export const ModelPromotionResultStatus = {
+  ACTIVE: 'ACTIVE',
+} as const;
+
+export interface ModelPromotionResult {
+  versionId: string;
+  market: ModelPromotionResultMarket;
+  status: ModelPromotionResultStatus;
+  /** @nullable */
+  displacedVersionId: string | null;
+  /** @nullable */
+  displacedStatus: string | null;
+  walkForwardRunId: string;
+  /** @minimum 0 */
+  foldCount: number;
+  expectedCalibrationError: number;
+  predictionStdDev: number;
+  /** @nullable */
+  brierSkillScore: number | null;
+  calibrationSlope: number;
+  calibrationIntercept: number;
+  promotedAt: string;
+}
+
+export type ModelDemotionResultMarket = typeof ModelDemotionResultMarket[keyof typeof ModelDemotionResultMarket];
+
+
+export const ModelDemotionResultMarket = {
+  TB: 'TB',
+  XBH: 'XBH',
+  WALK: 'WALK',
+  HR: 'HR',
+} as const;
+
+export type ModelDemotionResultStatus = typeof ModelDemotionResultStatus[keyof typeof ModelDemotionResultStatus];
+
+
+export const ModelDemotionResultStatus = {
+  RETIRED: 'RETIRED',
+} as const;
+
+export interface ModelDemotionResult {
+  versionId: string;
+  market: ModelDemotionResultMarket;
+  status: ModelDemotionResultStatus;
+  demotedAt: string;
+}
+
 export interface WalkForwardCalibrationPoint {
   /** @minimum 0 */
   bucket: number;

@@ -960,6 +960,80 @@ paths:
                 properties:
                   error: { type: string }
                 required: [error]
+  /analyst/models/{versionId}/promote:
+    post:
+      operationId: promoteAnalystModel
+      tags: [analyst]
+      summary: Promote one validated candidate model to ACTIVE
+      description: |
+        Operator-initiated promotion. Refuses unless the version is a CANDIDATE with a
+        walk-forward acceptance whose run passed, met the expected calibration error
+        threshold, met the sharpness guard, beat its benchmark by the required margin,
+        and carries accepted calibration parameters. Retires whatever was ACTIVE for the
+        same market in the same transaction, so exactly one model per market is live.
+        Promotion is never performed by the orchestration pipeline.
+      parameters:
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The version is now ACTIVE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPromotionResult"
+        "400":
+          description: The version does not meet the promotion conditions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPromotionRefusal"
+        "404":
+          description: The version was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPromotionRefusal"
+  /analyst/models/{versionId}/demote:
+    post:
+      operationId: demoteAnalystModel
+      tags: [analyst]
+      summary: Return one market to research-only
+      description: |
+        The kill switch. Retires the ACTIVE model for its market, so the next board
+        refresh emits RESEARCH_ONLY rows for that market.
+      parameters:
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelDemotionInput"
+      responses:
+        "200":
+          description: The version is retired and the market is research-only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelDemotionResult"
+        "400":
+          description: The version is not ACTIVE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPromotionRefusal"
+        "404":
+          description: The version was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPromotionRefusal"
   /analyst/models/validate:
     post:
       operationId: validateAnalystModel
@@ -2379,6 +2453,49 @@ components:
           items: { $ref: "#/components/schemas/ModelVersion" }
         total: { type: integer, minimum: 0 }
       required: [versions, total]
+    ModelDemotionInput:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          description: Why the market is being returned to research-only. Recorded on the audit event.
+    ModelPromotionRefusal:
+      type: object
+      additionalProperties: false
+      properties:
+        error: { type: string }
+        reason:
+          type: string
+          description: The single named condition that was not met.
+      required: [error, reason]
+    ModelPromotionResult:
+      type: object
+      additionalProperties: false
+      properties:
+        versionId: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        status: { type: string, enum: [ACTIVE] }
+        displacedVersionId: { type: ["string", "null"] }
+        displacedStatus: { type: ["string", "null"] }
+        walkForwardRunId: { type: string }
+        foldCount: { type: integer, minimum: 0 }
+        expectedCalibrationError: { type: number }
+        predictionStdDev: { type: number }
+        brierSkillScore: { type: ["number", "null"] }
+        calibrationSlope: { type: number }
+        calibrationIntercept: { type: number }
+        promotedAt: { type: string, format: date-time }
+      required: [versionId, market, status, displacedVersionId, displacedStatus, walkForwardRunId, foldCount, expectedCalibrationError, predictionStdDev, brierSkillScore, calibrationSlope, calibrationIntercept, promotedAt]
+    ModelDemotionResult:
+      type: object
+      additionalProperties: false
+      properties:
+        versionId: { type: string }
+        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        status: { type: string, enum: [RETIRED] }
+        demotedAt: { type: string, format: date-time }
+      required: [versionId, market, status, demotedAt]
     WalkForwardCalibrationPoint:
       type: object
       additionalProperties: false
