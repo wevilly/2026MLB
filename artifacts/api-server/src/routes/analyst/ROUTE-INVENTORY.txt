@@ -1,0 +1,79 @@
+# The analyst route inventory, pinned.
+#
+# Captured from routes/analyst.ts immediately BEFORE remediation task 5.2 split
+# it into domain modules. tests/analyst-routes.test.ts diffs the routes actually
+# registered against this list, so the split is provably a pure move and any
+# future change to the URL surface has to be made here on purpose.
+#
+# Format: VERB then path, sorted.
+
+DELETE  /analyst/bettor/sources/:sourceId
+GET     /analyst/ai/drafts
+GET     /analyst/ai/operator-session
+GET     /analyst/ai/research-notes
+GET     /analyst/ai/sourcing-register
+GET     /analyst/ai/tool-registry
+GET     /analyst/audit-events
+GET     /analyst/batter-pitcher
+GET     /analyst/bettor/evaluation
+GET     /analyst/bettor/picks
+GET     /analyst/bettor/sources
+GET     /analyst/bullpen-room
+GET     /analyst/data-health
+GET     /analyst/export/slate-json
+GET     /analyst/export/workbook
+GET     /analyst/feature-store
+GET     /analyst/game-lab
+GET     /analyst/market-board
+GET     /analyst/market-board/game-summary
+GET     /analyst/market-research
+GET     /analyst/models
+GET     /analyst/models/validation
+GET     /analyst/operations/operator-session
+GET     /analyst/orchestration/runs
+GET     /analyst/pitcher-lab
+GET     /analyst/player-lab
+GET     /analyst/postmortems
+GET     /analyst/projections
+GET     /analyst/round-robin/comparison
+GET     /analyst/settings
+GET     /analyst/settlements
+GET     /analyst/today
+PATCH   /analyst/ai/sourcing-register/:claimId
+PATCH   /analyst/bettor/sources/:sourceId
+POST    /analyst/ai/chat
+POST    /analyst/ai/drafts
+POST    /analyst/ai/drafts/:draftId/approve
+POST    /analyst/ai/drafts/:draftId/reject
+POST    /analyst/ai/operator-session
+POST    /analyst/ai/tool-call
+POST    /analyst/bettor/ingest
+POST    /analyst/bettor/sources
+POST    /analyst/feature-store/backfill
+POST    /analyst/feature-store/capture
+POST    /analyst/feature-store/correct
+POST    /analyst/feature-store/outcome
+POST    /analyst/market-board/refresh
+POST    /analyst/models/:versionId/demote
+POST    /analyst/models/:versionId/promote
+POST    /analyst/models/train
+POST    /analyst/models/validate
+POST    /analyst/operations/operator-session
+POST    /analyst/orchestration/late-scratches
+POST    /analyst/orchestration/run
+POST    /analyst/orchestration/runs/:runId/interrupt
+POST    /analyst/postmortems
+POST    /analyst/refresh/batter-pitcher
+POST    /analyst/refresh/bullpen
+POST    /analyst/refresh/fantasypros
+POST    /analyst/refresh/market-research/hr
+POST    /analyst/refresh/market-research/tb
+POST    /analyst/refresh/market-research/walk
+POST    /analyst/refresh/market-research/xbh
+POST    /analyst/refresh/mlb
+POST    /analyst/refresh/research
+POST    /analyst/refresh/research/splits-full
+POST    /analyst/settlement/refresh
+POST    /analyst/settlements/:gamePk
+POST    /analyst/settlements/automate
+POST    /analyst/settlements/ingest

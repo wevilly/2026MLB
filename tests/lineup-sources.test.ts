@@ -98,7 +98,8 @@ describe("Task 2.7 no consumer hardcodes the lineup source", () => {
     "artifacts/api-server/src/services/walk-engine.ts",
     "artifacts/api-server/src/services/xbh-engine.ts",
     "artifacts/api-server/src/services/hr-engine.ts",
-    "artifacts/api-server/src/routes/analyst.ts",
+    // Task 5.2 moved the Round Robin route into its own domain module.
+    "artifacts/api-server/src/routes/analyst/research.ts",
   ];
 
   test("no engine pins the lineup source inside its SQL", () => {
@@ -112,11 +113,15 @@ describe("Task 2.7 no consumer hardcodes the lineup source", () => {
   });
 
   test("the Round Robin lineup selection is parameterised", () => {
-    const source = readFileSync("artifacts/api-server/src/routes/analyst.ts", "utf8");
+    const source = readFileSync("artifacts/api-server/src/routes/analyst/research.ts", "utf8");
+    const shared = readFileSync("artifacts/api-server/src/routes/analyst/shared.ts", "utf8");
     const cte = source.slice(source.indexOf("latest_lineup AS ("), source.indexOf("SELECT mrc.candidate_id"));
     assert.ok(!/source_id = 'FANTASYPROS'/.test(cte), "the selection CTE must not pin a source");
     assert.ok(cte.includes("JOIN accepted a"), "the selection CTE must join the accepted source and state pairs");
-    assert.ok(source.includes("ROUND_ROBIN_LINEUP_FILTER"), "the pairs must come from the shared precedence list");
+    assert.ok(
+      source.includes("ROUND_ROBIN_LINEUP_FILTER") && shared.includes("ROUND_ROBIN_LINEUP_FILTER"),
+      "the pairs must come from the shared precedence list",
+    );
     // The readiness counters elsewhere in this file deliberately count each
     // source separately; they select nothing and are not part of this defect.
   });
