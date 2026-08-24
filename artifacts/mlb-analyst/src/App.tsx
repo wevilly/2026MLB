@@ -437,6 +437,7 @@ function OrchestrationPage() {
   const [date, setDate] = useState(today);
   const [runs, setRuns] = useState<OrchestrationRun[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageKind, setMessageKind] = useState<'info' | 'error'>('info');
   const [loading, setLoading] = useState(false);
   const healthQuery = useGetAnalystDataHealth({ date });
   const [approvalKey, setApprovalKey] = useState('');
@@ -448,13 +449,20 @@ function OrchestrationPage() {
     try { setApproval(await operationsRequest<OperatorApproval>('/analyst/operations/operator-session')); }
     catch { setApproval({ authorized: false, expiresAt: null, detail: 'Operator approval status could not be checked.' }); }
   };
-  const load = async () => {
+  const load = async (completionMessage?: string) => {
     setLoading(true);
+    if (!completionMessage) setMessage(null);
     try {
       const response = await operationsRequest<{ runs: OrchestrationRun[] }>(`/analyst/orchestration/runs?date=${date}`);
       setRuns(response.runs);
-      setMessage(null);
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to load orchestration history.'); }
+      if (completionMessage) {
+        setMessageKind('info');
+        setMessage(completionMessage);
+      }
+    } catch (error) {
+      setMessageKind('error');
+      setMessage(error instanceof Error ? error.message : 'Unable to load orchestration history.');
+    }
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, [date]);
@@ -467,17 +475,25 @@ function OrchestrationPage() {
       const next = await operationsRequest<{ expiresAt: string }>('/analyst/operations/operator-session', { method: 'POST', body: JSON.stringify({ approvalKey }) });
       setApprovalKey('');
       setApproval({ authorized: true, expiresAt: next.expiresAt, detail: 'Operator approval is active.' });
+      setMessageKind('info');
       setMessage('Operator approval is active. Routine slate operations are now available until the displayed expiry time.');
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to unlock operator actions.'); }
+    } catch (error) {
+      setMessageKind('error');
+      setMessage(error instanceof Error ? error.message : 'Unable to unlock operator actions.');
+    }
     finally { setLoading(false); }
   };
   const startRun = async () => {
     setLoading(true);
+    setMessageKind('info');
+    setMessage('Starting the daily run…');
     try {
-      await operationsRequest(`/analyst/orchestration/run?date=${date}`, { method: 'POST' });
-      setMessage('Daily run started. This view refreshes the run ledger.');
-      await load();
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to start run.'); }
+      const run = await operationsRequest<OrchestrationRun>(`/analyst/orchestration/run?date=${date}`, { method: 'POST' });
+      await load(`Daily run accepted · run ${run.runId.slice(0, 8)} is running in the background.`);
+    } catch (error) {
+      setMessageKind('error');
+      setMessage(error instanceof Error ? error.message : 'Unable to start run.');
+    }
     finally { setLoading(false); }
   };
   const interrupt = async (runId: string) => {
@@ -488,20 +504,30 @@ function OrchestrationPage() {
     setLoading(true);
     try {
       const result = await operationsRequest<{ corrections: number }>(`/analyst/orchestration/late-scratches?date=${date}`, { method: 'POST' });
-      setMessage(result.corrections ? `${result.corrections} late-scratch correction(s) recorded and the board refreshed.` : 'No post-freeze scratches require correction.');
-      await load();
-    } catch (error) { setMessage(error instanceof Error ? error.message : 'Late-scratch scan failed.'); }
+      await load(result.corrections ? `${result.corrections} late-scratch correction(s) recorded and the board refreshed.` : 'No post-freeze scratches require correction.');
+    } catch (error) {
+      setMessageKind('error');
+      setMessage(error instanceof Error ? error.message : 'Late-scratch scan failed.');
+    }
     finally { setLoading(false); }
+  };
+  const refreshLedger = () => {
+    setLoading(true);
+    setMessageKind('info');
+    setMessage('Refreshing the run ledger…');
+    window.setTimeout(() => {
+      void load('Run ledger refreshed.');
+    }, 0);
   };
   return <div className="page-content rise-in" data-testid="page-orchestration">
     <div className="page-intro">
       <div><Kicker>Daily refresh control</Kicker><h1>Slate <span className="slash">//</span> orchestration</h1><p>One auditable sequence for ingest, research, market build, health checks, and the pregame freeze.</p></div>
-      <div className="flex gap-2 flex-wrap"><input className="search-input !w-auto" type="date" value={date} onChange={(event) => setDate(event.target.value)} /><button className="button button-dark" disabled={loading || !approvalActive} onClick={startRun} data-testid="button-start-orchestration"><Play size={15} /> Run slate</button></div>
+      <div className="flex gap-2 flex-wrap"><input className="search-input !w-auto" type="date" value={date} onChange={(event) => setDate(event.target.value)} /><button className="button button-dark" disabled={loading || !approvalActive} onClick={startRun} data-testid="button-start-orchestration"><Play size={15} /> {loading ? 'Working…' : 'Run slate'}</button></div>
     </div>
     <ReadinessStrip health={healthQuery.data} />
     <Panel className="mb-6"><div className="flex flex-wrap justify-between gap-3 items-center"><div><Kicker>Operations approval</Kicker><strong>{approvalActive ? `Active · ${Math.ceil(approvalRemaining / 60000)} minute(s) remaining` : 'Routine actions locked'}</strong><p className="text-xs text-muted-foreground mt-1">{approval.detail}</p></div><div className="flex gap-2 flex-wrap"><input className="search-input !w-auto" type="password" value={approvalKey} onChange={(event) => setApprovalKey(event.target.value)} placeholder="Operator approval key" aria-label="Operator approval key" data-testid="input-operations-approval-key" /><button className="button button-dark" disabled={loading || !approvalKey.trim()} onClick={() => void unlock()}>{approvalActive ? 'Renew unlock' : 'Unlock operations'}</button></div></div></Panel>
-    <Panel className="mb-6"><div className="flex flex-wrap justify-between gap-3 items-center"><div><Kicker>Schedule policy</Kicker><strong>08:00 ET refresh · freeze 90 minutes before the earliest first pitch</strong><p className="text-xs text-muted-foreground mt-1">Manual runs are recorded separately; feature snapshots remain append-only once frozen.</p></div><div className="flex gap-2 flex-wrap"><button className="button button-quiet" onClick={() => void lateScratchScan()} disabled={loading || !approvalActive}>Scan late scratches</button><button className="button button-quiet" onClick={() => void load()}><RefreshCw size={15} /> Refresh</button><a className="button button-quiet" href={`/api/analyst/export/slate-json?date=${date}`} target="_blank" rel="noreferrer"><Download size={15} /> slate.json</a><a className="button button-quiet" href={`/api/analyst/export/workbook?date=${date}`}><Download size={15} /> Workbook</a></div></div></Panel>
-    {message && <div className="query-message query-error mb-4"><AlertTriangle size={16} /><div><strong>Operator note</strong><p>{message}</p></div></div>}
+     <Panel className="mb-6"><div className="flex flex-wrap justify-between gap-3 items-center"><div><Kicker>Schedule policy</Kicker><strong>08:00 ET refresh · freeze 90 minutes before the earliest first pitch</strong><p className="text-xs text-muted-foreground mt-1">Manual runs are recorded separately; feature snapshots remain append-only once frozen.</p></div><div className="flex gap-2 flex-wrap"><button className="button button-quiet" onClick={() => void lateScratchScan()} disabled={loading || !approvalActive}>Scan late scratches</button><button className="button button-quiet" onClick={refreshLedger} disabled={loading}><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> {loading ? 'Refreshing…' : 'Refresh'}</button><a className="button button-quiet" href={`/api/analyst/export/slate-json?date=${date}`} target="_blank" rel="noreferrer"><Download size={15} /> slate.json</a><a className="button button-quiet" href={`/api/analyst/export/workbook?date=${date}`}><Download size={15} /> Workbook</a></div></div></Panel>
+     {message && <div className={`query-message mb-4 ${messageKind === 'error' ? 'query-error' : ''}`} role="status" data-testid="orchestration-message">{messageKind === 'error' ? <AlertTriangle size={16} /> : <Check size={16} />}<div><strong>{messageKind === 'error' ? 'Operator error' : 'Operator note'}</strong><p>{message}</p></div></div>}
     {runs.length === 0 && !loading ? <QueryMessage kind="empty" /> : <div className="space-y-4">
       {runs.map((run) => <Panel key={run.runId} className="p-5" data-testid={`orchestration-run-${run.runId}`}>
         <div className="flex justify-between gap-3 flex-wrap items-start"><div><Kicker>{run.triggeredBy} · {run.runDate}</Kicker><h2 className="text-lg">Run {run.runId.slice(0, 8)} <Badge tone={toneFor(run.overallStatus)}>{run.overallStatus}</Badge></h2><p className="text-xs text-muted-foreground mt-1">Frozen: {run.frozenAt ?? 'not yet'} {run.errorMessage ? `· ${run.errorMessage}` : ''}</p></div>{run.overallStatus === 'RUNNING' && <button className="button button-quiet" disabled={!approvalActive} onClick={() => void interrupt(run.runId)}><Square size={14} /> Interrupt</button>}</div>
