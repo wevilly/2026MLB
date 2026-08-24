@@ -515,6 +515,7 @@ async function persistFantasyProsLineups(
   ingestRunId: string,
   effectiveDate: string,
   payload: JsonObject,
+  state: "PROJECTED" | "CONFIRMED",
 ) {
   let snapshots = 0;
   let unresolvedEntries = 0;
@@ -539,20 +540,20 @@ async function persistFantasyProsLineups(
       const lineupRaw = {
         checksum: checksum({ gameId: game.game_id, abbreviation, lineupRows }),
         owner: FANTASY_PROS_SOURCE,
-        state: "PROJECTED",
+        state,
         entries: lineupRows.map((row) => ({ order: row.order, playerId: String(row.value.player_id ?? ""), position: String(row.value.position ?? "") })),
       };
       const existing = await pool.query<{ lineup_snapshot_id: string }>(
         `SELECT lineup_snapshot_id FROM lineup_snapshots
-         WHERE game_pk = $1 AND team_id = $2 AND state = 'PROJECTED' AND source_id = $3
-           AND raw->>'checksum' = $4 LIMIT 1`,
-        [gameTarget.game_pk, gameTarget.team_id, FANTASY_PROS_SOURCE, String(lineupRaw.checksum)],
+         WHERE game_pk = $1 AND team_id = $2 AND state = $3 AND source_id = $4
+           AND raw->>'checksum' = $5 LIMIT 1`,
+        [gameTarget.game_pk, gameTarget.team_id, state, FANTASY_PROS_SOURCE, String(lineupRaw.checksum)],
       );
       if (existing.rowCount) continue;
       const snapshot = await pool.query<{ lineup_snapshot_id: string }>(
         `INSERT INTO lineup_snapshots (game_pk, team_id, state, source_id, observed_at, raw)
-         VALUES ($1, $2, 'PROJECTED', $3, now(), $4) RETURNING lineup_snapshot_id`,
-        [gameTarget.game_pk, gameTarget.team_id, FANTASY_PROS_SOURCE, lineupRaw],
+         VALUES ($1, $2, $3, $4, now(), $5) RETURNING lineup_snapshot_id`,
+        [gameTarget.game_pk, gameTarget.team_id, state, FANTASY_PROS_SOURCE, lineupRaw],
       );
       for (const row of lineupRows) {
         const externalId = String(row.value.player_id ?? "");
@@ -577,8 +578,8 @@ async function persistFantasyProsLineups(
                SELECT 1 FROM identity_review_queue WHERE source_id = $1 AND external_player_id = $2 AND state = 'OPEN'
              )`,
             [
-              FANTASY_PROS_SOURCE, externalId, `FantasyPros projected lineup ID ${externalId}`, normaliseName(externalId),
-              { projectedLineup: true, gamePk: gameTarget.game_pk, team: abbreviation, reason: "identity_or_current_roster_not_confirmed" },
+              FANTASY_PROS_SOURCE, externalId, `FantasyPros ${state.toLowerCase()} lineup ID ${externalId}`, normaliseName(externalId),
+              { fantasyProsLineup: true, lineupState: state, gamePk: gameTarget.game_pk, team: abbreviation, reason: "identity_or_current_roster_not_confirmed" },
             ],
           );
           await recordIssue(
@@ -586,7 +587,7 @@ async function persistFantasyProsLineups(
             ingestRunId,
             "PROJECTED_LINEUP_IDENTITY_BLOCKING",
             "BLOCKING",
-            `FantasyPros projected lineup player ${externalId} is not a resolved current MLB player and is blocked from research.`,
+            `FantasyPros ${state.toLowerCase()} lineup player ${externalId} is not a resolved current MLB player and is blocked from research.`,
           );
           continue;
         }
@@ -965,7 +966,10 @@ export async function ingestFantasyPros(requestedDate: string) {
         `${missingIdentity.size} FantasyPros player IDs require canonical MLB identity resolution.`,
       );
     }
-    const lineupResult = await persistFantasyProsLineups(ingestRunId, effectiveDate, lineups.payload);
+    const [lineupResult, confirmedLineupResult] = await Promise.all([
+      persistFantasyProsLineups(ingestRunId, effectiveDate, lineups.payload, "PROJECTED"),
+      persistFantasyProsLineups(ingestRunId, effectiveDate, currentLineups.payload, "CONFIRMED"),
+    ]);
     await finishRun(ingestRunId, "PARTIAL", {
       rowCount: projectionRows + newsItems.length,
       normalizedRowCount: projectionRows + newsItems.length,
@@ -975,9 +979,11 @@ export async function ingestFantasyPros(requestedDate: string) {
         hitterRows: asArray(hitters.payload.player).length,
         pitcherRows: asArray(pitchers.payload.player).length,
         playerDirectoryRows: playerDirectory.size,
-        lineupPayloads: asArray(lineups.payload.games).length,
-        lineupSnapshots: lineupResult.snapshots,
-        lineupIdentityRejected: lineupResult.unresolvedEntries,
+        projectedLineupPayloads: asArray(lineups.payload.games).length,
+        confirmedLineupPayloads: asArray(currentLineups.payload.games).length,
+        projectedLineupSnapshots: lineupResult.snapshots,
+        confirmedLineupSnapshots: confirmedLineupResult.snapshots,
+        lineupIdentityRejected: lineupResult.unresolvedEntries + confirmedLineupResult.unresolvedEntries,
         newsRows: newsItems.length,
         endpoints: endpointResults.map((endpoint) => ({
           label: endpoint.label,

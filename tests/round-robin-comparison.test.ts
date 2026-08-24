@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compareRoundRobinGame, type RoundRobinCandidate, type RoundRobinSideContext } from "../artifacts/api-server/src/services/round-robin-comparison.ts";
+import { compareRoundRobinGame, type RoundRobinCandidate } from "../artifacts/api-server/src/services/round-robin-comparison.ts";
 
 function candidate(overrides: Partial<RoundRobinCandidate>): RoundRobinCandidate {
   const id = overrides.candidateId ?? `${overrides.side ?? "AWAY"}-${overrides.market ?? "TB"}-${overrides.playerId ?? 1}`;
@@ -16,7 +16,7 @@ function candidate(overrides: Partial<RoundRobinCandidate>): RoundRobinCandidate
     team: overrides.team ?? (overrides.side === "HOME" ? "HOME" : "AWAY"),
     selectable: overrides.selectable ?? true,
     selectionBlockReason: overrides.selectionBlockReason ?? null,
-    lineupState: overrides.lineupState ?? "POSTED",
+    lineupState: overrides.lineupState ?? "PROJECTED",
     starterState: overrides.starterState ?? "CONFIRMED",
     bvpStatus: "AVAILABLE",
     bvpEvidence: null,
@@ -63,13 +63,26 @@ test("RR4 can select home when its XBH and walk evidence is stronger", () => {
   assert.equal(result.selectedConstruction?.constructionLabel, "Same-team XBH + Walk");
 });
 
-test("RR1 labels a side-anchored cross-team pair when it is the only legal construction", () => {
+test("confirmed FantasyPros lineups break an otherwise exact projected-lineup tie", () => {
+  const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+    candidate({ candidateId: "away-tb", side: "AWAY", playerId: 1, market: "TB", lineupState: "CONFIRMED" }),
+    candidate({ candidateId: "away-walk", side: "AWAY", playerId: 2, market: "WALK", lineupState: "CONFIRMED" }),
+    candidate({ candidateId: "home-tb", side: "HOME", team: "HOME", playerId: 3, market: "TB", lineupState: "PROJECTED" }),
+    candidate({ candidateId: "home-walk", side: "HOME", team: "HOME", playerId: 4, market: "WALK", lineupState: "PROJECTED" }),
+  ]);
+  assert.equal(result.selectedSide, "AWAY");
+  assert.match(result.away.bestConstruction?.evidenceSummary ?? "", /FantasyPros confirmed lineups/);
+  assert.match(result.home.bestConstruction?.evidenceSummary ?? "", /FantasyPros projected lineups/);
+});
+
+test("RR1 rejects a cross-team TB pair when it is the only available construction", () => {
   const result = compareRoundRobinGame("RR1", 1, "AWAY", "HOME", [
     candidate({ candidateId: "away-tb", side: "AWAY", playerId: 1, market: "TB" }),
     candidate({ candidateId: "home-tb", side: "HOME", team: "HOME", playerId: 2, market: "TB" }),
   ]);
-  assert.equal(result.away.bestConstruction?.constructionLabel, "Cross-team TB + TB");
-  assert.equal(result.home.bestConstruction?.constructionLabel, "Cross-team TB + TB");
+  assert.equal(result.away.bestConstruction, null);
+  assert.equal(result.home.bestConstruction, null);
+  assert.ok(result.away.noPairCauses.includes("NO_LEGAL_SAME_TEAM_PAIR"));
 });
 
 test("same-market pairs are retained when evidence order disagrees with candidate ID order", () => {
@@ -81,17 +94,31 @@ test("same-market pairs are retained when evidence order disagrees with candidat
   assert.equal(result.away.bestConstruction?.legs.length, 2);
 });
 
-test("RR5 considers all four supported construction types", () => {
+test("RR5 selects only among the four legal same-team boards", () => {
   const result = compareRoundRobinGame("RR5", 1, "AWAY", "HOME", [
     candidate({ candidateId: "tb-1", side: "AWAY", playerId: 1, market: "TB" }),
     candidate({ candidateId: "tb-2", side: "AWAY", playerId: 2, market: "TB" }),
     candidate({ candidateId: "walk", side: "AWAY", playerId: 3, market: "WALK" }),
     candidate({ candidateId: "xbh", side: "AWAY", playerId: 4, market: "XBH" }),
-    candidate({ candidateId: "hr-1", side: "AWAY", playerId: 5, market: "HR" }),
-    candidate({ candidateId: "hr-2", side: "AWAY", playerId: 6, market: "HR" }),
+    candidate({ candidateId: "hrrbi", side: "AWAY", playerId: 5, market: "H_R_RBI" }),
   ]);
-  assert.deepEqual(result.away.consideredConstructionTypes.sort(), ["HR_HR", "TB_TB", "TB_WALK", "XBH_WALK"]);
+  assert.deepEqual(result.away.consideredConstructionTypes.sort(), ["TB_TB", "TB_WALK", "XBH_H_R_RBI", "XBH_WALK"]);
 });
+
+for (const [board, markets] of [
+  ["RR2", ["TB", "WALK"]],
+  ["RR3", ["XBH", "H_R_RBI"]],
+  ["RR4", ["XBH", "WALK"]],
+  ["RR5", ["TB", "WALK", "XBH", "H_R_RBI"]],
+] as const) {
+  test(`${board} cannot form a legal construction from one player's mixed-market rows`, () => {
+    const result = compareRoundRobinGame(board, 1, "AWAY", "HOME", markets.map((market, index) =>
+      candidate({ candidateId: `${board}-${market}`, playerId: 1, market, researchRank: index + 1 }),
+    ));
+    assert.equal(result.away.bestConstruction, null);
+    assert.ok(result.away.noPairCauses.includes("NO_LEGAL_SAME_TEAM_PAIR"));
+  });
+}
 
 test("unsafe rows remain evaluated but cannot enter a selected construction", () => {
   const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
@@ -137,42 +164,14 @@ test("Round Robin blocks a malformed CURRENT bullpen payload", () => {
   assert.equal(result.selectedSide, null);
   assert.match(result.away.unavailableReason ?? "", /complete, distinct projected 7th\/8th\/9th arm path/);
 });
-function context(overrides: Partial<RoundRobinSideContext> = {}): RoundRobinSideContext {
-  return {
-    lineup: {
-      present: true,
-      state: "PROJECTED",
-      source: "FANTASYPROS",
-      observedAt: "2026-08-24T12:00:00.000Z",
-      hitterCount: 9,
-    },
-    research: {
-      usable: true,
-      readinessStatus: "READY",
-      readinessReason: null,
-      observedAt: "2026-08-24T12:05:00.000Z",
-    },
-    ...overrides,
-  };
-}
-
-test("no lineup and no market research remain distinct audit states", () => {
+test("missing market research remains distinct from a route-level missing lineup signal", () => {
   const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [], {
-    AWAY: context({
-      lineup: {
-        present: false,
-        state: "UNKNOWN",
-        source: null,
-        observedAt: null,
-        hitterCount: 0,
-      },
-    }),
-    HOME: context(),
+    lineupSource: "FANTASYPROS,MISSING",
+    evidenceGaps: ["Missing selected lineup snapshot for one or both teams"],
   });
-  assert.equal(result.away.availabilityStatus, "NO_LINEUP");
-  assert.match(result.away.availabilityDetail ?? "", /No projected or posted lineup/);
-  assert.equal(result.home.availabilityStatus, "NO_MARKET_CANDIDATES");
-  assert.match(result.home.availabilityDetail ?? "", /No market candidates were produced/);
+  assert.equal(result.away.availabilityStatus, "NO_MARKET_CANDIDATES");
+  assert.ok(result.noPairCauses.includes("MISSING_FANTASYPROS_LINEUP"));
+  assert.ok(result.evidenceGaps.some((gap) => gap.includes("Missing selected lineup")));
   assert.equal(result.comparisonStatus, "NO_COMPARISON");
 });
 
@@ -210,7 +209,7 @@ test("exact comparisons are reported as valid ties without selecting a side", ()
   ]);
   assert.equal(result.selectedSide, null);
   assert.equal(result.comparisonStatus, "VALID_TIE");
-  assert.match(result.comparisonReason, /Valid comparison tie/);
+  assert.match(result.comparisonReason, /EXACT_TIE/);
 });
 
 test("different construction labels do not break an otherwise exact comparison tie", () => {

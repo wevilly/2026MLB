@@ -11,6 +11,7 @@ export type RoundRobinLegLineupState = typeof RoundRobinLegLineupState[keyof typ
 
 export const RoundRobinLegLineupState = {
   POSTED: 'POSTED',
+  CONFIRMED: 'CONFIRMED',
   PROJECTED: 'PROJECTED',
   UNKNOWN: 'UNKNOWN',
 } as const;

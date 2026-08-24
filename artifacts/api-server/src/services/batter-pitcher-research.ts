@@ -271,7 +271,12 @@ export async function refreshBatterPitcherSlate(effectiveDate: string) {
     `WITH latest_lineup AS (
        SELECT DISTINCT ON (ls.game_pk, ls.team_id) ls.lineup_snapshot_id, ls.game_pk, ls.team_id
        FROM lineup_snapshots ls JOIN games g ON g.game_pk = ls.game_pk
-       WHERE g.game_date = $1 AND ls.state IN ('POSTED','PROJECTED') ORDER BY ls.game_pk, ls.team_id, ls.observed_at DESC
+       WHERE g.game_date = $1
+         AND ls.source_id = 'FANTASYPROS'
+         AND ls.state IN ('CONFIRMED', 'PROJECTED')
+       ORDER BY ls.game_pk, ls.team_id,
+         CASE WHEN ls.state = 'CONFIRMED' THEN 1 ELSE 2 END,
+         ls.observed_at DESC
      ), latest_starter AS (
        SELECT DISTINCT ON (s.game_pk, s.team_id) s.game_pk, s.team_id, s.player_id
        FROM starters s JOIN games g ON g.game_pk = s.game_pk

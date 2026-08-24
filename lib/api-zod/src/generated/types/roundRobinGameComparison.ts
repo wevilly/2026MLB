@@ -17,7 +17,11 @@ export interface RoundRobinGameComparison {
   /** @nullable */
   selectedSide: RoundRobinGameComparisonSelectedSide;
   selectedConstruction: RoundRobinConstruction | null;
-  /** Distinguishes an unavailable game from an exact source-backed comparison tie. */
   comparisonStatus: RoundRobinGameComparisonComparisonStatus;
   comparisonReason: string;
+  lineupState: string;
+  lineupSource: string;
+  starterState: string;
+  evidenceGaps: string[];
+  noPairCauses: string[];
 }

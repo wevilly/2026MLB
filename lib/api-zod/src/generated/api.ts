@@ -788,7 +788,7 @@ export const GetAnalystMarketResearchResponse = zod.object({
   "gamePk": zod.number().int(),
   "playerId": zod.number().int(),
   "playerName": zod.string(),
-  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI']),
   "researchRank": zod.number().int().nullable(),
   "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
   "primaryMechanism": zod.string().nullable(),
@@ -908,19 +908,19 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "team": zod.string(),
   "evaluatedEligibleHitters": zod.number().int().min(getAnalystRoundRobinComparisonResponseGamesItemAwayEvaluatedEligibleHittersMin),
   "evaluatedIneligibleHitters": zod.number().int().min(getAnalystRoundRobinComparisonResponseGamesItemAwayEvaluatedIneligibleHittersMin),
-  "consideredConstructionTypes": zod.array(zod.enum(['TB_TB', 'TB_WALK', 'XBH_WALK', 'HR_HR'])),
+  "consideredConstructionTypes": zod.array(zod.enum(['TB_TB', 'TB_WALK', 'XBH_H_R_RBI', 'XBH_WALK'])),
   "bestConstruction": zod.union([zod.object({
-  "constructionType": zod.enum(['TB_TB', 'TB_WALK', 'XBH_WALK', 'HR_HR']),
+  "constructionType": zod.enum(['TB_TB', 'TB_WALK', 'XBH_H_R_RBI', 'XBH_WALK']),
   "constructionLabel": zod.string(),
   "side": zod.enum(['AWAY', 'HOME']),
   "legs": zod.array(zod.object({
   "candidateId": zod.string(),
   "playerId": zod.number().int(),
   "playerName": zod.string(),
-  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI']),
   "researchRank": zod.number().int().nullable(),
   "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
-  "lineupState": zod.enum(['POSTED', 'PROJECTED', 'UNKNOWN']),
+  "lineupState": zod.enum(['POSTED', 'CONFIRMED', 'PROJECTED', 'UNKNOWN']),
   "starterState": zod.string(),
   "bvpEvidence": zod.union([zod.object({
   "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
@@ -972,35 +972,44 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "counterEvidence": zod.object({
 
 }).passthrough(),
+  "sourceLineage": zod.record(zod.string(), zod.unknown()),
+  "sampleDenominators": zod.record(zod.string(), zod.unknown()),
   "selectable": zod.boolean(),
   "selectionBlockReason": zod.string().nullable()
 }).describe('A candidate evaluated in a game-level Round Robin construction. Research fields are audit context, never betting values.')).min(getAnalystRoundRobinComparisonResponseGamesItemAwayBestConstructionOneLegsMin).max(getAnalystRoundRobinComparisonResponseGamesItemAwayBestConstructionOneLegsMax),
   "stateTotal": zod.number().int(),
   "rankTotal": zod.number().int(),
-  "evidenceSummary": zod.string()
+  "evidenceSummary": zod.string(),
+  "legCases": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sharedMechanism": zod.string(),
+  "geometry": zod.string().nullable(),
+  "runnerUpComparison": zod.string().nullable(),
+  "rejectedAlternatives": zod.array(zod.string())
 }),zod.null()]),
-  "availabilityStatus": zod.enum(['AVAILABLE', 'NO_LINEUP', 'UNRESOLVED_IDENTITY', 'MISSING_STARTER', 'STALE_OR_INCOMPLETE_RESEARCH', 'NO_MARKET_CANDIDATES', 'NO_LEGAL_CONSTRUCTION', 'UNSUPPORTED_BOARD']).describe('The safety prerequisite that prevents this side from forming a construction, when applicable.'),
-  "availabilityDetail": zod.string().nullable().describe('Source-backed lineup, starter, identity, or research-readiness detail for the side\'s availability state.'),
-  "unavailableReason": zod.string().nullable()
+  "availabilityStatus": zod.string(),
+  "availabilityDetail": zod.string().nullable(),
+  "unavailableReason": zod.string().nullable(),
+  "noPairCauses": zod.array(zod.string()),
+  "rejectedAlternatives": zod.array(zod.string())
 }),
   "home": zod.object({
   "side": zod.enum(['AWAY', 'HOME']),
   "team": zod.string(),
   "evaluatedEligibleHitters": zod.number().int().min(getAnalystRoundRobinComparisonResponseGamesItemHomeEvaluatedEligibleHittersMin),
   "evaluatedIneligibleHitters": zod.number().int().min(getAnalystRoundRobinComparisonResponseGamesItemHomeEvaluatedIneligibleHittersMin),
-  "consideredConstructionTypes": zod.array(zod.enum(['TB_TB', 'TB_WALK', 'XBH_WALK', 'HR_HR'])),
+  "consideredConstructionTypes": zod.array(zod.enum(['TB_TB', 'TB_WALK', 'XBH_H_R_RBI', 'XBH_WALK'])),
   "bestConstruction": zod.union([zod.object({
-  "constructionType": zod.enum(['TB_TB', 'TB_WALK', 'XBH_WALK', 'HR_HR']),
+  "constructionType": zod.enum(['TB_TB', 'TB_WALK', 'XBH_H_R_RBI', 'XBH_WALK']),
   "constructionLabel": zod.string(),
   "side": zod.enum(['AWAY', 'HOME']),
   "legs": zod.array(zod.object({
   "candidateId": zod.string(),
   "playerId": zod.number().int(),
   "playerName": zod.string(),
-  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI']),
   "researchRank": zod.number().int().nullable(),
   "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
-  "lineupState": zod.enum(['POSTED', 'PROJECTED', 'UNKNOWN']),
+  "lineupState": zod.enum(['POSTED', 'CONFIRMED', 'PROJECTED', 'UNKNOWN']),
   "starterState": zod.string(),
   "bvpEvidence": zod.union([zod.object({
   "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
@@ -1052,30 +1061,39 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "counterEvidence": zod.object({
 
 }).passthrough(),
+  "sourceLineage": zod.record(zod.string(), zod.unknown()),
+  "sampleDenominators": zod.record(zod.string(), zod.unknown()),
   "selectable": zod.boolean(),
   "selectionBlockReason": zod.string().nullable()
 }).describe('A candidate evaluated in a game-level Round Robin construction. Research fields are audit context, never betting values.')).min(getAnalystRoundRobinComparisonResponseGamesItemHomeBestConstructionOneLegsMin).max(getAnalystRoundRobinComparisonResponseGamesItemHomeBestConstructionOneLegsMax),
   "stateTotal": zod.number().int(),
   "rankTotal": zod.number().int(),
-  "evidenceSummary": zod.string()
+  "evidenceSummary": zod.string(),
+  "legCases": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sharedMechanism": zod.string(),
+  "geometry": zod.string().nullable(),
+  "runnerUpComparison": zod.string().nullable(),
+  "rejectedAlternatives": zod.array(zod.string())
 }),zod.null()]),
-  "availabilityStatus": zod.enum(['AVAILABLE', 'NO_LINEUP', 'UNRESOLVED_IDENTITY', 'MISSING_STARTER', 'STALE_OR_INCOMPLETE_RESEARCH', 'NO_MARKET_CANDIDATES', 'NO_LEGAL_CONSTRUCTION', 'UNSUPPORTED_BOARD']).describe('The safety prerequisite that prevents this side from forming a construction, when applicable.'),
-  "availabilityDetail": zod.string().nullable().describe('Source-backed lineup, starter, identity, or research-readiness detail for the side\'s availability state.'),
-  "unavailableReason": zod.string().nullable()
+  "availabilityStatus": zod.string(),
+  "availabilityDetail": zod.string().nullable(),
+  "unavailableReason": zod.string().nullable(),
+  "noPairCauses": zod.array(zod.string()),
+  "rejectedAlternatives": zod.array(zod.string())
 }),
   "selectedSide": zod.union([zod.literal('AWAY'),zod.literal('HOME'),zod.literal(null)]).nullable(),
   "selectedConstruction": zod.union([zod.object({
-  "constructionType": zod.enum(['TB_TB', 'TB_WALK', 'XBH_WALK', 'HR_HR']),
+  "constructionType": zod.enum(['TB_TB', 'TB_WALK', 'XBH_H_R_RBI', 'XBH_WALK']),
   "constructionLabel": zod.string(),
   "side": zod.enum(['AWAY', 'HOME']),
   "legs": zod.array(zod.object({
   "candidateId": zod.string(),
   "playerId": zod.number().int(),
   "playerName": zod.string(),
-  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI']),
   "researchRank": zod.number().int().nullable(),
   "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
-  "lineupState": zod.enum(['POSTED', 'PROJECTED', 'UNKNOWN']),
+  "lineupState": zod.enum(['POSTED', 'CONFIRMED', 'PROJECTED', 'UNKNOWN']),
   "starterState": zod.string(),
   "bvpEvidence": zod.union([zod.object({
   "status": zod.enum(['AVAILABLE', 'INSUFFICIENT_SAMPLE', 'NOT_FOUND']),
@@ -1127,15 +1145,27 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "counterEvidence": zod.object({
 
 }).passthrough(),
+  "sourceLineage": zod.record(zod.string(), zod.unknown()),
+  "sampleDenominators": zod.record(zod.string(), zod.unknown()),
   "selectable": zod.boolean(),
   "selectionBlockReason": zod.string().nullable()
 }).describe('A candidate evaluated in a game-level Round Robin construction. Research fields are audit context, never betting values.')).min(getAnalystRoundRobinComparisonResponseGamesItemSelectedConstructionOneLegsMin).max(getAnalystRoundRobinComparisonResponseGamesItemSelectedConstructionOneLegsMax),
   "stateTotal": zod.number().int(),
   "rankTotal": zod.number().int(),
-  "evidenceSummary": zod.string()
+  "evidenceSummary": zod.string(),
+  "legCases": zod.array(zod.record(zod.string(), zod.unknown())),
+  "sharedMechanism": zod.string(),
+  "geometry": zod.string().nullable(),
+  "runnerUpComparison": zod.string().nullable(),
+  "rejectedAlternatives": zod.array(zod.string())
 }),zod.null()]),
-  "comparisonStatus": zod.enum(['SELECTED', 'NO_COMPARISON', 'VALID_TIE']).describe('Distinguishes an unavailable game from an exact source-backed comparison tie.'),
-  "comparisonReason": zod.string()
+  "comparisonStatus": zod.enum(['SELECTED', 'NO_COMPARISON', 'VALID_TIE']),
+  "comparisonReason": zod.string(),
+  "lineupState": zod.string(),
+  "lineupSource": zod.string(),
+  "starterState": zod.string(),
+  "evidenceGaps": zod.array(zod.string()),
+  "noPairCauses": zod.array(zod.string())
 })),
   "readiness": zod.object({
   "currentDate": zod.string(),
@@ -2836,5 +2866,4 @@ export const RefreshBullpenResponse = zod.object({
   "teamsComputed": zod.number().int(),
   "error": zod.string().nullable()
 })
-
 

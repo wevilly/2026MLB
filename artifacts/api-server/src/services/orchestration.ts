@@ -7,6 +7,7 @@ import { runTBEngine } from "./tb-engine";
 import { runXBHEngine } from "./xbh-engine";
 import { runWALKEngine } from "./walk-engine";
 import { runHREngine } from "./hr-engine";
+import { runHRRBIEngine } from "./hrrbi-engine";
 import { captureSlateSnapshots, correctSnapshot } from "./feature-store";
 import { populateDailyMarketBoard } from "./daily-market-board";
 import { recordAuditEvent } from "./audit";
@@ -25,7 +26,7 @@ export type RunStep = {
 
 const STEP_NAMES = [
   "mlb_ingest", "fantasypros_ingest", "research_refresh", "bullpen_refresh",
-  "tb_engine", "xbh_engine", "walk_engine", "hr_engine", "market_board",
+  "tb_engine", "xbh_engine", "walk_engine", "hr_engine", "hrrbi_engine", "market_board",
   "health_check", "feature_snapshot_freeze",
 ] as const;
 
@@ -207,6 +208,7 @@ async function executeRun(runId: string, slateDate: string) {
     if (!await runRequiredStep(runId, slateDate, steps, "xbh_engine", () => runXBHEngine(slateDate))) return;
     if (!await runRequiredStep(runId, slateDate, steps, "walk_engine", () => runWALKEngine(slateDate))) return;
     if (!await runRequiredStep(runId, slateDate, steps, "hr_engine", () => runHREngine(slateDate))) return;
+    if (!await runRequiredStep(runId, slateDate, steps, "hrrbi_engine", () => runHRRBIEngine(slateDate))) return;
     if (!await runRequiredStep(runId, slateDate, steps, "market_board", () => populateDailyMarketBoard(slateDate))) return;
     if (await cancellationRequested(runId)) {
       markPendingSkipped(steps, "Skipped because the run was interrupted");

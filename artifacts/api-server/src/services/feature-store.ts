@@ -688,7 +688,7 @@ export async function captureSlateSnapshots(slateDate: string): Promise<CaptureS
     }>(
       `SELECT candidate_id, player_id, game_pk, market
        FROM market_research_candidates
-       WHERE slate_date = $1
+       WHERE slate_date = $1 AND market <> 'HITS_RUNS_RBI_2_PLUS'
        ORDER BY market, player_id`,
        [normalizedSlateDate],
     );

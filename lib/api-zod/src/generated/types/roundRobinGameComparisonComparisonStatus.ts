@@ -6,9 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 
-/**
- * Distinguishes an unavailable game from an exact source-backed comparison tie.
- */
 export type RoundRobinGameComparisonComparisonStatus = typeof RoundRobinGameComparisonComparisonStatus[keyof typeof RoundRobinGameComparisonComparisonStatus];
 
 

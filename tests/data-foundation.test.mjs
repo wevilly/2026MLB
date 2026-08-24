@@ -37,6 +37,54 @@ test("FantasyPros fixtures retain independent hitter components and lineup state
   assert.deepEqual(current.games[0].hitters, {});
 });
 
+test("official and FantasyPros lineup snapshot deduplication binds every checksum parameter", () => {
+  const service = readText("artifacts/api-server/src/services/data-foundation.ts");
+  assert.match(
+    service,
+    /state = 'POSTED' AND source_id = \$3\s+AND raw->>'checksum' = \$4 LIMIT 1[\s\S]{0,180}\[gamePk, teamId, MLB_SOURCE, String\(lineupRaw\.checksum\)\]/,
+    "official posted-lineup checksum must be the fourth bound value",
+  );
+  assert.match(
+    service,
+    /state = \$3 AND source_id = \$4\s+AND raw->>'checksum' = \$5 LIMIT 1[\s\S]{0,200}\[gameTarget\.game_pk, gameTarget\.team_id, state, FANTASY_PROS_SOURCE, String\(lineupRaw\.checksum\)\]/,
+    "FantasyPros projected and confirmed snapshots must bind the checksum separately from source",
+  );
+  assert.ok(service.includes('persistFantasyProsLineups(ingestRunId, effectiveDate, lineups.payload, "PROJECTED")'));
+  assert.ok(service.includes('persistFantasyProsLineups(ingestRunId, effectiveDate, currentLineups.payload, "CONFIRMED")'));
+});
+
+test("Round Robin pregame lineage uses FantasyPros confirmed then projected snapshots only", () => {
+  const route = readText("artifacts/api-server/src/routes/analyst.ts");
+  const comparator = readText("artifacts/api-server/src/services/round-robin-comparison.ts");
+  assert.ok(route.includes("AND ls.source_id = 'FANTASYPROS'"));
+  assert.ok(route.includes("AND ls.state IN ('CONFIRMED', 'PROJECTED')"));
+  assert.ok(route.includes("WHEN ls.state = 'CONFIRMED' THEN 1"));
+  assert.ok(route.includes("ELSE 2"));
+  assert.ok(route.includes("Missing selected lineup snapshot for one or both teams"));
+  assert.ok(!comparator.includes('candidate.lineupState === "PROJECTED" && candidate.selectionBlockReason === "INCOMPLETE_EVIDENCE"'));
+  assert.ok(comparator.includes('context.lineupSource?.split(",").includes("MISSING")'));
+});
+
+test("pregame research never falls back to MLB, unsupported sources, or UPDATED snapshots", () => {
+  for (const engine of ["tb-engine", "xbh-engine", "walk-engine", "hr-engine"]) {
+    const service = readText(`artifacts/api-server/src/services/${engine}.ts`);
+    const selector = service.match(/WITH best_lineup AS \([\s\S]*?\n\s*\)\n\s*SELECT/)?.[0] ?? "";
+    assert.ok(selector.includes("source_id = 'FANTASYPROS'"), `${engine} must select FantasyPros lineups only`);
+    assert.ok(selector.includes("state IN ('CONFIRMED', 'PROJECTED')"), `${engine} must allow only FantasyPros projected and confirmed lineups`);
+    assert.ok(!selector.includes("MLB_OFFICIAL"), `${engine} must not select MLB postgame/settlement lineups`);
+    assert.ok(!service.includes("WHEN 'UPDATED'"), `${engine} must not rank UPDATED snapshots`);
+  }
+});
+
+test("research-only H+R+RBI cannot enter feature snapshots or settle as Total Bases", () => {
+  const featureStore = readText("artifacts/api-server/src/services/feature-store.ts");
+  const dailyBoard = readText("artifacts/api-server/src/services/daily-market-board.ts");
+  assert.ok(featureStore.includes("market <> 'HITS_RUNS_RBI_2_PLUS'"));
+  assert.ok(!featureStore.includes("HITS_RUNS_RBI_2_PLUS: \"TB\""));
+  assert.ok(dailyBoard.includes("mrc.market <> 'HITS_RUNS_RBI_2_PLUS'"));
+  assert.ok(dailyBoard.includes("market = 'HITS_RUNS_RBI_2_PLUS'"));
+});
+
 test("MLB fixtures retain official identity, lineup order, and settlement facts", () => {
   const schedule = readJson("tests/fixtures/mlb_stats_api/schedule-with-probables.json");
   const feed = readJson("tests/fixtures/mlb_stats_api/game-live-feed-posted-lineups.json");

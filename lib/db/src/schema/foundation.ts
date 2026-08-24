@@ -57,6 +57,7 @@ export const starterStateEnum = pgEnum("starter_state", [
 
 export const lineupStateEnum = pgEnum("lineup_state", [
   "PROJECTED",
+  "CONFIRMED",
   "POSTED",
   "UPDATED",
   "SCRATCHED",
@@ -86,6 +87,7 @@ export const marketTypeEnum = pgEnum("market_type", [
   "EXTRA_BASE_HIT",
   "BATTER_WALK",
   "HOME_RUN",
+  "HITS_RUNS_RBI_2_PLUS",
 ]);
 
 /**

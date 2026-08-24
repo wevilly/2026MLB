@@ -221,9 +221,15 @@ async function getSlateLineupPlayers(gamePks: number[]): Promise<LineupPlayer[]>
     `WITH best_lineup AS (
        SELECT DISTINCT ON (game_pk, team_id)
          lineup_snapshot_id, game_pk, team_id, state AS lineup_state
-       FROM lineup_snapshots WHERE game_pk = ANY($1)
+       FROM lineup_snapshots
+       WHERE game_pk = ANY($1)
+         AND source_id = 'FANTASYPROS'
+         AND state IN ('CONFIRMED', 'PROJECTED')
        ORDER BY game_pk, team_id,
-         CASE state WHEN 'POSTED' THEN 1 WHEN 'UPDATED' THEN 2 WHEN 'PROJECTED' THEN 3 ELSE 4 END,
+         CASE
+           WHEN state = 'CONFIRMED' THEN 1
+           ELSE 2
+         END,
          observed_at DESC
      )
      SELECT le.player_id, p.full_name, p.bats, le.batting_order,

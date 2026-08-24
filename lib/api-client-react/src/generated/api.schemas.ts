@@ -1323,6 +1323,7 @@ export const MarketResearchCandidateMarket = {
   XBH: 'XBH',
   WALK: 'WALK',
   HR: 'HR',
+  H_R_RBI: 'H_R_RBI',
 } as const;
 
 export type MarketResearchCandidateResearchState = typeof MarketResearchCandidateResearchState[keyof typeof MarketResearchCandidateResearchState];
@@ -1453,6 +1454,7 @@ export const RoundRobinLegMarket = {
   XBH: 'XBH',
   WALK: 'WALK',
   HR: 'HR',
+  H_R_RBI: 'H_R_RBI',
 } as const;
 
 export type RoundRobinLegResearchState = typeof RoundRobinLegResearchState[keyof typeof RoundRobinLegResearchState];
@@ -1471,6 +1473,7 @@ export type RoundRobinLegLineupState = typeof RoundRobinLegLineupState[keyof typ
 
 export const RoundRobinLegLineupState = {
   POSTED: 'POSTED',
+  CONFIRMED: 'CONFIRMED',
   PROJECTED: 'PROJECTED',
   UNKNOWN: 'UNKNOWN',
 } as const;
@@ -1493,6 +1496,10 @@ export type RoundRobinLegBullpenPathEvidence = { [key: string]: unknown };
 export type RoundRobinLegParkEvidence = { [key: string]: unknown };
 
 export type RoundRobinLegCounterEvidence = { [key: string]: unknown };
+
+export type RoundRobinLegSourceLineage = { [key: string]: unknown };
+
+export type RoundRobinLegSampleDenominators = { [key: string]: unknown };
 
 /**
  * A candidate evaluated in a game-level Round Robin construction. Research fields are audit context, never betting values.
@@ -1517,6 +1524,8 @@ export interface RoundRobinLeg {
   bullpenPathEvidence: RoundRobinLegBullpenPathEvidence;
   parkEvidence: RoundRobinLegParkEvidence;
   counterEvidence: RoundRobinLegCounterEvidence;
+  sourceLineage: RoundRobinLegSourceLineage;
+  sampleDenominators: RoundRobinLegSampleDenominators;
   selectable: boolean;
   /** @nullable */
   selectionBlockReason: string | null;
@@ -1528,8 +1537,8 @@ export type RoundRobinConstructionConstructionType = typeof RoundRobinConstructi
 export const RoundRobinConstructionConstructionType = {
   TB_TB: 'TB_TB',
   TB_WALK: 'TB_WALK',
+  XBH_H_R_RBI: 'XBH_H_R_RBI',
   XBH_WALK: 'XBH_WALK',
-  HR_HR: 'HR_HR',
 } as const;
 
 export type RoundRobinConstructionSide = typeof RoundRobinConstructionSide[keyof typeof RoundRobinConstructionSide];
@@ -1539,6 +1548,8 @@ export const RoundRobinConstructionSide = {
   AWAY: 'AWAY',
   HOME: 'HOME',
 } as const;
+
+export type RoundRobinConstructionLegCasesItem = { [key: string]: unknown };
 
 export interface RoundRobinConstruction {
   constructionType: RoundRobinConstructionConstructionType;
@@ -1552,6 +1563,13 @@ export interface RoundRobinConstruction {
   stateTotal: number;
   rankTotal: number;
   evidenceSummary: string;
+  legCases: RoundRobinConstructionLegCasesItem[];
+  sharedMechanism: string;
+  /** @nullable */
+  geometry: string | null;
+  /** @nullable */
+  runnerUpComparison: string | null;
+  rejectedAlternatives: string[];
 }
 
 export type RoundRobinSideComparisonSide = typeof RoundRobinSideComparisonSide[keyof typeof RoundRobinSideComparisonSide];
@@ -1568,25 +1586,8 @@ export type RoundRobinSideComparisonConsideredConstructionTypesItem = typeof Rou
 export const RoundRobinSideComparisonConsideredConstructionTypesItem = {
   TB_TB: 'TB_TB',
   TB_WALK: 'TB_WALK',
+  XBH_H_R_RBI: 'XBH_H_R_RBI',
   XBH_WALK: 'XBH_WALK',
-  HR_HR: 'HR_HR',
-} as const;
-
-/**
- * The safety prerequisite that prevents this side from forming a construction, when applicable.
- */
-export type RoundRobinSideComparisonAvailabilityStatus = typeof RoundRobinSideComparisonAvailabilityStatus[keyof typeof RoundRobinSideComparisonAvailabilityStatus];
-
-
-export const RoundRobinSideComparisonAvailabilityStatus = {
-  AVAILABLE: 'AVAILABLE',
-  NO_LINEUP: 'NO_LINEUP',
-  UNRESOLVED_IDENTITY: 'UNRESOLVED_IDENTITY',
-  MISSING_STARTER: 'MISSING_STARTER',
-  STALE_OR_INCOMPLETE_RESEARCH: 'STALE_OR_INCOMPLETE_RESEARCH',
-  NO_MARKET_CANDIDATES: 'NO_MARKET_CANDIDATES',
-  NO_LEGAL_CONSTRUCTION: 'NO_LEGAL_CONSTRUCTION',
-  UNSUPPORTED_BOARD: 'UNSUPPORTED_BOARD',
 } as const;
 
 export interface RoundRobinSideComparison {
@@ -1598,15 +1599,13 @@ export interface RoundRobinSideComparison {
   evaluatedIneligibleHitters: number;
   consideredConstructionTypes: RoundRobinSideComparisonConsideredConstructionTypesItem[];
   bestConstruction: RoundRobinConstruction | null;
-  /** The safety prerequisite that prevents this side from forming a construction, when applicable. */
-  availabilityStatus: RoundRobinSideComparisonAvailabilityStatus;
-  /**
-     * Source-backed lineup, starter, identity, or research-readiness detail for the side's availability state.
-     * @nullable
-     */
+  availabilityStatus: string;
+  /** @nullable */
   availabilityDetail: string | null;
   /** @nullable */
   unavailableReason: string | null;
+  noPairCauses: string[];
+  rejectedAlternatives: string[];
 }
 
 /**
@@ -1620,9 +1619,6 @@ export const RoundRobinGameComparisonSelectedSide = {
   HOME: 'HOME',
 } as const;
 
-/**
- * Distinguishes an unavailable game from an exact source-backed comparison tie.
- */
 export type RoundRobinGameComparisonComparisonStatus = typeof RoundRobinGameComparisonComparisonStatus[keyof typeof RoundRobinGameComparisonComparisonStatus];
 
 
@@ -1639,9 +1635,13 @@ export interface RoundRobinGameComparison {
   /** @nullable */
   selectedSide: RoundRobinGameComparisonSelectedSide;
   selectedConstruction: RoundRobinConstruction | null;
-  /** Distinguishes an unavailable game from an exact source-backed comparison tie. */
   comparisonStatus: RoundRobinGameComparisonComparisonStatus;
   comparisonReason: string;
+  lineupState: string;
+  lineupSource: string;
+  starterState: string;
+  evidenceGaps: string[];
+  noPairCauses: string[];
 }
 
 export type RoundRobinComparisonBoard = typeof RoundRobinComparisonBoard[keyof typeof RoundRobinComparisonBoard];
@@ -3078,4 +3078,3 @@ team?: string;
 export type RefreshBullpenParams = {
 date?: string;
 };
-

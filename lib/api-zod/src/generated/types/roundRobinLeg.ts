@@ -14,6 +14,8 @@ import type { RoundRobinLegMarket } from './roundRobinLegMarket';
 import type { RoundRobinLegOpportunityEvidence } from './roundRobinLegOpportunityEvidence';
 import type { RoundRobinLegParkEvidence } from './roundRobinLegParkEvidence';
 import type { RoundRobinLegResearchState } from './roundRobinLegResearchState';
+import type { RoundRobinLegSampleDenominators } from './roundRobinLegSampleDenominators';
+import type { RoundRobinLegSourceLineage } from './roundRobinLegSourceLineage';
 import type { RoundRobinLegStarterMatchupEvidence } from './roundRobinLegStarterMatchupEvidence';
 
 /**
@@ -39,6 +41,8 @@ export interface RoundRobinLeg {
   bullpenPathEvidence: RoundRobinLegBullpenPathEvidence;
   parkEvidence: RoundRobinLegParkEvidence;
   counterEvidence: RoundRobinLegCounterEvidence;
+  sourceLineage: RoundRobinLegSourceLineage;
+  sampleDenominators: RoundRobinLegSampleDenominators;
   selectable: boolean;
   /** @nullable */
   selectionBlockReason: string | null;

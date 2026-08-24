@@ -2528,7 +2528,7 @@ components:
         gamePk: { type: integer }
         playerId: { type: integer }
         playerName: { type: string }
-        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        market: { type: string, enum: [TB, XBH, WALK, HR, H_R_RBI] }
         researchRank: { type: ["integer", "null"] }
         researchState: { type: string, enum: [STRONG, POSITIVE, NEUTRAL, NEGATIVE, BLOCKED] }
         primaryMechanism: { type: ["string", "null"] }
@@ -2588,10 +2588,10 @@ components:
         candidateId: { type: string }
         playerId: { type: integer }
         playerName: { type: string }
-        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        market: { type: string, enum: [TB, XBH, WALK, HR, H_R_RBI] }
         researchRank: { type: ["integer", "null"] }
         researchState: { type: string, enum: [STRONG, POSITIVE, NEUTRAL, NEGATIVE, BLOCKED] }
-        lineupState: { type: string, enum: [POSTED, PROJECTED, UNKNOWN] }
+        lineupState: { type: string, enum: [POSTED, CONFIRMED, PROJECTED, UNKNOWN] }
         starterState: { type: string }
         bvpEvidence: { anyOf: [{ $ref: "#/components/schemas/BatterPitcherEvidence" }, { type: "null" }] }
         arsenalStatus: { type: string }
@@ -2602,20 +2602,27 @@ components:
         bullpenPathEvidence: { type: object }
         parkEvidence: { type: object }
         counterEvidence: { type: object }
+        sourceLineage: { type: object, additionalProperties: true }
+        sampleDenominators: { type: object, additionalProperties: true }
         selectable: { type: boolean }
         selectionBlockReason: { type: ["string", "null"] }
-      required: [candidateId, playerId, playerName, market, researchRank, researchState, lineupState, starterState, bvpEvidence, arsenalStatus, evidenceFreshness, primaryMechanism, opportunityEvidence, starterMatchupEvidence, bullpenPathEvidence, parkEvidence, counterEvidence, selectable, selectionBlockReason]
+      required: [candidateId, playerId, playerName, market, researchRank, researchState, lineupState, starterState, bvpEvidence, arsenalStatus, evidenceFreshness, primaryMechanism, opportunityEvidence, starterMatchupEvidence, bullpenPathEvidence, parkEvidence, counterEvidence, sourceLineage, sampleDenominators, selectable, selectionBlockReason]
     RoundRobinConstruction:
       type: object
       properties:
-        constructionType: { type: string, enum: [TB_TB, TB_WALK, XBH_WALK, HR_HR] }
+        constructionType: { type: string, enum: [TB_TB, TB_WALK, XBH_H_R_RBI, XBH_WALK] }
         constructionLabel: { type: string }
         side: { type: string, enum: [AWAY, HOME] }
         legs: { type: array, items: { $ref: "#/components/schemas/RoundRobinLeg" }, minItems: 2, maxItems: 2 }
         stateTotal: { type: integer }
         rankTotal: { type: integer }
         evidenceSummary: { type: string }
-      required: [constructionType, constructionLabel, side, legs, stateTotal, rankTotal, evidenceSummary]
+        legCases: { type: array, items: { type: object, additionalProperties: true } }
+        sharedMechanism: { type: string }
+        geometry: { type: ["string", "null"] }
+        runnerUpComparison: { type: ["string", "null"] }
+        rejectedAlternatives: { type: array, items: { type: string } }
+      required: [constructionType, constructionLabel, side, legs, stateTotal, rankTotal, evidenceSummary, legCases, sharedMechanism, geometry, runnerUpComparison, rejectedAlternatives]
     RoundRobinSideComparison:
       type: object
       properties:
@@ -2625,17 +2632,14 @@ components:
         evaluatedIneligibleHitters: { type: integer, minimum: 0 }
         consideredConstructionTypes:
           type: array
-          items: { type: string, enum: [TB_TB, TB_WALK, XBH_WALK, HR_HR] }
+          items: { type: string, enum: [TB_TB, TB_WALK, XBH_H_R_RBI, XBH_WALK] }
         bestConstruction: { anyOf: [{ $ref: "#/components/schemas/RoundRobinConstruction" }, { type: "null" }] }
-        availabilityStatus:
-          type: string
-          enum: [AVAILABLE, NO_LINEUP, UNRESOLVED_IDENTITY, MISSING_STARTER, STALE_OR_INCOMPLETE_RESEARCH, NO_MARKET_CANDIDATES, NO_LEGAL_CONSTRUCTION, UNSUPPORTED_BOARD]
-          description: The safety prerequisite that prevents this side from forming a construction, when applicable.
-        availabilityDetail:
-          type: ["string", "null"]
-          description: Source-backed lineup, starter, identity, or research-readiness detail for the side's availability state.
+        availabilityStatus: { type: string }
+        availabilityDetail: { type: ["string", "null"] }
         unavailableReason: { type: ["string", "null"] }
-      required: [side, team, evaluatedEligibleHitters, evaluatedIneligibleHitters, consideredConstructionTypes, bestConstruction, availabilityStatus, availabilityDetail, unavailableReason]
+        noPairCauses: { type: array, items: { type: string } }
+        rejectedAlternatives: { type: array, items: { type: string } }
+      required: [side, team, evaluatedEligibleHitters, evaluatedIneligibleHitters, consideredConstructionTypes, bestConstruction, availabilityStatus, availabilityDetail, unavailableReason, noPairCauses, rejectedAlternatives]
     RoundRobinGameComparison:
       type: object
       properties:
@@ -2644,12 +2648,14 @@ components:
         home: { $ref: "#/components/schemas/RoundRobinSideComparison" }
         selectedSide: { type: ["string", "null"], enum: [AWAY, HOME, null] }
         selectedConstruction: { anyOf: [{ $ref: "#/components/schemas/RoundRobinConstruction" }, { type: "null" }] }
-        comparisonStatus:
-          type: string
-          enum: [SELECTED, NO_COMPARISON, VALID_TIE]
-          description: Distinguishes an unavailable game from an exact source-backed comparison tie.
+        comparisonStatus: { type: string, enum: [SELECTED, NO_COMPARISON, VALID_TIE] }
         comparisonReason: { type: string }
-      required: [gamePk, away, home, selectedSide, selectedConstruction, comparisonStatus, comparisonReason]
+        lineupState: { type: string }
+        lineupSource: { type: string }
+        starterState: { type: string }
+        evidenceGaps: { type: array, items: { type: string } }
+        noPairCauses: { type: array, items: { type: string } }
+      required: [gamePk, away, home, selectedSide, selectedConstruction, comparisonStatus, comparisonReason, lineupState, lineupSource, starterState, evidenceGaps, noPairCauses]
     RoundRobinComparison:
       type: object
       description: Both teams are evaluated before a game construction is selected. It contains no odds, prices, EV, CLV, vig, or probabilities.
@@ -3239,4 +3245,3 @@ components:
         events: { type: array, items: { $ref: "#/components/schemas/AuditEvent" } }
         total: { type: integer }
       required: [events, total]
-

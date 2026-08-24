@@ -12,6 +12,6 @@ export type RoundRobinConstructionConstructionType = typeof RoundRobinConstructi
 export const RoundRobinConstructionConstructionType = {
   TB_TB: 'TB_TB',
   TB_WALK: 'TB_WALK',
+  XBH_H_R_RBI: 'XBH_H_R_RBI',
   XBH_WALK: 'XBH_WALK',
-  HR_HR: 'HR_HR',
 } as const;

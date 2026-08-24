@@ -1002,12 +1002,14 @@ const MARKET_SHORTCODE_TO_DB: Record<string, string> = {
   XBH: "EXTRA_BASE_HIT",
   WALK: "BATTER_WALK",
   HR: "HOME_RUN",
+  H_R_RBI: "HITS_RUNS_RBI_2_PLUS",
 };
 const MARKET_DB_TO_SHORTCODE: Record<string, string> = {
   TOTAL_BASES_2_PLUS: "TB",
   EXTRA_BASE_HIT: "XBH",
   BATTER_WALK: "WALK",
   HOME_RUN: "HR",
+  HITS_RUNS_RBI_2_PLUS: "H_R_RBI",
 };
 
 const RANK_DONT_GATE_SEMANTICS =
@@ -1064,20 +1066,28 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
       research_rank: number | null; research_state: "STRONG" | "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "BLOCKED";
       primary_mechanism: string | null; opportunity_evidence: Record<string, unknown>; starter_matchup_evidence: Record<string, unknown>;
       bullpen_path_evidence: Record<string, unknown>; park_evidence: Record<string, unknown>; counter_evidence: Record<string, unknown>;
-      missing_stale_evidence: string | null; identity_resolved: boolean; side: "AWAY" | "HOME"; team: string; lineup_state: "POSTED" | "PROJECTED";
+       missing_stale_evidence: string | null; identity_resolved: boolean; side: "AWAY" | "HOME"; team: string;
+       lineup_state: "POSTED" | "CONFIRMED" | "PROJECTED"; lineup_source: string;
     }>(
       `WITH latest_lineup AS (
          SELECT DISTINCT ON (ls.game_pk, ls.team_id)
-           ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state
+            ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state, ls.source_id
          FROM lineup_snapshots ls
          JOIN games g ON g.game_pk = ls.game_pk
-         WHERE g.game_date = $1 AND ls.state IN ('POSTED', 'PROJECTED')
-         ORDER BY ls.game_pk, ls.team_id, (ls.state = 'POSTED') DESC, ls.observed_at DESC
+         WHERE g.game_date = $1
+           AND ls.source_id = 'FANTASYPROS'
+           AND ls.state IN ('CONFIRMED', 'PROJECTED')
+         ORDER BY ls.game_pk, ls.team_id,
+           CASE
+             WHEN ls.state = 'CONFIRMED' THEN 1
+             ELSE 2
+           END,
+           ls.observed_at DESC
        )
        SELECT mrc.candidate_id, mrc.game_pk::bigint, mrc.player_id, COALESCE(p.full_name, 'Unknown') AS player_name,
               mrc.market, mrc.research_rank, mrc.research_state, mrc.primary_mechanism,
               mrc.opportunity_evidence, mrc.starter_matchup_evidence, mrc.bullpen_path_evidence,
-              mrc.park_evidence, mrc.counter_evidence, mrc.missing_stale_evidence, ll.state AS lineup_state,
+               mrc.park_evidence, mrc.counter_evidence, mrc.missing_stale_evidence, ll.state AS lineup_state, ll.source_id AS lineup_source,
               CASE WHEN ll.team_id = g.away_team_id THEN 'AWAY' ELSE 'HOME' END AS side,
               CASE WHEN ll.team_id = g.away_team_id THEN away.abbreviation ELSE home.abbreviation END AS team,
               NOT EXISTS (
@@ -1117,7 +1127,7 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
         ? "BLOCKED"
         : baseEligibility.selectionBlockReason;
       const selectable = operationallyUsable && starterResolved && baseEligibility.selectable;
-      const bvpEvidence = starterId
+      const bvpEvidence = starterId && MARKET_DB_TO_SHORTCODE[row.market] !== "H_R_RBI"
         ? await getBatterPitcherEvidence(row.player_id, starterId, date, MARKET_DB_TO_SHORTCODE[row.market] as BvpMarket)
         : null;
       const evidenceFreshness = row.missing_stale_evidence
@@ -1148,14 +1158,20 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
         bullpenPathEvidence: stripProhibitedKeys(row.bullpen_path_evidence ?? {}) as Record<string, unknown>,
         parkEvidence: stripProhibitedKeys(row.park_evidence ?? {}) as Record<string, unknown>,
         counterEvidence: stripProhibitedKeys(row.counter_evidence ?? {}) as Record<string, unknown>,
+        sourceLineage: { lineupSource: row.lineup_source, lineupState: row.lineup_state, starterSource: "MLB_OFFICIAL" },
+        sampleDenominators: {
+          starter: (row.starter_matchup_evidence ?? {}).sampleSize ?? null,
+          bullpen: (row.bullpen_path_evidence ?? {}).sampleSize ?? null,
+          park: (row.park_evidence ?? {}).sampleSize ?? null,
+        },
       } satisfies RoundRobinCandidate;
     }));
 
     const gameMetadata = await pool.query<{
       game_pk: number; away: string; home: string;
-      away_lineup_state: "POSTED" | "PROJECTED" | null; away_lineup_source: string | null;
+      away_lineup_state: "POSTED" | "CONFIRMED" | "PROJECTED" | null; away_lineup_source: string | null;
       away_lineup_observed_at: string | null; away_lineup_hitters: number;
-      home_lineup_state: "POSTED" | "PROJECTED" | null; home_lineup_source: string | null;
+      home_lineup_state: "POSTED" | "CONFIRMED" | "PROJECTED" | null; home_lineup_source: string | null;
       home_lineup_observed_at: string | null; home_lineup_hitters: number;
     }>(
       `WITH latest_lineup AS (
@@ -1163,8 +1179,15 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
            ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state, ls.source_id, ls.observed_at
          FROM lineup_snapshots ls
          JOIN games g ON g.game_pk = ls.game_pk
-         WHERE g.game_date = $1 AND ls.state IN ('POSTED', 'PROJECTED')
-         ORDER BY ls.game_pk, ls.team_id, (ls.state = 'POSTED') DESC, ls.observed_at DESC
+         WHERE g.game_date = $1
+           AND ls.source_id = 'FANTASYPROS'
+           AND ls.state IN ('CONFIRMED', 'PROJECTED')
+         ORDER BY ls.game_pk, ls.team_id,
+           CASE
+             WHEN ls.state = 'CONFIRMED' THEN 1
+             ELSE 2
+           END,
+           ls.observed_at DESC
        ),
        lineup_hitter_counts AS (
          SELECT lineup_snapshot_id, count(*)::int AS hitter_count
@@ -1195,12 +1218,6 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
       gameCandidates.push(candidate);
       byGame.set(candidate.gamePk, gameCandidates);
     }
-    const researchContext = {
-      usable: operationallyUsable,
-      readinessStatus: health.readiness.status,
-      readinessReason: operationallyUsable ? null : health.readiness.reason,
-      observedAt: String(health.readiness.observedAt),
-    };
     const games = gameMetadata.rows.map((game) => compareRoundRobinGame(
       board as RoundRobinBoardId,
       Number(game.game_pk),
@@ -1208,26 +1225,13 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
       game.home,
       byGame.get(Number(game.game_pk)) ?? [],
       {
-        AWAY: {
-          lineup: {
-            present: Boolean(game.away_lineup_state && game.away_lineup_hitters > 0),
-            state: game.away_lineup_state ?? "UNKNOWN",
-            source: game.away_lineup_source,
-            observedAt: game.away_lineup_observed_at,
-            hitterCount: game.away_lineup_hitters,
-          },
-          research: researchContext,
-        },
-        HOME: {
-          lineup: {
-            present: Boolean(game.home_lineup_state && game.home_lineup_hitters > 0),
-            state: game.home_lineup_state ?? "UNKNOWN",
-            source: game.home_lineup_source,
-            observedAt: game.home_lineup_observed_at,
-            hitterCount: game.home_lineup_hitters,
-          },
-          research: researchContext,
-        },
+        lineupState: `${game.away_lineup_state ?? "UNKNOWN"},${game.home_lineup_state ?? "UNKNOWN"}`,
+        lineupSource: `${game.away_lineup_source ?? "MISSING"},${game.home_lineup_source ?? "MISSING"}`,
+        starterState: "MLB_OFFICIAL_CONTEXT",
+        evidenceGaps: [
+          !game.away_lineup_state || !game.home_lineup_state ? "Missing selected lineup snapshot for one or both teams" : null,
+          !operationallyUsable ? (health.readiness.reason ?? "Research readiness is unavailable") : null,
+        ].filter((gap): gap is string => Boolean(gap)),
       },
     ));
     res.json(GetAnalystRoundRobinComparisonResponse.parse({
@@ -1334,7 +1338,7 @@ router.get("/analyst/market-research", async (req, res, next) => {
       const starterId = typeof row.starter_matchup_evidence?.starterPlayerId === "number"
         ? row.starter_matchup_evidence.starterPlayerId
         : null;
-      const bvpEvidence = starterId
+      const bvpEvidence = starterId && MARKET_DB_TO_SHORTCODE[row.market] !== "H_R_RBI"
         ? await getBatterPitcherEvidence(row.player_id, starterId, date, MARKET_DB_TO_SHORTCODE[row.market] as BvpMarket)
         : null;
       return {

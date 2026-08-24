@@ -191,6 +191,13 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // H+R+RBI is a Round Robin research-only market. It has no daily-board
+    // model contract and must never be materialized alongside settled markets.
+    await client.query(
+      `DELETE FROM daily_market_board
+        WHERE slate_date = $1 AND market = 'HITS_RUNS_RBI_2_PLUS'`,
+      [slateDate],
+    );
     const candidates = await client.query<{
     game_pk: number;
     player_id: number;
@@ -219,6 +226,7 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
           LIMIT 1
        ) pfs ON true
       WHERE mrc.slate_date = $1
+        AND mrc.market <> 'HITS_RUNS_RBI_2_PLUS'
         AND ($2::market_type IS NULL OR mrc.market = $2::market_type)
         AND mrc.research_state <> 'BLOCKED'
       ORDER BY mrc.market, mrc.research_rank ASC NULLS LAST, mrc.player_id`,

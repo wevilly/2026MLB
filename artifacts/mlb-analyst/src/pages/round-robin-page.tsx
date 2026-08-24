@@ -11,7 +11,7 @@ import { AlertTriangle, CalendarDays, Info, Layers, Plus, RefreshCw, Search, X }
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge, Kicker, LoadingPanel, Panel, QueryMessage, ReadinessStrip, SectionHeading, toneFor } from '../App';
 
-type ResearchMarket = Extract<MarketResearchCandidate['market'], 'TB' | 'XBH' | 'WALK' | 'HR'>;
+type ResearchMarket = Extract<MarketResearchCandidate['market'], 'TB' | 'XBH' | 'WALK' | 'HR' | 'H_R_RBI'>;
 type BoardId = 'rr1' | 'rr2' | 'rr3' | 'rr4' | 'rr5';
 type CombinationSize = 2 | 3 | 4;
 
@@ -40,9 +40,8 @@ const BOARDS: BoardConfig[] = [
   {
     id: 'rr3',
     label: 'RR3 · XBH + H+R+RBI',
-    description: '1+ Extra Base Hit is available when researched. The H+R+RBI companion remains inactive until its evidence contract ships.',
-    activeMarkets: ['XBH'],
-    unavailableMarket: '2+ H+R+RBI',
+    description: '1+ Extra Base Hit + 2+ H+R+RBI. Both legs require current, source-backed research for the same team.',
+    activeMarkets: ['XBH', 'H_R_RBI'],
   },
   {
     id: 'rr4',
@@ -54,8 +53,8 @@ const BOARDS: BoardConfig[] = [
   {
     id: 'rr5',
     label: 'RR5 · All / General',
-    description: 'Extensible research shell. Only markets with usable current research rows are selectable.',
-    activeMarkets: ['TB', 'XBH', 'WALK', 'HR'],
+    description: 'Chooses the strongest legal same-team construction from RR1 through RR4; no additional pair type is introduced.',
+    activeMarkets: ['TB', 'XBH', 'WALK', 'H_R_RBI'],
   },
 ];
 
@@ -63,6 +62,7 @@ const MARKET_LABELS: Record<ResearchMarket, string> = {
   TB: '2+ Total Bases',
   XBH: '1+ Extra Base Hit',
   WALK: '1+ Batter Walk',
+  H_R_RBI: '2+ H+R+RBI',
   HR: '1+ Home Run',
 };
 
@@ -142,15 +142,21 @@ function SideConstruction({ side, selected }: { side: RoundRobinSideComparison; 
                 <small>
                   Opportunity: {evidenceKeys(leg.opportunityEvidence)} · bullpen: {evidenceKeys(leg.bullpenPathEvidence)} · park: {evidenceKeys(leg.parkEvidence)} · counter: {evidenceKeys(leg.counterEvidence)}
                 </small>
+                <small>Lineage: {Object.entries(leg.sourceLineage).map(([key, value]) => `${key}=${String(value)}`).join(' · ')} · samples: {Object.entries(leg.sampleDenominators).map(([key, value]) => `${key}=${String(value ?? 'not found')}`).join(' · ')}</small>
+                {construction.legCases.filter((item) => item.candidateId === leg.candidateId).map((item) => (
+                  <small key={String(item.candidateId)}>Case: {String(item.caseFor)} {String(item.counterCase)} {String(item.missingOrStale)}</small>
+                ))}
               </li>
             ))}
           </ol>
           <p className="round-robin-comparison-summary">{construction.evidenceSummary}</p>
+          <p className="round-robin-comparison-summary">{construction.sharedMechanism}{construction.geometry ? ` · ${construction.geometry}` : ''}</p>
+          {!!construction.rejectedAlternatives.length && <p className="round-robin-comparison-summary">Rejected alternatives: {construction.rejectedAlternatives.join(' · ')}</p>}
         </>
       ) : (
         <div className="round-robin-missing" data-testid={`round-robin-availability-${side.side.toLowerCase()}`}>
           <strong>{side.availabilityStatus.replaceAll("_", " ")}</strong>
-          <p>{side.availabilityDetail ?? side.unavailableReason}</p>
+          <p>{side.availabilityDetail ?? side.unavailableReason} {side.noPairCauses.join(' · ')}</p>
         </div>
       )}
     </article>
@@ -372,7 +378,7 @@ export default function RoundRobinPage() {
                       <div><Kicker>Game {game.gamePk}</Kicker><h3>{game.away.team} @ {game.home.team}</h3></div>
                       {game.selectedConstruction
                         ? <Badge tone="good">{game.selectedSide} selected · {game.selectedConstruction.constructionLabel}</Badge>
-                        : <Badge tone="warn">{game.comparisonStatus === "VALID_TIE" ? "Valid comparison tie" : "No selected side"}</Badge>}
+                        : <Badge tone="warn">No selected side</Badge>}
                     </header>
                     <div className="round-robin-side-grid">
                       <SideConstruction side={game.away} selected={game.selectedSide === 'AWAY'} />

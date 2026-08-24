@@ -37,6 +37,16 @@ test("BvP sample bands and ranking guardrails keep named history subordinate", (
   assert.ok(service.includes("Math.exp(-ageDays / 730)"), "old named history must decay instead of receiving full weight");
 });
 
+test("BvP slate refresh uses FantasyPros pregame lineups even when a newer official lineup exists", () => {
+  const service = read("artifacts/api-server/src/services/batter-pitcher-research.ts");
+  const selector = service.match(/WITH latest_lineup AS \([\s\S]*?\n\s*\), latest_starter/)?.[0] ?? "";
+  assert.ok(selector.includes("ls.source_id = 'FANTASYPROS'"));
+  assert.ok(selector.includes("ls.state IN ('CONFIRMED', 'PROJECTED')"));
+  assert.ok(selector.includes("CASE WHEN ls.state = 'CONFIRMED' THEN 1 ELSE 2 END"));
+  assert.ok(!selector.includes("POSTED"), "official posted lineups must not enter BvP pregame pairs even if newer");
+  assert.ok(!selector.includes("MLB_OFFICIAL"), "BvP pregame lineup selection must not use MLB source rows");
+});
+
 test("market engines and Round Robin expose BvP only as bounded research context", () => {
   for (const [file, market] of [
     ["tb-engine.ts", "TB"], ["xbh-engine.ts", "XBH"], ["walk-engine.ts", "WALK"], ["hr-engine.ts", "HR"],

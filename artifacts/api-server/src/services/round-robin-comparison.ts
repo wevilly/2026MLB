@@ -1,16 +1,22 @@
 export type RoundRobinBoardId = "RR1" | "RR2" | "RR3" | "RR4" | "RR5";
 export type RoundRobinSide = "AWAY" | "HOME";
-export type RoundRobinMarket = "TB" | "XBH" | "WALK" | "HR";
+export type RoundRobinMarket = "TB" | "XBH" | "WALK" | "HR" | "H_R_RBI";
 
+export type RoundRobinNoPairCause =
+  | "MISSING_FANTASYPROS_LINEUP"
+  | "MISSING_MARKET_CANDIDATES"
+  | "STARTER_UNCERTAINTY"
+  | "STALE_OR_INCOMPLETE_RESEARCH"
+  | "IDENTITY_CONFLICT"
+  | "NO_LEGAL_SAME_TEAM_PAIR"
+  | "EXACT_TIE";
 export type RoundRobinAvailabilityStatus =
   | "AVAILABLE"
-  | "NO_LINEUP"
-  | "UNRESOLVED_IDENTITY"
+  | "NO_MARKET_CANDIDATES"
   | "MISSING_STARTER"
   | "STALE_OR_INCOMPLETE_RESEARCH"
-  | "NO_MARKET_CANDIDATES"
-  | "NO_LEGAL_CONSTRUCTION"
-  | "UNSUPPORTED_BOARD";
+  | "UNRESOLVED_IDENTITY"
+  | "NO_LEGAL_CONSTRUCTION";
 export type RoundRobinCandidate = {
   candidateId: string;
   gamePk: number;
@@ -23,29 +29,41 @@ export type RoundRobinCandidate = {
   team: string;
   selectable: boolean;
   selectionBlockReason: string | null;
-  lineupState: "POSTED" | "PROJECTED" | "UNKNOWN";
+  lineupState: "POSTED" | "CONFIRMED" | "PROJECTED" | "UNKNOWN";
   starterState: string;
   bvpStatus: string;
   bvpEvidence: unknown | null;
   arsenalStatus: string;
   evidenceFreshness: "CURRENT" | "STALE" | "INCOMPLETE";
-  evidenceFreshnessDetail: string | null;
+  evidenceFreshnessDetail?: string | null;
   primaryMechanism: string | null;
   opportunityEvidence: Record<string, unknown>;
   starterMatchupEvidence: Record<string, unknown>;
   bullpenPathEvidence: Record<string, unknown>;
   parkEvidence: Record<string, unknown>;
   counterEvidence: Record<string, unknown>;
+  sourceLineage?: Record<string, unknown>;
+  sampleDenominators?: Record<string, unknown>;
 };
 
 export type RoundRobinConstruction = {
-  constructionType: "TB_TB" | "TB_WALK" | "XBH_WALK" | "HR_HR";
+  constructionType: "TB_TB" | "TB_WALK" | "XBH_H_R_RBI" | "XBH_WALK";
   constructionLabel: string;
   side: RoundRobinSide;
   legs: RoundRobinCandidate[];
   stateTotal: number;
   rankTotal: number;
   evidenceSummary: string;
+  legCases: Array<{
+    candidateId: string;
+    caseFor: string;
+    counterCase: string;
+    missingOrStale: string;
+  }>;
+  sharedMechanism: string;
+  geometry: string | null;
+  runnerUpComparison: string | null;
+  rejectedAlternatives: string[];
 };
 
 export type RoundRobinSideComparison = {
@@ -58,6 +76,8 @@ export type RoundRobinSideComparison = {
   availabilityStatus: RoundRobinAvailabilityStatus;
   availabilityDetail: string | null;
   unavailableReason: string | null;
+  noPairCauses: RoundRobinNoPairCause[];
+  rejectedAlternatives: string[];
 };
 
 export type RoundRobinGameComparison = {
@@ -66,10 +86,21 @@ export type RoundRobinGameComparison = {
   home: RoundRobinSideComparison;
   selectedSide: RoundRobinSide | null;
   selectedConstruction: RoundRobinConstruction | null;
-  comparisonStatus: RoundRobinComparisonStatus;
+  comparisonStatus: "SELECTED" | "NO_COMPARISON" | "VALID_TIE";
   comparisonReason: string;
+  lineupState: string;
+  lineupSource: string;
+  starterState: string;
+  evidenceGaps: string[];
+  noPairCauses: RoundRobinNoPairCause[];
 };
 
+export type RoundRobinGameContext = {
+  lineupState?: string;
+  lineupSource?: string;
+  starterState?: string;
+  evidenceGaps?: string[];
+};
 const STATE_WEIGHT: Record<RoundRobinCandidate["researchState"], number> = {
   STRONG: 4,
   POSITIVE: 3,
@@ -143,10 +174,31 @@ function pair(
   const legs = [first, second].sort(compareCandidate);
   const stateTotal = legs.reduce((total, leg) => total + STATE_WEIGHT[leg.researchState], 0);
   const rankTotal = legs.reduce((total, leg) => total + (leg.researchRank ?? 10_000), 0);
-  const posted = legs.every((leg) => leg.lineupState === "POSTED");
+  const lineupEvidence = legs.every((leg) => leg.lineupState === "CONFIRMED")
+    ? "FantasyPros confirmed lineups"
+    : legs.every((leg) => leg.lineupState === "PROJECTED")
+      ? "FantasyPros projected lineups"
+      : "FantasyPros mixed confirmed/projected lineups";
   const confirmedStarter = legs.every((leg) => leg.starterState === "CONFIRMED");
   const arsenalAvailable = legs.filter((leg) => leg.arsenalStatus === "AVAILABLE").length;
   const bvpAvailable = legs.filter((leg) => leg.bvpStatus === "AVAILABLE").length;
+  const mechanismNames = legs.map((leg) => leg.primaryMechanism).filter(Boolean);
+  const sharedMechanism = mechanismNames.length === 2 && mechanismNames[0] === mechanismNames[1]
+    ? `Shared mechanism: ${mechanismNames[0]}`
+    : "Shared mechanism: complementary market evidence across both legs";
+  const legCases = legs.map((leg) => ({
+    candidateId: leg.candidateId,
+    caseFor: `${leg.playerName}: ${leg.primaryMechanism ?? "market-specific evidence"} with ordinal rank ${leg.researchRank ?? "unranked"}.`,
+    counterCase: Object.keys(leg.counterEvidence).length
+      ? `Counter-case: ${Object.keys(leg.counterEvidence).join(", ")}.`
+      : "Counter-case: none recorded.",
+    missingOrStale: leg.evidenceFreshness === "CURRENT"
+      ? "No stale evidence flag."
+      : `${leg.evidenceFreshness} evidence: ${leg.selectionBlockReason ?? "review required"}.`,
+  }));
+  const geometry = constructionType === "TB_TB" || constructionType === "XBH_H_R_RBI" || constructionType === "XBH_WALK"
+    ? "Same-team lineup geometry; two distinct player IDs."
+    : null;
   return {
     constructionType,
     constructionLabel,
@@ -154,26 +206,28 @@ function pair(
     legs,
     stateTotal,
     rankTotal,
-    evidenceSummary: `${posted ? "posted lineups" : "projected lineups"} · ${confirmedStarter ? "confirmed starters" : "starter context"} · 2/2 current bullpen role paths · ${arsenalAvailable}/2 arsenal comparisons · ${bvpAvailable}/2 named-pair contexts`,
+    evidenceSummary: `${lineupEvidence} · ${confirmedStarter ? "confirmed starters" : "starter context"} · ${arsenalAvailable}/2 arsenal comparisons · ${bvpAvailable}/2 named-pair contexts`,
+    legCases,
+    sharedMechanism,
+    geometry,
+    runnerUpComparison: null,
+    rejectedAlternatives: [],
   };
 }
 
 function compareConstruction(a: RoundRobinConstruction, b: RoundRobinConstruction) {
   if (a.stateTotal !== b.stateTotal) return b.stateTotal - a.stateTotal;
   if (a.rankTotal !== b.rankTotal) return a.rankTotal - b.rankTotal;
-  const freshnessA = a.legs.filter((leg) => leg.lineupState === "POSTED").length;
-  const freshnessB = b.legs.filter((leg) => leg.lineupState === "POSTED").length;
+  const lineupFreshness = (lineupState: string) =>
+    lineupState === "CONFIRMED" ? 2 : lineupState === "PROJECTED" ? 1 : 0;
+  const freshnessA = a.legs.reduce((total, leg) => total + lineupFreshness(leg.lineupState), 0);
+  const freshnessB = b.legs.reduce((total, leg) => total + lineupFreshness(leg.lineupState), 0);
   if (freshnessA !== freshnessB) return freshnessB - freshnessA;
   return 0;
 }
 
-function compareConstructionWithinSide(a: RoundRobinConstruction, b: RoundRobinConstruction) {
-  const comparison = compareConstruction(a, b);
-  if (comparison) return comparison;
-  return a.constructionLabel.localeCompare(b.constructionLabel);
-}
 function best(pairs: RoundRobinConstruction[]) {
-  return pairs.sort(compareConstructionWithinSide)[0] ?? null;
+  return pairs.sort(compareConstruction)[0] ?? null;
 }
 
 function uniquePairs(
@@ -182,7 +236,6 @@ function uniquePairs(
   side: RoundRobinSide,
   constructionType: RoundRobinConstruction["constructionType"],
   constructionLabel: string,
-  requireSameTeam: boolean,
 ) {
   const output: RoundRobinConstruction[] = [];
   for (const first of left) {
@@ -191,7 +244,7 @@ function uniquePairs(
       // Same-market arrays are compared against themselves. Canonicalize before
       // evidence sorting so each unordered pair appears exactly once.
       if (left === right && first.candidateId >= second.candidateId) continue;
-      if (requireSameTeam && first.team !== second.team) continue;
+      if (first.team !== second.team) continue;
       output.push(pair(side, constructionType, constructionLabel, first, second));
     }
   }
@@ -200,47 +253,24 @@ function uniquePairs(
 
 function pairCandidates(board: RoundRobinBoardId, side: RoundRobinSide, eligible: RoundRobinCandidate[]) {
   const own = eligible.filter((candidate) => candidate.side === side);
-  const other = eligible.filter((candidate) => candidate.side !== side);
   const ownByMarket = (market: RoundRobinMarket) => own.filter((candidate) => candidate.market === market);
-  const allByMarket = (market: RoundRobinMarket) => eligible.filter((candidate) => candidate.market === market);
   const tb = ownByMarket("TB");
-  const allTb = allByMarket("TB");
-  const tbSame = uniquePairs(tb, tb, side, "TB_TB", "Same-team TB + TB", true);
-  const tbCross = uniquePairs(tb, allTb.filter((candidate) => candidate.side !== side), side, "TB_TB", "Cross-team TB + TB", false);
-  const tbWalk = uniquePairs(tb, ownByMarket("WALK"), side, "TB_WALK", "Same-team TB + Walk", true);
-  const xbhWalk = uniquePairs(ownByMarket("XBH"), ownByMarket("WALK"), side, "XBH_WALK", "Same-team XBH + Walk", true);
-  const hrHr = uniquePairs(ownByMarket("HR"), ownByMarket("HR"), side, "HR_HR", "Same-team HR + HR", true);
-  if (board === "RR1") return [...tbSame, ...tbCross];
+  const tbSame = uniquePairs(tb, tb, side, "TB_TB", "Same-team TB + TB");
+  const tbWalk = uniquePairs(tb, ownByMarket("WALK"), side, "TB_WALK", "Same-team TB + Walk");
+  const xbhHrrbi = uniquePairs(ownByMarket("XBH"), ownByMarket("H_R_RBI"), side, "XBH_H_R_RBI", "Same-team XBH + H+R+RBI");
+  const xbhWalk = uniquePairs(ownByMarket("XBH"), ownByMarket("WALK"), side, "XBH_WALK", "Same-team XBH + Walk");
+  if (board === "RR1") return tbSame;
   if (board === "RR2") return tbWalk;
-  if (board === "RR3") return [];
+  if (board === "RR3") return xbhHrrbi;
   if (board === "RR4") return xbhWalk;
-  return [...tbSame, ...tbCross, ...tbWalk, ...xbhWalk, ...hrHr];
+  return [...tbSame, ...tbWalk, ...xbhHrrbi, ...xbhWalk];
 }
 
-function countBy<T extends string>(values: T[]) {
-  return values.reduce<Record<string, number>>((counts, value) => {
-    counts[value] = (counts[value] ?? 0) + 1;
-    return counts;
-  }, {});
-}
-function bullpenSummary(issues: BullpenPathIssue[]) {
-  return [...new Set(issues.map((issue) =>
-    `${issue.status === "STALE" ? "Stale" : "Incomplete"} bullpen path: ${issue.reason}`,
-  ))].join(" ");
-}
-
-function sideResult(
-  board: RoundRobinBoardId,
-  side: RoundRobinSide,
-  team: string,
-  candidates: RoundRobinCandidate[],
-  suppliedContext?: RoundRobinSideContext,
-): RoundRobinSideComparison {
+function sideResult(board: RoundRobinBoardId, side: RoundRobinSide, team: string, candidates: RoundRobinCandidate[]): RoundRobinSideComparison {
   const own = candidates.filter((candidate) => candidate.side === side);
-  const context = suppliedContext ?? defaultContext(own);
   const ownBullpenIssues = own
-    .map((candidate) => bullpenPathIssue(candidate))
-    .filter((issue): issue is BullpenPathIssue => issue !== null);
+    .map((candidate) => ({ candidate, issue: bullpenPathIssue(candidate) }))
+    .filter((item): item is { candidate: RoundRobinCandidate; issue: BullpenPathIssue } => item.issue !== null);
   const eligible = candidates.filter((candidate) =>
     candidate.selectable
       && candidate.starterState !== "UNKNOWN"
@@ -249,7 +279,37 @@ function sideResult(
   );
   const constructions = pairCandidates(board, side, eligible);
   const bestConstruction = best(constructions);
-  const unavailable = bestConstruction ? null : unavailableDiagnostic(board, own, context, ownBullpenIssues);
+  const causes: RoundRobinNoPairCause[] = [];
+  if (!bestConstruction) {
+    if (!own.length) causes.push("MISSING_MARKET_CANDIDATES");
+    if (own.some((candidate) => ["UNKNOWN", "TBD"].includes(candidate.starterState))) causes.push("STARTER_UNCERTAINTY");
+    if (own.some((candidate) => candidate.selectionBlockReason === "STALE" || candidate.selectionBlockReason === "INCOMPLETE_EVIDENCE" || bullpenPathIssue(candidate) !== null)) {
+      causes.push("STALE_OR_INCOMPLETE_RESEARCH");
+    }
+    if (own.some((candidate) => candidate.selectionBlockReason === "UNRESOLVED_IDENTITY")) causes.push("IDENTITY_CONFLICT");
+    if (!causes.length) causes.push("NO_LEGAL_SAME_TEAM_PAIR");
+  }
+  const bullpenReason = ownBullpenIssues.length > 0
+    ? [...new Set(ownBullpenIssues.map((item) =>
+      `${item.issue.status === "STALE" ? "Stale" : "Incomplete"} bullpen path: ${item.issue.reason}`,
+    ))].join(" ")
+    : null;
+  const unavailableReason = !bestConstruction
+      ? own.length === 0
+        ? "No projected or posted hitters were found for this team."
+        : bullpenReason
+          ? `No complete legal pair remains because ${bullpenReason}`
+          : own.some((candidate) => candidate.evidenceFreshness !== "CURRENT" && candidate.evidenceFreshnessDetail)
+            ? `No complete legal pair remains because ${own.filter((candidate) => candidate.evidenceFreshness !== "CURRENT").map((candidate) => candidate.evidenceFreshnessDetail).filter(Boolean).join(" ")}`
+            : "No complete legal pair remains after identity, freshness, starter, and evidence safety gates."
+      : null;
+  const availabilityStatus: RoundRobinAvailabilityStatus = bestConstruction
+    ? "AVAILABLE"
+    : causes.includes("MISSING_MARKET_CANDIDATES") ? "NO_MARKET_CANDIDATES"
+      : causes.includes("STARTER_UNCERTAINTY") ? "MISSING_STARTER"
+        : causes.includes("IDENTITY_CONFLICT") ? "UNRESOLVED_IDENTITY"
+          : causes.includes("STALE_OR_INCOMPLETE_RESEARCH") ? "STALE_OR_INCOMPLETE_RESEARCH"
+            : "NO_LEGAL_CONSTRUCTION";
   return {
     side,
     team,
@@ -262,36 +322,23 @@ function sideResult(
     ).length,
     consideredConstructionTypes: [...new Set(constructions.map((construction) => construction.constructionType))],
     bestConstruction,
-    availabilityStatus: unavailable?.availabilityStatus ?? "AVAILABLE",
-    availabilityDetail: unavailable?.availabilityDetail ?? null,
-    unavailableReason: unavailable?.availabilityDetail ?? null,
+    availabilityStatus,
+    availabilityDetail: unavailableReason,
+    unavailableReason,
+    noPairCauses: causes,
+    rejectedAlternatives: constructions.slice(1).map((construction) => `${construction.constructionLabel}: retained as runner-up audit alternative.`),
   };
 }
 
 function decision(away: RoundRobinSideComparison, home: RoundRobinSideComparison) {
   if (!away.bestConstruction && !home.bestConstruction) {
-    return {
-      selectedSide: null,
-      selectedConstruction: null,
-      comparisonStatus: "NO_COMPARISON" as const,
-      comparisonReason: `Neither team has a legal construction. Away: ${away.availabilityDetail} Home: ${home.availabilityDetail}`,
-    };
+    return { selectedSide: null, selectedConstruction: null, comparisonStatus: "NO_COMPARISON" as const, comparisonReason: `No selected side. Away: ${away.unavailableReason} Home: ${home.unavailableReason}.` };
   }
   if (!away.bestConstruction) {
-    return {
-      selectedSide: "HOME" as const,
-      selectedConstruction: home.bestConstruction,
-      comparisonStatus: "SELECTED" as const,
-      comparisonReason: `Home wins because away is unavailable: ${away.availabilityDetail}`,
-    };
+    return { selectedSide: "HOME" as const, selectedConstruction: home.bestConstruction, comparisonStatus: "SELECTED" as const, comparisonReason: `Home wins because away is unavailable: ${away.unavailableReason}` };
   }
   if (!home.bestConstruction) {
-    return {
-      selectedSide: "AWAY" as const,
-      selectedConstruction: away.bestConstruction,
-      comparisonStatus: "SELECTED" as const,
-      comparisonReason: `Away wins because home is unavailable: ${home.availabilityDetail}`,
-    };
+    return { selectedSide: "AWAY" as const, selectedConstruction: away.bestConstruction, comparisonStatus: "SELECTED" as const, comparisonReason: `Away wins because home is unavailable: ${home.unavailableReason}` };
   }
   const order = compareConstruction(away.bestConstruction, home.bestConstruction);
   if (order === 0) {
@@ -299,7 +346,7 @@ function decision(away: RoundRobinSideComparison, home: RoundRobinSideComparison
       selectedSide: null,
       selectedConstruction: null,
       comparisonStatus: "VALID_TIE" as const,
-      comparisonReason: "Valid comparison tie: both sides have the same evidence tier, combined ordinal rank, and lineup freshness. No side is silently preferred.",
+      comparisonReason: "EXACT_TIE: both sides have the same evidence tier, combined ordinal rank, and lineup freshness. No side is silently preferred.",
     };
   }
   const winner = order < 0 ? away.bestConstruction : home.bestConstruction;
@@ -318,160 +365,23 @@ export function compareRoundRobinGame(
   awayTeam: string,
   homeTeam: string,
   candidates: RoundRobinCandidate[],
-  contexts?: Partial<Record<RoundRobinSide, RoundRobinSideContext>>,
+  context: RoundRobinGameContext = {},
 ): RoundRobinGameComparison {
-  const away = sideResult(board, "AWAY", awayTeam, candidates, contexts?.AWAY);
-  const home = sideResult(board, "HOME", homeTeam, candidates, contexts?.HOME);
+  const away = sideResult(board, "AWAY", awayTeam, candidates);
+  const home = sideResult(board, "HOME", homeTeam, candidates);
   const selected = decision(away, home);
-  return { gamePk, away, home, ...selected };
-}
-
-export type RoundRobinSideContext = {
-  lineup: {
-    present: boolean;
-    state: "POSTED" | "PROJECTED" | "UNKNOWN";
-    source: string | null;
-    observedAt: string | null;
-    hitterCount: number;
-  };
-  research: {
-    usable: boolean;
-    readinessStatus: string;
-    readinessReason: string | null;
-    observedAt: string | null;
-  };
-};
-
-function contextDetail(context: RoundRobinSideContext) {
-  const lineup = context.lineup;
-  const observed = lineup.observedAt ? ` observed ${lineup.observedAt}` : "";
-  const source = lineup.source ?? "not found";
-  return `Lineup ${lineup.state} from ${source}${observed}; ${lineup.hitterCount} mapped hitter${lineup.hitterCount === 1 ? "" : "s"}.`;
-}
-
-function blockSummary(candidates: RoundRobinCandidate[]) {
-  const counts = countBy(candidates
-    .filter((candidate) => !candidate.selectable || ["UNKNOWN", "TBD"].includes(candidate.starterState))
-    .map((candidate) => {
-      if (["UNKNOWN", "TBD"].includes(candidate.starterState)) return "missing or unknown starter";
-      if (candidate.selectionBlockReason === "UNRESOLVED_IDENTITY") return "unresolved identity";
-      if (candidate.selectionBlockReason === "STALE") return "stale research";
-      if (candidate.selectionBlockReason === "INCOMPLETE_EVIDENCE") return "incomplete research";
-      return candidate.selectionBlockReason?.replaceAll("_", " ").toLowerCase() ?? "safety-blocked research";
-    }));
-  const entries = Object.entries(counts).map(([reason, count]) => `${count} ${reason}`);
-  return entries.length ? ` Safety gates: ${entries.join("; ")}.` : "";
-}
-
-function freshnessDetail(candidates: RoundRobinCandidate[]) {
-  const details = [...new Set(candidates
-    .map((candidate) => candidate.evidenceFreshnessDetail?.trim())
-    .filter((detail): detail is string => Boolean(detail)))];
-  return details.length ? ` Evidence detail: ${details.slice(0, 3).join(" · ")}.` : "";
-}
-
-function defaultContext(own: RoundRobinCandidate[]): RoundRobinSideContext {
+  const noPairCauses = [...new Set([...away.noPairCauses, ...home.noPairCauses])];
+  if (context.lineupSource?.split(",").includes("MISSING")) noPairCauses.push("MISSING_FANTASYPROS_LINEUP");
+  if (selected.comparisonReason.startsWith("EXACT_TIE")) noPairCauses.push("EXACT_TIE");
   return {
-    // The comparison service may be exercised without route-provided lineage.
-    // In that case an empty candidate set is unknown research, not proof that a
-    // lineup is absent.
-    lineup: {
-      present: true,
-      state: own[0]?.lineupState ?? "UNKNOWN",
-      source: null,
-      observedAt: null,
-      hitterCount: own.length,
-    },
-    research: {
-      usable: true,
-      readinessStatus: "UNKNOWN",
-      readinessReason: null,
-      observedAt: null,
-    },
+    gamePk,
+    away,
+    home,
+    ...selected,
+    lineupState: context.lineupState ?? "UNKNOWN",
+    lineupSource: context.lineupSource ?? "UNKNOWN",
+    starterState: context.starterState ?? "UNKNOWN",
+    evidenceGaps: context.evidenceGaps ?? [],
+    noPairCauses: [...new Set(noPairCauses)],
   };
-}
-
-export type RoundRobinComparisonStatus = "SELECTED" | "NO_COMPARISON" | "VALID_TIE";
-
-function unavailableDiagnostic(
-  board: RoundRobinBoardId,
-  own: RoundRobinCandidate[],
-  context: RoundRobinSideContext,
-  bullpenIssues: BullpenPathIssue[],
-) {
-  if (board === "RR3") {
-    return {
-      availabilityStatus: "UNSUPPORTED_BOARD" as const,
-      availabilityDetail: "2+ H+R+RBI is unsupported, so no legal RR3 pair can be constructed.",
-    };
-  }
-
-  if (!context.lineup.present) {
-    return {
-      availabilityStatus: "NO_LINEUP" as const,
-      availabilityDetail: `No projected or posted lineup is available. ${contextDetail(context)}`,
-    };
-  }
-
-  if (!own.length) {
-    if (!context.research.usable) {
-      return {
-        availabilityStatus: "STALE_OR_INCOMPLETE_RESEARCH" as const,
-        availabilityDetail: `No market candidates can be evaluated because research is not current or complete. ${researchDetail(context)}`,
-      };
-    }
-    return {
-      availabilityStatus: "NO_MARKET_CANDIDATES" as const,
-      availabilityDetail: `No market candidates were produced for this lineup. ${contextDetail(context)}`,
-    };
-  }
-
-  const unresolvedIdentity = own.filter((candidate) => candidate.selectionBlockReason === "UNRESOLVED_IDENTITY");
-  if (unresolvedIdentity.length === own.length) {
-    return {
-      availabilityStatus: "UNRESOLVED_IDENTITY" as const,
-      availabilityDetail: `${own.length} market candidate${own.length === 1 ? "" : "s"} cannot be used because identity is unresolved.${blockSummary(own)}`,
-    };
-  }
-
-  const missingStarter = own.filter((candidate) => ["UNKNOWN", "TBD"].includes(candidate.starterState));
-  if (missingStarter.length === own.length) {
-    const states = [...new Set(missingStarter.map((candidate) => candidate.starterState))].join(", ");
-    return {
-      availabilityStatus: "MISSING_STARTER" as const,
-      availabilityDetail: `${own.length} market candidate${own.length === 1 ? "" : "s"} cannot be used because the opposing starter is ${states}.${blockSummary(own)}`,
-    };
-  }
-
-  const staleOrIncomplete = own.filter((candidate) =>
-    candidate.evidenceFreshness !== "CURRENT"
-    || candidate.selectionBlockReason === "STALE"
-    || candidate.selectionBlockReason === "INCOMPLETE_EVIDENCE",
-  );
-  if (!context.research.usable || staleOrIncomplete.length === own.length) {
-    return {
-      availabilityStatus: "STALE_OR_INCOMPLETE_RESEARCH" as const,
-      availabilityDetail: !context.research.usable
-        ? `Research is not current or complete for selection. ${researchDetail(context)}${blockSummary(own)}`
-        : `${staleOrIncomplete.length} market candidate${staleOrIncomplete.length === 1 ? "" : "s"} have stale or incomplete research.${blockSummary(own)}${freshnessDetail(staleOrIncomplete)}`,
-    };
-  }
-
-  if (bullpenIssues.length === own.length) {
-    return {
-      availabilityStatus: "STALE_OR_INCOMPLETE_RESEARCH" as const,
-      availabilityDetail: `${own.length} market candidate${own.length === 1 ? "" : "s"} cannot be used because ${bullpenSummary(bullpenIssues)}`,
-    };
-  }
-
-  return {
-    availabilityStatus: "NO_LEGAL_CONSTRUCTION" as const,
-    availabilityDetail: `${own.length} market candidate${own.length === 1 ? "" : "s"} were audited, but none form a legal ${board} construction.${blockSummary(own)}${bullpenIssues.length ? ` ${bullpenSummary(bullpenIssues)}` : ""}`,
-  };
-}
-
-function researchDetail(context: RoundRobinSideContext) {
-  const observed = context.research.observedAt ? ` observed ${context.research.observedAt}` : "";
-  const gate = context.research.readinessReason ?? "the current-date research health gate is not usable";
-  return `Research readiness ${context.research.readinessStatus}${observed}: ${gate}`;
 }

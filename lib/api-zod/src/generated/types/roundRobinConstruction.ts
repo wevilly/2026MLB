@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { RoundRobinConstructionConstructionType } from './roundRobinConstructionConstructionType';
+import type { RoundRobinConstructionLegCasesItem } from './roundRobinConstructionLegCasesItem';
 import type { RoundRobinConstructionSide } from './roundRobinConstructionSide';
 import type { RoundRobinLeg } from './roundRobinLeg';
 
@@ -21,4 +22,11 @@ export interface RoundRobinConstruction {
   stateTotal: number;
   rankTotal: number;
   evidenceSummary: string;
+  legCases: RoundRobinConstructionLegCasesItem[];
+  sharedMechanism: string;
+  /** @nullable */
+  geometry: string | null;
+  /** @nullable */
+  runnerUpComparison: string | null;
+  rejectedAlternatives: string[];
 }

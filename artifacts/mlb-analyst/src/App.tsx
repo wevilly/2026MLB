@@ -16,6 +16,7 @@ const queryClient = new QueryClient();
 
 export type Tone = 'good' | 'warn' | 'bad' | 'neutral' | 'accent';
 type MarketShortCode = MarketResearchCandidate['market'];
+type SettledMarketShortCode = Exclude<MarketShortCode, 'H_R_RBI'>;
 
 function currentEasternDate() {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -1838,13 +1839,13 @@ function FeatureStoreBackfillPanel() {
 function FeatureStorePage() {
   const [slateDate, setSlateDate] = useState(new Date().toISOString().slice(0, 10));
   const [filterPlayer, setFilterPlayer] = useState('');
-  const [filterMarket, setFilterMarket] = useState<MarketShortCode | ''>('');
+  const [filterMarket, setFilterMarket] = useState<SettledMarketShortCode | ''>('');
 
   const query = useGetAnalystFeatureStore({
     dateFrom: slateDate,
     dateTo: slateDate,
     ...(filterPlayer ? { playerId: Number(filterPlayer) } : {}),
-    ...(filterMarket ? { market: filterMarket as MarketShortCode } : {}),
+    ...(filterMarket ? { market: filterMarket as SettledMarketShortCode } : {}),
     limit: 200,
   });
   const data = query.data as FeatureStoreResult | undefined;
@@ -1880,7 +1881,7 @@ function FeatureStorePage() {
         <select
           className="search-input !h-[35px]"
           value={filterMarket}
-          onChange={(e) => setFilterMarket(e.target.value as MarketShortCode | '')}
+          onChange={(e) => setFilterMarket(e.target.value as SettledMarketShortCode | '')}
         >
           <option value="">All markets</option>
           {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
@@ -2039,11 +2040,11 @@ function FeatureStorePage() {
 
 function MarketBoardPage() {
   const [dateParam, setDateParam] = useState('');
-  const [marketParam, setMarketParam] = useState<MarketShortCode | ''>('');
+  const [marketParam, setMarketParam] = useState<SettledMarketShortCode | ''>('');
   const effectiveDate = dateParam || currentEasternDate();
   const params = {
     date: effectiveDate,
-    ...(marketParam ? { market: marketParam as MarketShortCode } : {}),
+    ...(marketParam ? { market: marketParam as SettledMarketShortCode } : {}),
   };
   const boardQuery = useGetAnalystDailyMarketBoard(params);
   const gameQuery = useGetAnalystDailyBoardGameSummary({ date: effectiveDate });
@@ -2092,7 +2093,7 @@ function MarketBoardPage() {
         <select
           className="search-input !h-[35px]"
           value={marketParam}
-          onChange={(e) => setMarketParam(e.target.value as MarketShortCode | '')}
+          onChange={(e) => setMarketParam(e.target.value as SettledMarketShortCode | '')}
           data-testid="select-market-board-market"
         >
           <option value="">All markets</option>
@@ -2114,7 +2115,7 @@ function MarketBoardPage() {
               <button
                 key={m}
                 className={`button button-quiet text-xs ${marketParam === m ? 'button-dark' : ''}`}
-                onClick={() => setMarketParam(marketParam === m ? '' : m)}
+                onClick={() => setMarketParam(marketParam === m ? '' : m as SettledMarketShortCode)}
                 data-testid={`market-filter-${m}`}
               >
                 {MARKET_LABELS[m]}
