@@ -66,6 +66,11 @@ paths:
       operationId: getAnalystDataHealth
       tags: [analyst]
       summary: Get source freshness and data-quality state
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
       responses:
         "200":
           description: Data health summary
@@ -1568,7 +1573,23 @@ components:
         lastSuccess: { type: ["string", "null"] }
         rowCount: { type: number }
         detail: { type: string }
-      required: [name, status, freshness, lastSuccess, rowCount, detail]
+        effectiveDate: { type: ["string", "null"] }
+        ageMinutes: { type: ["integer", "null"], minimum: 0 }
+        isCurrentDate: { type: boolean }
+      required: [name, status, freshness, lastSuccess, rowCount, detail, effectiveDate, ageMinutes, isCurrentDate]
+    OperationalReadiness:
+      type: object
+      additionalProperties: false
+      properties:
+        currentDate: { type: string }
+        requestedDate: { type: string }
+        isCurrentDate: { type: boolean }
+        status: { type: string, enum: [READY, PARTIAL, BLOCKED, AUDIT_ONLY] }
+        usable: { type: boolean }
+        reason: { type: string }
+        reasons: { type: array, items: { type: string } }
+        observedAt: { type: string, format: date-time }
+      required: [currentDate, requestedDate, isCurrentDate, status, usable, reason, reasons, observedAt]
     Starter:
       type: object
       properties:
@@ -1601,8 +1622,9 @@ components:
         games: { type: array, items: { $ref: "#/components/schemas/SlateGame" } }
         sources: { type: array, items: { $ref: "#/components/schemas/SourceBadge" } }
         identityCoverage: { $ref: "#/components/schemas/IdentityCoverage" }
+        readiness: { $ref: "#/components/schemas/OperationalReadiness" }
         alerts: { type: array, items: { type: string } }
-      required: [date, timezone, games, sources, identityCoverage, alerts]
+      required: [date, timezone, games, sources, identityCoverage, readiness, alerts]
     ProjectionRow:
       type: object
       properties:
@@ -1674,7 +1696,8 @@ components:
         identityCoverage: { $ref: "#/components/schemas/IdentityCoverage" }
         researchHealth: { $ref: "#/components/schemas/ResearchHealth" }
         lastRun: { type: string }
-      required: [overall, phase2aReady, sources, issues, identityCoverage, researchHealth, lastRun]
+        readiness: { $ref: "#/components/schemas/OperationalReadiness" }
+      required: [overall, phase2aReady, sources, issues, identityCoverage, researchHealth, lastRun, readiness]
     ConnectionStatus:
       type: object
       properties:
@@ -2515,9 +2538,14 @@ components:
           type: ["string", "null"]
           enum: [BLOCKED, NEGATIVE, STALE, UNRESOLVED_IDENTITY, INCOMPLETE_EVIDENCE, null]
           description: The reason this row cannot be selected, when applicable.
+        operationalState:
+          type: string
+          enum: [USABLE, AUDIT_ONLY]
+          description: Separates rows currently safe for operations from retained audit evidence.
+        auditReason: { type: ["string", "null"] }
         createdAt: { type: string }
         updatedAt: { type: string }
-      required: [candidateId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, secondaryMechanism, opportunityEvidence, starterMatchupEvidence, bullpenPathEvidence, parkEvidence, recentVsSeasonVsCareer, counterEvidence, bvpEvidence, missingStaleEvidence, identityResolved, selectable, selectionBlockReason, createdAt, updatedAt]
+      required: [candidateId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, secondaryMechanism, opportunityEvidence, starterMatchupEvidence, bullpenPathEvidence, parkEvidence, recentVsSeasonVsCareer, counterEvidence, bvpEvidence, missingStaleEvidence, identityResolved, selectable, selectionBlockReason, operationalState, auditReason, createdAt, updatedAt]
     MarketResearch:
       type: object
       description: |
@@ -2537,7 +2565,8 @@ components:
           minimum: 0
           description: Count of returned candidates that meet the shared Round Robin selection predicate.
         systemNote: { type: string }
-      required: [date, market, gameId, rankSemantics, prohibitedFields, candidates, candidateCount, selectableCandidateCount, systemNote]
+        readiness: { $ref: "#/components/schemas/OperationalReadiness" }
+      required: [date, market, gameId, rankSemantics, prohibitedFields, candidates, candidateCount, selectableCandidateCount, systemNote, readiness]
     RoundRobinLeg:
       type: object
       description: A candidate evaluated in a game-level Round Robin construction. Research fields are audit context, never betting values.
@@ -2603,8 +2632,9 @@ components:
         date: { type: string, format: date }
         board: { type: string, enum: [RR1, RR2, RR3, RR4, RR5] }
         games: { type: array, items: { $ref: "#/components/schemas/RoundRobinGameComparison" } }
+        readiness: { $ref: "#/components/schemas/OperationalReadiness" }
         prohibitedFields: { type: array, items: { type: string } }
-      required: [date, board, games, prohibitedFields]
+      required: [date, board, games, readiness, prohibitedFields]
     DailyMarketBoardEntry:
       type: object
       additionalProperties: false
@@ -2639,8 +2669,9 @@ components:
           type: array
           items: { $ref: "#/components/schemas/DailyMarketBoardEntry" }
         total: { type: integer, minimum: 0 }
+        readiness: { $ref: "#/components/schemas/OperationalReadiness" }
         notes: { type: array, items: { type: string } }
-      required: [date, market, entries, total, notes]
+      required: [date, market, entries, total, readiness, notes]
     DailyMarketBoardRefreshResult:
       type: object
       additionalProperties: false
@@ -2695,7 +2726,8 @@ components:
           type: array
           items: { $ref: "#/components/schemas/DailyBoardGameSummaryGame" }
         total: { type: integer, minimum: 0 }
-      required: [date, games, total]
+        readiness: { $ref: "#/components/schemas/OperationalReadiness" }
+      required: [date, games, total, readiness]
     ErrorResponse:
       type: object
       additionalProperties: false

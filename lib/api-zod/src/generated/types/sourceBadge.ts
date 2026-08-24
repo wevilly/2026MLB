@@ -14,4 +14,12 @@ export interface SourceBadge {
   lastSuccess: string | null;
   rowCount: number;
   detail: string;
+  /** @nullable */
+  effectiveDate: string | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  ageMinutes: number | null;
+  isCurrentDate: boolean;
 }

@@ -58,9 +58,9 @@ const navGroups: { label: string; items: Array<{ href: string; label: string; ic
 
 export function toneFor(value: string | null | undefined): Tone {
   const normalized = String(value ?? '').toLowerCase();
+  if (normalized.includes('not configured') || normalized.includes('not run') || normalized.includes('error') || normalized.includes('fail') || normalized.includes('missing') || normalized.includes('blocked') || normalized.includes('critical') || normalized.includes('unavailable')) return 'bad';
+  if (normalized.includes('warn') || normalized.includes('stale') || normalized.includes('partial') || normalized.includes('pending') || normalized.includes('degraded') || normalized.includes('audit')) return 'warn';
   if (normalized.includes('good') || normalized.includes('ready') || normalized.includes('fresh') || normalized.includes('healthy') || normalized.includes('complete') || normalized.includes('configured') || normalized.includes('active')) return 'good';
-  if (normalized.includes('warn') || normalized.includes('stale') || normalized.includes('partial') || normalized.includes('pending') || normalized.includes('degraded')) return 'warn';
-  if (normalized.includes('error') || normalized.includes('fail') || normalized.includes('missing') || normalized.includes('blocked') || normalized.includes('critical')) return 'bad';
   return 'neutral';
 }
 
@@ -142,15 +142,45 @@ function SourceRow({ source, compact = false }: { source: SourceBadge; compact?:
       </div>
       <div className="source-meta">
         <span>{source.freshness}</span>
+        <small>effective {source.effectiveDate ?? 'not reported'} · {source.ageMinutes === null ? 'age unavailable' : `${source.ageMinutes}m old`}</small>
         {!compact && <small>{source.rowCount.toLocaleString()} rows</small>}
       </div>
     </div>
   );
 }
 
+export function ReadinessStrip({ health, sources }: { health?: { readiness: DataHealth['readiness']; sources?: SourceBadge[] }; sources?: SourceBadge[] }) {
+  const readiness = health?.readiness;
+  const contextSources = sources ?? health?.sources ?? [];
+  if (!readiness) {
+    return <div className="readiness-strip readiness-unavailable"><AlertTriangle size={15} /><div><strong>Current-date readiness unavailable</strong><p>No health contract was returned, so this view cannot be treated as operational.</p></div></div>;
+  }
+  const tone = toneFor(readiness.status);
+  return (
+    <section className={`readiness-strip readiness-${tone}`} data-testid="current-readiness">
+      <div className="readiness-main">
+        <StatusDot tone={tone} pulse={readiness.status === 'PARTIAL'} />
+        <div><Kicker>Current Eastern-date health</Kicker><strong>{readiness.status}</strong><p>{readiness.reason}</p></div>
+      </div>
+      <div className="readiness-meta">
+        <span><b>Current</b> {readiness.currentDate}</span>
+        <span><b>Observed</b> {new Date(readiness.observedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' })} ET</span>
+        <span><b>Operational</b> {readiness.usable ? 'usable' : 'audit-only'}</span>
+      </div>
+      <div className="readiness-sources" aria-label="Source freshness context">
+        {contextSources.map((source) => <span key={source.name} className={`readiness-source source-${toneFor(source.status)}`}><b>{source.name}</b> {source.effectiveDate ?? 'no date'} · {source.ageMinutes === null ? 'age —' : `${source.ageMinutes}m`} · {source.isCurrentDate ? 'current' : 'not current'}</span>)}
+      </div>
+    </section>
+  );
+}
+
 function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const healthQuery = useGetAnalystDataHealth();
+  const readiness = healthQuery.data?.readiness;
+  const railStatus = healthQuery.isError ? 'UNAVAILABLE' : readiness?.status ?? 'CHECKING';
+  const railTone = healthQuery.isError ? 'bad' : toneFor(railStatus);
   const pageTitle = useMemo(() => navGroups.flatMap((group) => group.items).find((item) => item.href === location)?.label ?? 'Analyst platform', [location]);
 
   return (
@@ -161,7 +191,7 @@ function AppShell({ children }: { children: ReactNode }) {
           <div><strong>MLB / OPS</strong><span>Analyst platform</span></div>
           <button className="mobile-close" onClick={() => setMobileOpen(false)} data-testid="button-close-navigation"><X size={18} /></button>
         </div>
-        <div className="rail-status"><StatusDot tone="good" pulse /><span>Systems nominal</span><small>PHASE 01</small></div>
+        <div className="rail-status"><StatusDot tone={railTone} pulse={railStatus === 'PARTIAL' || railStatus === 'CHECKING'} /><span>{railStatus}</span><small>{readiness?.currentDate ?? 'HEALTH CHECK'}</small></div>
         <nav className="side-nav" aria-label="Primary navigation">
           {navGroups.map((group) => (
             <div className="nav-group" key={group.label}>
@@ -200,7 +230,7 @@ function AppShell({ children }: { children: ReactNode }) {
             <div className="breadcrumb"><span>OPERATIONS ROOM</span><ChevronRight size={13} /><strong>{pageTitle.toUpperCase()}</strong></div>
           </div>
           <div className="topbar-right">
-            <div className="live-clock"><span className="live-pip" /> LIVE <span className="clock-divider">/</span> {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' })} ET</div>
+            <div className="live-clock"><StatusDot tone={railTone} /> {railStatus} <span className="clock-divider">/</span> {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' })} ET</div>
             <Link href="/settings" className="topbar-icon" data-testid="link-topbar-settings"><SlidersHorizontal size={17} /></Link>
             <div className="analyst-avatar" data-testid="text-analyst-avatar">AN</div>
           </div>
@@ -236,6 +266,7 @@ function DashboardPage() {
       </div>
       {query.isLoading ? <LoadingPanel rows={5} /> : query.isError ? <QueryMessage kind="error" onRetry={() => query.refetch()} /> : !data ? <QueryMessage kind="empty" /> : (
         <>
+          <ReadinessStrip health={{ readiness: data.readiness, sources: data.sources }} sources={data.sources} />
           <div className="metric-grid">
             <Metric label="Games on slate" value={data.games?.length ?? 0} note={`${data.timezone} window`} tone="accent" />
             <Metric label="Flags to resolve" value={flaggedGames} note={flaggedGames ? 'Review before lock' : 'No open flags'} tone={flaggedGames ? 'warn' : 'good'} />
@@ -341,6 +372,7 @@ function DataHealthPage() {
       </div>
       {query.isLoading ? <LoadingPanel rows={6} /> : query.isError ? <QueryMessage kind="error" onRetry={() => query.refetch()} /> : !data ? <QueryMessage kind="empty" /> : (
         <>
+          <ReadinessStrip health={data} />
           <div className="health-summary">
             <Panel className="overall-panel"><div className="health-ring"><Gauge size={25} /><span>{data.overall}</span></div><div><Kicker>Overall contract state</Kicker><h2>{data.overall}</h2><p>Last run {data.lastRun}</p></div><div className="health-rule" /></Panel>
             <Metric label="Sources observed" value={data.sources?.length ?? 0} note="In current health run" tone="accent" />
@@ -402,6 +434,7 @@ function OrchestrationPage() {
   const [runs, setRuns] = useState<OrchestrationRun[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const healthQuery = useGetAnalystDataHealth();
   const load = async () => {
     setLoading(true);
     try {
@@ -439,6 +472,7 @@ function OrchestrationPage() {
       <div><Kicker>Daily refresh control</Kicker><h1>Slate <span className="slash">//</span> orchestration</h1><p>One auditable sequence for ingest, research, market build, health checks, and the pregame freeze.</p></div>
       <div className="flex gap-2 flex-wrap"><input className="search-input !w-auto" type="date" value={date} onChange={(event) => setDate(event.target.value)} /><button className="button button-dark" disabled={loading} onClick={startRun} data-testid="button-start-orchestration"><Play size={15} /> Run slate</button></div>
     </div>
+    <ReadinessStrip health={healthQuery.data} />
     <Panel className="mb-6"><div className="flex flex-wrap justify-between gap-3 items-center"><div><Kicker>Schedule policy</Kicker><strong>08:00 ET refresh · freeze 90 minutes before the earliest first pitch</strong><p className="text-xs text-muted-foreground mt-1">Manual runs are recorded separately; feature snapshots remain append-only once frozen.</p></div><div className="flex gap-2 flex-wrap"><button className="button button-quiet" onClick={() => void lateScratchScan()} disabled={loading}>Scan late scratches</button><button className="button button-quiet" onClick={() => void load()}><RefreshCw size={15} /> Refresh</button><a className="button button-quiet" href={`/api/analyst/export/slate-json?date=${date}`} target="_blank" rel="noreferrer"><Download size={15} /> slate.json</a><a className="button button-quiet" href={`/api/analyst/export/workbook?date=${date}`}><Download size={15} /> Workbook</a></div></div></Panel>
     {message && <div className="query-message query-error mb-4"><AlertTriangle size={16} /><div><strong>Operator note</strong><p>{message}</p></div></div>}
     {runs.length === 0 && !loading ? <QueryMessage kind="empty" /> : <div className="space-y-4">
@@ -461,7 +495,7 @@ function AuditTrailPage() {
 
 function HealthSource({ source }: { source: SourceBadge }) {
   const tone = toneFor(source.status);
-  return <div className="health-source" data-testid={`health-source-${source.name.replaceAll(' ', '-').toLowerCase()}`}><div className="health-source-head"><div className="source-title"><StatusDot tone={tone} /><strong>{source.name}</strong></div><Badge tone={tone}>{source.freshness}</Badge></div><div className="health-bar"><span className={`health-bar-fill fill-${tone}`} style={{ width: tone === 'good' ? '92%' : tone === 'warn' ? '64%' : '28%' }} /></div><div className="health-source-foot"><span>{source.detail}</span><code>{source.rowCount.toLocaleString()} rows</code></div></div>;
+  return <div className="health-source" data-testid={`health-source-${source.name.replaceAll(' ', '-').toLowerCase()}`}><div className="health-source-head"><div className="source-title"><StatusDot tone={tone} /><strong>{source.name}</strong></div><Badge tone={tone}>{source.freshness}</Badge></div><div className="health-bar"><span className={`health-bar-fill fill-${tone}`} style={{ width: tone === 'good' ? '92%' : tone === 'warn' ? '64%' : '28%' }} /></div><div className="health-source-foot"><span>{source.detail}<br /><small>effective {source.effectiveDate ?? 'not reported'} · {source.ageMinutes === null ? 'age unavailable' : `${source.ageMinutes} minutes old`} · {source.isCurrentDate ? 'current date' : 'not current date'}</small></span><code>{source.rowCount.toLocaleString()} rows</code></div></div>;
 }
 
 function IssueRow({ issue }: { issue: HealthIssue }) {
@@ -1980,7 +2014,7 @@ function FeatureStorePage() {
 function MarketBoardPage() {
   const [dateParam, setDateParam] = useState('');
   const [marketParam, setMarketParam] = useState<MarketShortCode | ''>('');
-  const effectiveDate = dateParam || new Date().toISOString().slice(0, 10);
+  const effectiveDate = dateParam || currentEasternDate();
   const params = {
     date: effectiveDate,
     ...(marketParam ? { market: marketParam as MarketShortCode } : {}),
@@ -1998,20 +2032,17 @@ function MarketBoardPage() {
   const board = boardQuery.data as DailyMarketBoard | undefined;
   const gameSummary = gameQuery.data as DailyBoardGameSummary | undefined;
   const entries = board?.entries ?? [];
-  const confidenceTone = (label: string): Tone => (
-    label === 'FIRE' ? 'good' : label === 'HALF' ? 'accent' : label === 'HOLD' ? 'warn' : 'neutral'
-  );
   const refresh = () => refreshBoard.mutate({ params });
 
   return (
     <div className="page-content rise-in">
       <div className="page-intro">
         <div>
-          <Kicker>Daily confidence / Phase 6</Kicker>
+          <Kicker>Daily research evidence / Phase 6</Kicker>
           <h1>Market <span className="slash">//</span> board</h1>
           <p>
-            Server-persisted confidence for 2+ Total Bases, Extra Base Hit, Batter Walk, and Home Run.
-            Confidence is calculated from frozen research context and accepted calibrated model artifacts.
+            Server-persisted research evidence for 2+ Total Bases, Extra Base Hit, Batter Walk, and Home Run.
+            Model signals remain hidden unless the current-date readiness and validation contract both pass.
           </p>
         </div>
         <button
@@ -2047,10 +2078,10 @@ function MarketBoardPage() {
 
       <Panel className="mb-6 bg-accent/5 border-accent/20">
         <div className="p-4 space-y-3">
-          <Kicker>Confidence policy</Kicker>
+          <Kicker>Operational presentation policy</Kicker>
           <p className="text-xs font-mono text-muted-foreground" data-testid="confidence-policy">
-            FIRE requires STRONG research plus calibrated probability ≥ 65%. HALF requires model confirmation ≥ 55% and positive research.
-            HOLD means an active model did not confirm the candidate or its inputs were insufficient. NONE means no usable ACTIVE calibrated model.
+            This is a research board by default. Model prediction, calibrated probability, and confidence are suppressed
+            unless the current Eastern-date health response is READY and the persisted row has an accepted, explicitly validated ACTIVE contract.
           </p>
           <div className="flex flex-wrap gap-3 mt-3">
             {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
@@ -2071,12 +2102,15 @@ function MarketBoardPage() {
       </Panel>
 
       {board && (
+        <>
+        <ReadinessStrip health={{ readiness: board.readiness, sources: [] }} />
         <div className="metric-grid mb-6">
           <Metric label="Candidates" value={board.total} note={`${marketParam ? MARKET_LABELS[marketParam] : 'all markets'} · ${effectiveDate}`} tone="accent" />
           <Metric label="Market" value={marketParam ? MARKET_LABELS[marketParam] : 'All 4 markets'} note="TB / XBH / WALK / HR are independent" tone="neutral" />
-          <Metric label="FIRE" value={entries.filter((entry) => entry.confidenceLabel === 'FIRE').length} note="STRONG research + 65% calibrated probability" tone="good" />
-          <Metric label="Model-ready" value={entries.filter((entry) => entry.calibratedProbability !== null).length} note="Verified ACTIVE model and calibration" tone="neutral" />
+          <Metric label="Usable now" value={board.readiness.usable ? entries.length : 0} note={board.readiness.usable ? 'Current validated presentation' : 'Evidence remains audit-only'} tone={board.readiness.usable ? 'good' : 'warn'} />
+          <Metric label="Research-only" value={entries.filter((entry) => entry.confidenceBasis === 'RESEARCH_ONLY').length} note="No unsupported probability signal shown" tone="neutral" />
         </div>
+        </>
       )}
 
       {boardQuery.isLoading ? (
@@ -2090,7 +2124,7 @@ function MarketBoardPage() {
             <h2 className="text-lg">Refresh the daily board after the research engines and snapshot capture have completed</h2>
             <p className="text-sm text-muted-foreground max-w-lg mx-auto">
               This view intentionally reads persisted server outputs, not browser-derived confidence.
-              Research-only candidates will be stored as NONE until an ACTIVE calibrated model is available.
+              Research evidence stays visible for audit. It is never converted into probability or confidence guidance without a current accepted validation contract.
             </p>
           </div>
         </Panel>
@@ -2099,8 +2133,8 @@ function MarketBoardPage() {
         <Panel>
           <SectionHeading
             eyebrow={`${board.total} persisted rows · ${effectiveDate}`}
-            title="Confidence board"
-            detail="All confidence labels and calibrated probabilities were calculated server-side from a pinned model artifact and frozen snapshot."
+            title="Research evidence board"
+            detail={board.readiness.usable ? 'Validated model context is eligible for display under the current-date contract.' : 'Audit-only evidence: model-derived probability and confidence are intentionally suppressed.'}
           />
           <div className="table-wrap">
             <table className="data-table" data-testid="market-board-table">
@@ -2111,9 +2145,8 @@ function MarketBoardPage() {
                   <th>Market</th>
                   <th>Research</th>
                   <th>Mechanism</th>
-                  <th>Confidence</th>
-                  <th>Calibrated probability</th>
-                  <th>Model context</th>
+                  <th>Operational state</th>
+                  <th>Evidence policy</th>
                 </tr>
               </thead>
               <tbody>
@@ -2124,12 +2157,15 @@ function MarketBoardPage() {
                     <td><Badge tone="accent">{MARKET_LABELS[entry.market as MarketShortCode] ?? entry.market}</Badge></td>
                     <td><Badge tone={toneFor(entry.researchState)}>{entry.researchState}</Badge></td>
                     <td className="text-xs">{entry.primaryMechanism ?? 'Not classified'}</td>
-                    <td><Badge tone={confidenceTone(entry.confidenceLabel)}>{entry.confidenceLabel}</Badge></td>
-                    <td className="font-mono">
-                      {entry.calibratedProbability === null ? 'No ACTIVE calibration' : `${(entry.calibratedProbability * 100).toFixed(1)}%`}
+                    <td className="text-xs">
+                      <Badge tone={board.readiness.usable && entry.confidenceBasis === 'MODEL_CONFIRMED' ? 'good' : 'warn'}>{board.readiness.usable && entry.confidenceBasis === 'MODEL_CONFIRMED' ? 'VALIDATED MODEL' : 'RESEARCH ONLY'}</Badge>
                     </td>
                     <td className="text-xs">
-                      {entry.modelVersionId ? <span title={entry.modelVersionId}>{entry.confidenceBasis.replaceAll('_', ' ')}</span> : 'Research only'}
+                      {entry.confidenceBasis === 'MODEL_CONFIRMED'
+                        ? 'Accepted validation contract on record.'
+                        : entry.confidenceBasis === 'MODEL_REJECTED'
+                          ? 'Model validation did not confirm this research row.'
+                          : 'Research evidence only — no probability or confidence guidance.'}
                     </td>
                   </tr>
                 ))}
@@ -2141,7 +2177,7 @@ function MarketBoardPage() {
           <SectionHeading
             eyebrow={`${gameSummary?.total ?? 0} games with board context`}
             title="Game summaries"
-            detail="Starters, bullpen availability counts, and the highest confidence row for each market."
+            detail="Starters, bullpen availability counts, and the highest-ranked research row for each market."
           />
           {gameQuery.isLoading ? <LoadingPanel rows={2} /> : gameQuery.isError ? (
             <QueryMessage kind="error" onRetry={() => gameQuery.refetch()} />
@@ -2157,9 +2193,9 @@ function MarketBoardPage() {
                     available bullpen arms: {game.bullpenContext.awayAvailableArms} / {game.bullpenContext.homeAvailableArms}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {Object.values(game.topCandidates).map((candidate) => (
-                      <Badge key={candidate.boardId} tone={confidenceTone(candidate.confidenceLabel)}>
-                        {candidate.market} · {candidate.playerName} · {candidate.confidenceLabel}
+                      {Object.values(game.topCandidates).map((candidate) => (
+                        <Badge key={candidate.boardId} tone="neutral">
+                          {candidate.market} · {candidate.playerName} · research {candidate.researchState}
                       </Badge>
                     ))}
                   </div>

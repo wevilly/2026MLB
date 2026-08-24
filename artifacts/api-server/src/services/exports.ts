@@ -18,7 +18,7 @@ export async function buildSlateExport(rawDate: unknown) {
     ),
     pool.query(
       `SELECT dmb.game_pk::bigint AS "gamePk", dmb.player_id AS "playerId", p.full_name AS "playerName", dmb.market,
-              dmb.research_rank AS "researchRank", dmb.research_state AS "researchState", dmb.confidence_label AS "confidenceLabel"
+              dmb.research_rank AS "researchRank", dmb.research_state AS "researchState"
        FROM daily_market_board dmb JOIN players p ON p.player_id = dmb.player_id
        WHERE dmb.slate_date = $1 ORDER BY dmb.market, dmb.research_rank NULLS LAST`,
       [date],
@@ -87,9 +87,9 @@ export async function buildWorkbookExport(rawDate: unknown) {
   const games = slate.games as Array<Record<string, unknown>>;
   const marketSheets = ["TB", "XBH", "WALK", "HR"].map((market) => worksheet(
     market,
-    ["Game", "Player", "Rank", "State", "Confidence"],
+     ["Game", "Player", "Rank", "Research state"],
     boardRows.filter((row) => String(row.market).includes(market === "TB" ? "TOTAL_BASES" : market === "XBH" ? "EXTRA_BASE" : market === "WALK" ? "BATTER_WALK" : "HOME_RUN"))
-      .map((row) => [row.gamePk, row.playerName, row.researchRank, row.researchState, row.confidenceLabel]),
+      .map((row) => [row.gamePk, row.playerName, row.researchRank, row.researchState]),
   ));
   const workbook = `<?xml version="1.0"?>
 <?mso-application progid="Excel.Sheet"?>

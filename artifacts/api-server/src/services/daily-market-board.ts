@@ -310,9 +310,7 @@ export async function queryDailyMarketBoard(slateDate: string, market: BoardMark
        JOIN players p ON p.player_id = dmb.player_id
       WHERE dmb.slate_date = $1
         AND ($2::market_type IS NULL OR dmb.market = $2::market_type)
-      ORDER BY dmb.market,
-        CASE dmb.confidence_label WHEN 'FIRE' THEN 1 WHEN 'HALF' THEN 2 WHEN 'HOLD' THEN 3 ELSE 4 END,
-        dmb.research_rank ASC NULLS LAST, player_name`,
+       ORDER BY dmb.market, dmb.research_rank ASC NULLS LAST, player_name`,
     [slateDate, dbMarket],
   );
   return result.rows.map((row) => ({
@@ -334,7 +332,10 @@ export async function queryDailyMarketBoard(slateDate: string, market: BoardMark
   }));
 }
 
-export async function queryDailyBoardGameSummary(slateDate: string) {
+export async function queryDailyBoardGameSummary(
+  slateDate: string,
+  presentationEntries?: Awaited<ReturnType<typeof queryDailyMarketBoard>>,
+) {
   const games = await pool.query<{
     game_pk: number; away_team: string; home_team: string; start_time_utc: string | null; park: string | null;
     away_starter: string | null; home_starter: string | null; away_starter_state: string | null; home_starter_state: string | null;
@@ -371,7 +372,7 @@ export async function queryDailyBoardGameSummary(slateDate: string) {
       ORDER BY g.start_time_utc NULLS LAST`,
     [slateDate],
   );
-  const entries = await queryDailyMarketBoard(slateDate);
+  const entries = presentationEntries ?? await queryDailyMarketBoard(slateDate);
   return games.rows.map((game) => ({
     gamePk: Number(game.game_pk),
     awayTeam: game.away_team,

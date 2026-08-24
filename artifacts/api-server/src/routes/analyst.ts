@@ -159,6 +159,17 @@ function currentEasternDate() {
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
+type OperationalReadiness = {
+  currentDate: string;
+  requestedDate: string;
+  isCurrentDate: boolean;
+  status: "READY" | "PARTIAL" | "BLOCKED" | "AUDIT_ONLY";
+  usable: boolean;
+  reason: string;
+  reasons: string[];
+  observedAt: string;
+};
+
 function requestedDate(value: unknown) {
   const date = value instanceof Date
     ? value.toISOString().slice(0, 10)
@@ -263,11 +274,20 @@ async function sourceBadges(effectiveDate: string) {
     status: string; effective_date: Date; finished_at: string | null; row_count: number | null; normalized_row_count: number | null;
     rejected_row_count: number | null; http_status: number | null; duration_ms: number | null; error_message: string | null;
   } | undefined, configured = true) => {
-    if (!configured) return { name, status: "NOT CONFIGURED", freshness: "Credential missing", lastSuccess: null, rowCount: 0, detail: "A server-side credential is required." };
-    if (!run) return { name, status: "NOT RUN", freshness: "No successful ingest", lastSuccess: null, rowCount: 0, detail: "No ingestion run has completed." };
+    if (!configured) return {
+      name, status: "NOT CONFIGURED", freshness: "Credential missing", lastSuccess: null, rowCount: 0,
+      detail: "A server-side credential is required.", effectiveDate: null, ageMinutes: null, isCurrentDate: false,
+    };
+    if (!run) return {
+      name, status: "NOT RUN", freshness: "No successful ingest", lastSuccess: null, rowCount: 0,
+      detail: "No ingestion run has completed.", effectiveDate: null, ageMinutes: null, isCurrentDate: false,
+    };
     const runDate = dateOnly(run.effective_date);
     const isCurrentDate = runDate === effectiveDate;
     const status = !isCurrentDate ? "STALE" : run.status === "SUCCESS" ? "FRESH" : run.status === "PARTIAL" ? "PARTIAL" : "BLOCKED";
+    const ageMinutes = run.finished_at
+      ? Math.max(0, Math.floor((Date.now() - new Date(run.finished_at).getTime()) / 60_000))
+      : null;
     const runDetail = run.error_message
       ? run.error_message
       : `${run.normalized_row_count ?? 0} normalized · ${run.rejected_row_count ?? 0} rejected${run.http_status ? ` · HTTP ${run.http_status}` : ""}${run.duration_ms ? ` · ${run.duration_ms}ms` : ""}`;
@@ -280,6 +300,9 @@ async function sourceBadges(effectiveDate: string) {
       lastSuccess: run.status === "SUCCESS" || run.status === "PARTIAL" ? isoString(run.finished_at) : null,
       rowCount: run.row_count ?? 0,
       detail: isCurrentDate ? runDetail : `No ${effectiveDate} run. ${runDetail}`,
+      effectiveDate: runDate,
+      ageMinutes,
+      isCurrentDate,
     };
   };
   const splitRun = await pool.query<{
@@ -300,7 +323,10 @@ async function sourceBadges(effectiveDate: string) {
     makeRunBadge("Statcast Search splits", splitRun.rows[0]),
     makeBadge("FANGRAPHS", "FanGraphs", true),
     makeBadge("PARK_FACTORS", "Statcast Park Factors", true),
-    { name: "Weather", status: "NOT CONFIGURED", freshness: "No provider", lastSuccess: null, rowCount: 0, detail: "Optional source; no weather credential is configured." },
+    {
+      name: "Weather", status: "NOT CONFIGURED", freshness: "No provider", lastSuccess: null, rowCount: 0,
+      detail: "Optional source; no weather credential is configured.", effectiveDate: null, ageMinutes: null, isCurrentDate: false,
+    },
   ];
 }
 
@@ -389,10 +415,104 @@ async function identityCoverage(date: string) {
   };
 }
 
+async function analystDataHealth(date: string) {
+  const [sources, issueResult, lastRun, coverage, research, slate, workflow] = await Promise.all([
+    sourceBadges(date),
+    pool.query<{ issue_type: string; detail: string; severity: string }>(
+      `SELECT issue_type, detail, severity FROM ingest_issues WHERE resolved_at IS NULL
+       UNION ALL
+       SELECT 'IDENTITY_REVIEW' AS issue_type, CONCAT(raw_name, ' (FantasyPros ID ', external_player_id, ') requires review') AS detail, 'REVIEW' AS severity
+       FROM identity_review_queue WHERE state = 'OPEN'
+       ORDER BY issue_type LIMIT 50`,
+    ),
+    pool.query<{ finished_at: string | null }>("SELECT max(finished_at) AS finished_at FROM ingest_runs WHERE effective_date <= $1", [date]),
+    identityCoverage(date),
+    researchHealth(date),
+    pool.query<{ games: number }>("SELECT count(*)::int AS games FROM games WHERE game_date = $1", [date]),
+    pool.query<{ overall_status: "RUNNING" | "COMPLETE" | "PARTIAL" | "FAILED" | "CANCELLED"; error_message: string | null }>(
+      `SELECT overall_status, error_message FROM orchestration_runs
+       WHERE run_date = $1 ORDER BY created_at DESC LIMIT 1`,
+      [date],
+    ),
+  ]);
+  const currentDate = currentEasternDate();
+  const phaseTwoSources = sources.filter((source) => !["FanGraphs", "Weather"].includes(source.name));
+  const phaseTwoReady = research.handednessCoverageScope === "FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE"
+    && research.handednessIngestStatus === "SUCCESS"
+    && research.missingHandednessSplits === 0
+    && research.handednessTargetPlayers === research.handednessCoveredPlayers
+    && research.parkRequiredVenues > 0
+    && research.parkVenueCoverageGaps === 0
+    && research.hitterProfilesMissingEvidence === 0
+    && research.pitcherProfilesMissingEvidence === 0;
+  const workflowRun = workflow.rows[0];
+  const blockingReasons = [
+    ...(slate.rows[0]?.games ? [] : [`No official MLB schedule records are available for ${date}.`]),
+    ...(!phaseTwoReady ? [`Same-day research coverage is incomplete for ${date}.`] : []),
+    ...(coverage.unresolvedActivePlayers || coverage.blockingProjectedLineupIssues
+      ? [`${coverage.unresolvedActivePlayers + coverage.blockingProjectedLineupIssues} unresolved or blocking identity record(s) remain.`]
+      : []),
+    ...phaseTwoSources.filter((source) => ["BLOCKED", "NOT RUN", "STALE", "NOT CONFIGURED"].includes(source.status))
+      .map((source) => `${source.name} is ${source.status.toLowerCase()} (${source.detail}).`),
+    ...(workflowRun && ["FAILED", "CANCELLED"].includes(workflowRun.overall_status)
+      ? [`The latest workflow is ${workflowRun.overall_status.toLowerCase()}${workflowRun.error_message ? `: ${workflowRun.error_message}` : "."}`]
+      : []),
+  ];
+  const partialReasons = [
+    ...phaseTwoSources.filter((source) => source.status === "PARTIAL")
+      .map((source) => `${source.name} is partial (${source.detail}).`),
+    ...(workflowRun && ["RUNNING", "PARTIAL"].includes(workflowRun.overall_status)
+      ? [`The latest workflow is ${workflowRun.overall_status.toLowerCase()}; outputs are not operational until it completes.`]
+      : []),
+  ];
+  const isCurrentDate = date === currentDate;
+  const status: OperationalReadiness["status"] = !isCurrentDate
+    ? "AUDIT_ONLY"
+    : blockingReasons.length ? "BLOCKED"
+      : partialReasons.length ? "PARTIAL"
+        : "READY";
+  const reasons = !isCurrentDate
+    ? [`${date} is not the current Eastern slate date (${currentDate}); this is an audit-only view.`]
+    : [...blockingReasons, ...partialReasons];
+  const readiness: OperationalReadiness = {
+    currentDate,
+    requestedDate: date,
+    isCurrentDate,
+    status,
+    usable: status === "READY",
+    reason: reasons[0] ?? "All required current-date source, identity, research, and workflow checks passed.",
+    reasons,
+    observedAt: new Date().toISOString(),
+  };
+  const readinessIssues = [
+    ...(!slate.rows[0]?.games ? [{ label: "CURRENT SLATE MISSING", detail: `No official MLB schedule records are available for ${date}.`, severity: "CRITICAL" }] : []),
+    ...(!phaseTwoReady ? [{ label: "CURRENT RESEARCH INCOMPLETE", detail: `Same-day research coverage is not complete for ${date}.`, severity: "CRITICAL" }] : []),
+    ...(coverage.unresolvedActivePlayers || coverage.blockingProjectedLineupIssues
+      ? [{ label: "CURRENT IDENTITY UNRESOLVED", detail: `${coverage.unresolvedActivePlayers + coverage.blockingProjectedLineupIssues} active identity record(s) are unresolved or blocking.`, severity: "CRITICAL" }]
+      : []),
+    ...(workflowRun && ["FAILED", "CANCELLED"].includes(workflowRun.overall_status)
+      ? [{ label: "CURRENT WORKFLOW BLOCKED", detail: readiness.reason, severity: "CRITICAL" }]
+      : []),
+  ];
+  return {
+    overall: readiness.status,
+    phase2aReady: phaseTwoReady,
+    readiness,
+    sources,
+    issues: [
+      ...readinessIssues,
+      ...issueResult.rows.map((issue) => ({ label: issue.issue_type.replaceAll("_", " "), detail: issue.detail, severity: issue.severity })),
+    ],
+    identityCoverage: coverage,
+    researchHealth: research,
+    lastRun: isoString(lastRun.rows[0]?.finished_at) ?? "No completed ingestion runs recorded",
+  };
+}
+
 router.get("/analyst/today", async (req, res, next) => {
   try {
     const date = requestedDate(req.query.date);
-    const [gameResult, sources, coverage] = await Promise.all([
+    const [gameResult, health] = await Promise.all([
       pool.query<{
         game_pk: number; start_time_utc: string | null; away: string; home: string; park: string | null;
          away_starter: string | null; home_starter: string | null; away_hand: string | null; home_hand: string | null;
@@ -424,8 +544,7 @@ router.get("/analyst/today", async (req, res, next) => {
          WHERE g.game_date = $1 ORDER BY g.start_time_utc NULLS LAST`,
         [date],
       ),
-      sourceBadges(date),
-      identityCoverage(date),
+      analystDataHealth(date),
     ]);
     const games = gameResult.rows.map((game) => ({
       id: String(game.game_pk),
@@ -438,10 +557,12 @@ router.get("/analyst/today", async (req, res, next) => {
       awayStarter: { name: game.away_starter ?? "TBD", hand: game.away_hand || "NOT FOUND", state: game.away_state ?? "TBD", note: "" },
       homeStarter: { name: game.home_starter ?? "TBD", hand: game.home_hand || "NOT FOUND", state: game.home_state ?? "TBD", note: "" },
       lineupState: game.posted_lineup_teams === 2 ? "POSTED" : game.projected_lineup_teams > 0 ? "PROJECTED" : "UNKNOWN",
-      state: game.posted_lineup_teams === 2 && game.away_state === "CONFIRMED" && game.home_state === "CONFIRMED"
+      state: health.readiness.usable && game.posted_lineup_teams === 2 && game.away_state === "CONFIRMED" && game.home_state === "CONFIRMED"
         ? "READY"
-        : "PARTIAL",
-      flag: game.posted_lineup_teams === 2
+        : health.readiness.status === "BLOCKED" || health.readiness.status === "AUDIT_ONLY" ? "BLOCKED" : "PARTIAL",
+      flag: !health.readiness.usable
+        ? health.readiness.reason
+        : game.posted_lineup_teams === 2
         ? "Official posted lineups persisted"
         : game.projected_lineup_teams > 0
           ? "FantasyPros projected lineup evidence"
@@ -451,15 +572,17 @@ router.get("/analyst/today", async (req, res, next) => {
       date: new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" }).format(new Date(`${date}T12:00:00Z`)),
       timezone: "America/New_York",
       games,
-      sources,
-      identityCoverage: coverage,
+      sources: health.sources,
+      identityCoverage: health.identityCoverage,
+      readiness: health.readiness,
       alerts: [
         "Pre-model slate status uses READY, PARTIAL, and BLOCKED only.",
         "No forecast, price, odds, implied probability, EV, or CLV data is used in this workflow.",
         games.length ? "Official schedule and starter observations are persisted." : "No official schedule records have been ingested for this date.",
-        coverage.blockingProjectedLineupIssues
-          ? `${coverage.blockingProjectedLineupIssues} projected-lineup identity issue(s) are blocking research eligibility.`
+        health.identityCoverage.blockingProjectedLineupIssues
+          ? `${health.identityCoverage.blockingProjectedLineupIssues} projected-lineup identity issue(s) are blocking research eligibility.`
           : "Projected lineup identities have no current blocking issue.",
+        health.readiness.reason,
       ],
     };
     res.json(GetAnalystTodayResponse.parse(today));
@@ -543,45 +666,7 @@ router.get("/analyst/projections", async (req, res, next) => {
 router.get("/analyst/data-health", async (req, res, next) => {
   try {
     const date = requestedDate(req.query.date);
-    const [sources, issueResult, lastRun, coverage, research, slate] = await Promise.all([
-      sourceBadges(date),
-      pool.query<{ issue_type: string; detail: string; severity: string }>(
-        `SELECT issue_type, detail, severity FROM ingest_issues WHERE resolved_at IS NULL
-         UNION ALL
-         SELECT 'IDENTITY_REVIEW' AS issue_type, CONCAT(raw_name, ' (FantasyPros ID ', external_player_id, ') requires review') AS detail, 'REVIEW' AS severity
-         FROM identity_review_queue WHERE state = 'OPEN'
-         ORDER BY issue_type LIMIT 50`,
-      ),
-      pool.query<{ finished_at: string | null }>("SELECT max(finished_at) AS finished_at FROM ingest_runs WHERE effective_date <= $1", [date]),
-      identityCoverage(date),
-      researchHealth(date),
-      pool.query<{ games: number }>("SELECT count(*)::int AS games FROM games WHERE game_date = $1", [date]),
-    ]);
-    const phaseTwoSources = sources.filter((source) => !["FanGraphs", "Weather"].includes(source.name));
-    const phaseTwoReady = research.handednessCoverageScope === "FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE"
-      && research.handednessIngestStatus === "SUCCESS"
-      && research.missingHandednessSplits === 0
-      && research.handednessTargetPlayers === research.handednessCoveredPlayers
-      && research.parkRequiredVenues > 0
-      && research.parkVenueCoverageGaps === 0;
-    const readinessIssues = [
-      ...(slate.rows[0]?.games ? [] : [{ label: "CURRENT SLATE MISSING", detail: `No official MLB schedule records are available for ${date}.`, severity: "CRITICAL" }]),
-      ...(phaseTwoReady ? [] : [{ label: "CURRENT RESEARCH INCOMPLETE", detail: `Same-day research coverage is not complete for ${date}.`, severity: "CRITICAL" }]),
-    ];
-    const sourceStatus = !slate.rows[0]?.games || !phaseTwoReady || phaseTwoSources.some((source) => ["BLOCKED", "NOT RUN", "STALE"].includes(source.status)) ? "BLOCKED"
-      : "READY";
-    res.json(GetAnalystDataHealthResponse.parse({
-      overall: sourceStatus,
-      phase2aReady: phaseTwoReady,
-      sources,
-      issues: [
-        ...readinessIssues,
-        ...issueResult.rows.map((issue) => ({ label: issue.issue_type.replaceAll("_", " "), detail: issue.detail, severity: issue.severity })),
-      ],
-      identityCoverage: coverage,
-      researchHealth: research,
-      lastRun: isoString(lastRun.rows[0]?.finished_at) ?? "No completed ingestion runs recorded",
-    }));
+    res.json(GetAnalystDataHealthResponse.parse(await analystDataHealth(date)));
   } catch (error) {
     next(error);
   }
@@ -938,6 +1023,8 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
       res.status(400).json({ error: "board must be RR1, RR2, RR3, RR4, or RR5." });
       return;
     }
+    const health = await analystDataHealth(date);
+    const operationallyUsable = date === health.readiness.currentDate && health.readiness.usable;
     const rows = await pool.query<{
       candidate_id: string; game_pk: number; player_id: number; player_name: string; market: string;
       research_rank: number | null; research_state: "STRONG" | "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "BLOCKED";
@@ -990,10 +1077,12 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
         identityResolved: row.identity_resolved,
       });
       const starterResolved = starterId !== null && !["UNKNOWN", "TBD"].includes(starterState);
-      const selectionBlockReason = !starterResolved
+      const selectionBlockReason = !operationallyUsable
+        ? "BLOCKED"
+        : !starterResolved
         ? "BLOCKED"
         : baseEligibility.selectionBlockReason;
-      const selectable = starterResolved && baseEligibility.selectable;
+      const selectable = operationallyUsable && starterResolved && baseEligibility.selectable;
       const bvpEvidence = starterId
         ? await getBatterPitcherEvidence(row.player_id, starterId, date, MARKET_DB_TO_SHORTCODE[row.market] as BvpMarket)
         : null;
@@ -1050,6 +1139,7 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
       date,
       board,
       games,
+      readiness: health.readiness,
       prohibitedFields: PROHIBITED_FIELDS,
     }));
   } catch (error) {
@@ -1074,6 +1164,8 @@ router.get("/analyst/market-research", async (req, res, next) => {
     }
 
     const dbMarket = marketParam ? MARKET_SHORTCODE_TO_DB[marketParam] : null;
+    const health = await analystDataHealth(date);
+    const operationallyUsable = date === health.readiness.currentDate && health.readiness.usable;
 
     // Validate gameId is a safe positive integer
     let gameIdNum: number | null = null;
@@ -1172,7 +1264,15 @@ router.get("/analyst/market-research", async (req, res, next) => {
         bvpEvidence,
         missingStaleEvidence: row.missing_stale_evidence,
         identityResolved: row.identity_resolved,
-        ...eligibility,
+        selectable: operationallyUsable && eligibility.selectable,
+        selectionBlockReason: !operationallyUsable ? "BLOCKED" : eligibility.selectionBlockReason,
+        operationalState: operationallyUsable && eligibility.selectable ? "USABLE" : "AUDIT_ONLY",
+        auditReason: operationallyUsable && eligibility.selectable
+          ? null
+          : !operationallyUsable ? health.readiness.reason
+            : eligibility.selectionBlockReason
+              ? `Not usable: ${eligibility.selectionBlockReason.replaceAll("_", " ").toLowerCase()}.`
+              : "Not usable under the current-date safety contract.",
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       };
@@ -1182,12 +1282,13 @@ router.get("/analyst/market-research", async (req, res, next) => {
       date,
       market: marketParam,
       gameId,
+      readiness: health.readiness,
       rankSemantics: RANK_DONT_GATE_SEMANTICS,
       prohibitedFields: PROHIBITED_FIELDS,
       candidates,
       candidateCount: candidates.length,
       selectableCandidateCount: candidates.filter((candidate) => candidate.selectable).length,
-      systemNote: "Market engines 3A–3D populate this board. All candidates remain visible for audit; only rows with resolved identity and complete current evidence are selectable in Round Robin.",
+      systemNote: "Market engines 3A–3D populate this board. All candidates remain visible for audit; only current rows with resolved identity, complete evidence, and a READY current-date health contract are usable in Round Robin.",
     }));
   } catch (error) {
     next(error);
@@ -1581,6 +1682,22 @@ function requestedBoardMarket(value: unknown): BoardMarket | null {
   return market as BoardMarket;
 }
 
+function marketBoardPresentation(
+  entries: Awaited<ReturnType<typeof queryDailyMarketBoard>>,
+  readiness: OperationalReadiness,
+  date: string,
+) {
+  const validatedCurrentPresentation = date === readiness.currentDate && readiness.usable;
+  return validatedCurrentPresentation ? entries : entries.map((entry) => ({
+    ...entry,
+    modelPrediction: null,
+    calibratedProbability: null,
+    modelVersionId: null,
+    confidenceLabel: "NONE" as const,
+    confidenceBasis: "RESEARCH_ONLY" as const,
+  }));
+}
+
 router.post("/analyst/models/train", async (req, res, next) => {
   try {
     const result = await trainMarketModel(requestedModelMarket(req.query.market));
@@ -1660,14 +1777,20 @@ router.get("/analyst/market-board", async (req, res, next) => {
     const date = requestedBoardDate(req.query.date);
     const market = requestedBoardMarket(req.query.market);
     const entries = await queryDailyMarketBoard(date, market);
+    const health = await analystDataHealth(date);
+    const allowValidatedModelPresentation = date === health.readiness.currentDate && health.readiness.usable;
+    const presentationEntries = marketBoardPresentation(entries, health.readiness, date);
     res.json(GetAnalystDailyMarketBoardResponse.parse({
       date,
       market,
-      entries,
-      total: entries.length,
+      entries: presentationEntries,
+      total: presentationEntries.length,
+      readiness: health.readiness,
       notes: [
-        "Confidence and calibrated probability are computed server-side from frozen snapshots and verified ACTIVE artifacts.",
-        "FIRE requires STRONG research and a calibrated probability of at least 0.65. No ACTIVE calibrated model yields NONE / RESEARCH_ONLY.",
+        allowValidatedModelPresentation
+          ? "Model-derived fields are shown only because the current date is READY and the persisted row has an accepted, explicitly validated ACTIVE model contract."
+          : `Research-only presentation: ${health.readiness.reason}`,
+        "Without the current-date validation contract, model prediction, calibrated probability, and confidence are intentionally suppressed.",
         "No odds, prices, EV, CLV, or related betting fields are included.",
       ],
     }));
@@ -1683,8 +1806,15 @@ router.get("/analyst/market-board", async (req, res, next) => {
 router.get("/analyst/market-board/game-summary", async (req, res, next) => {
   try {
     const date = requestedBoardDate(req.query.date);
-    const games = await queryDailyBoardGameSummary(date);
-    res.json(GetAnalystDailyBoardGameSummaryResponse.parse({ date, games, total: games.length }));
+    const health = await analystDataHealth(date);
+    const entries = marketBoardPresentation(await queryDailyMarketBoard(date), health.readiness, date);
+    const games = await queryDailyBoardGameSummary(date, entries);
+    res.json(GetAnalystDailyBoardGameSummaryResponse.parse({
+      date,
+      games,
+      total: games.length,
+      readiness: health.readiness,
+    }));
   } catch (error) {
     if (error instanceof DailyMarketBoardValidationError) {
       res.status(400).json({ error: error.message });

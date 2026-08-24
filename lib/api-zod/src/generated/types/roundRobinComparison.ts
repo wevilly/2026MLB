@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { OperationalReadiness } from './operationalReadiness';
 import type { RoundRobinComparisonBoard } from './roundRobinComparisonBoard';
 import type { RoundRobinGameComparison } from './roundRobinGameComparison';
 
@@ -15,5 +16,6 @@ export interface RoundRobinComparison {
   date: Date;
   board: RoundRobinComparisonBoard;
   games: RoundRobinGameComparison[];
+  readiness: OperationalReadiness;
   prohibitedFields: string[];
 }

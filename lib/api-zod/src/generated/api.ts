@@ -24,6 +24,10 @@ export const GetAnalystTodayQueryParams = zod.object({
   "date": zod.date().optional().describe('Requested MLB slate date in Eastern Time. Defaults to the current Eastern date.')
 })
 
+export const getAnalystTodayResponseSourcesItemAgeMinutesMin = 0;
+
+
+
 export const GetAnalystTodayResponse = zod.object({
   "date": zod.string(),
   "timezone": zod.string(),
@@ -57,7 +61,10 @@ export const GetAnalystTodayResponse = zod.object({
   "freshness": zod.string(),
   "lastSuccess": zod.string().nullable(),
   "rowCount": zod.number(),
-  "detail": zod.string()
+  "detail": zod.string(),
+  "effectiveDate": zod.string().nullable(),
+  "ageMinutes": zod.number().int().min(getAnalystTodayResponseSourcesItemAgeMinutesMin).nullable(),
+  "isCurrentDate": zod.boolean()
 })),
   "identityCoverage": zod.object({
   "officialStartersMapped": zod.number(),
@@ -72,6 +79,16 @@ export const GetAnalystTodayResponse = zod.object({
   "quarantinedRows": zod.number(),
   "teamAssignmentConflicts": zod.number(),
   "blockingProjectedLineupIssues": zod.number()
+}),
+  "readiness": zod.object({
+  "currentDate": zod.string(),
+  "requestedDate": zod.string(),
+  "isCurrentDate": zod.boolean(),
+  "status": zod.enum(['READY', 'PARTIAL', 'BLOCKED', 'AUDIT_ONLY']),
+  "usable": zod.boolean(),
+  "reason": zod.string(),
+  "reasons": zod.array(zod.string()),
+  "observedAt": zod.coerce.date()
 }),
   "alerts": zod.array(zod.string())
 })
@@ -110,6 +127,14 @@ export const GetAnalystProjectionsResponse = zod.object({
 /**
  * @summary Get source freshness and data-quality state
  */
+export const GetAnalystDataHealthQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
+export const getAnalystDataHealthResponseSourcesItemAgeMinutesMin = 0;
+
+
+
 export const GetAnalystDataHealthResponse = zod.object({
   "overall": zod.string(),
   "phase2aReady": zod.boolean(),
@@ -119,7 +144,10 @@ export const GetAnalystDataHealthResponse = zod.object({
   "freshness": zod.string(),
   "lastSuccess": zod.string().nullable(),
   "rowCount": zod.number(),
-  "detail": zod.string()
+  "detail": zod.string(),
+  "effectiveDate": zod.string().nullable(),
+  "ageMinutes": zod.number().int().min(getAnalystDataHealthResponseSourcesItemAgeMinutesMin).nullable(),
+  "isCurrentDate": zod.boolean()
 })),
   "issues": zod.array(zod.object({
   "label": zod.string(),
@@ -166,7 +194,17 @@ export const GetAnalystDataHealthResponse = zod.object({
   "parkRequiredVenues": zod.number(),
   "parkVenueCoverageGaps": zod.number()
 }),
-  "lastRun": zod.string()
+  "lastRun": zod.string(),
+  "readiness": zod.object({
+  "currentDate": zod.string(),
+  "requestedDate": zod.string(),
+  "isCurrentDate": zod.boolean(),
+  "status": zod.enum(['READY', 'PARTIAL', 'BLOCKED', 'AUDIT_ONLY']),
+  "usable": zod.boolean(),
+  "reason": zod.string(),
+  "reasons": zod.array(zod.string()),
+  "observedAt": zod.coerce.date()
+})
 })
 
 
@@ -800,12 +838,24 @@ export const GetAnalystMarketResearchResponse = zod.object({
   "identityResolved": zod.boolean().describe('Whether the player identity has been resolved for the slate.'),
   "selectable": zod.boolean().describe('Whether this audit row can be added as a Round Robin leg.'),
   "selectionBlockReason": zod.union([zod.literal('BLOCKED'),zod.literal('NEGATIVE'),zod.literal('STALE'),zod.literal('UNRESOLVED_IDENTITY'),zod.literal('INCOMPLETE_EVIDENCE'),zod.literal(null)]).nullable().describe('The reason this row cannot be selected, when applicable.'),
+  "operationalState": zod.enum(['USABLE', 'AUDIT_ONLY']).describe('Separates rows currently safe for operations from retained audit evidence.'),
+  "auditReason": zod.string().nullable(),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 }).describe('One research candidate for a player-market-slate_date-game combination.\nRANK_DONT_GATE: research_rank is ordinal only; it implies no threshold, gate, or probability.\nTies share the same integer rank and are never collapsed.\nProhibited fields absent from this schema: ev, clv, odds, impliedProbability, vigJuice,\nedgePercent, kellyFraction, expectedValue.\n')),
   "candidateCount": zod.number().int(),
   "selectableCandidateCount": zod.number().int().min(getAnalystMarketResearchResponseSelectableCandidateCountMin).describe('Count of returned candidates that meet the shared Round Robin selection predicate.'),
-  "systemNote": zod.string()
+  "systemNote": zod.string(),
+  "readiness": zod.object({
+  "currentDate": zod.string(),
+  "requestedDate": zod.string(),
+  "isCurrentDate": zod.boolean(),
+  "status": zod.enum(['READY', 'PARTIAL', 'BLOCKED', 'AUDIT_ONLY']),
+  "usable": zod.boolean(),
+  "reason": zod.string(),
+  "reasons": zod.array(zod.string()),
+  "observedAt": zod.coerce.date()
+})
 }).describe('Market research board for a given date\/market\/game.\nPopulated by Phase 3A–3D engines. Empty until at least one engine has run.\nThe prohibitedFields array documents which analytics are permanently absent from this contract.\n')
 
 
@@ -1073,6 +1123,16 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
 }),zod.null()]),
   "comparisonReason": zod.string()
 })),
+  "readiness": zod.object({
+  "currentDate": zod.string(),
+  "requestedDate": zod.string(),
+  "isCurrentDate": zod.boolean(),
+  "status": zod.enum(['READY', 'PARTIAL', 'BLOCKED', 'AUDIT_ONLY']),
+  "usable": zod.boolean(),
+  "reason": zod.string(),
+  "reasons": zod.array(zod.string()),
+  "observedAt": zod.coerce.date()
+}),
   "prohibitedFields": zod.array(zod.string())
 }).describe('Both teams are evaluated before a game construction is selected. It contains no odds, prices, EV, CLV, vig, or probabilities.')
 
@@ -1912,6 +1972,16 @@ export const GetAnalystDailyMarketBoardResponse = zod.object({
   "boardFrozenAt": zod.string()
 }).describe('One persisted confidence record. Model values are generated only by a\nverified ACTIVE artifact with accepted calibration; no betting fields are\npart of this contract.\n')),
   "total": zod.number().int().min(getAnalystDailyMarketBoardResponseTotalMin),
+  "readiness": zod.object({
+  "currentDate": zod.string(),
+  "requestedDate": zod.string(),
+  "isCurrentDate": zod.boolean(),
+  "status": zod.enum(['READY', 'PARTIAL', 'BLOCKED', 'AUDIT_ONLY']),
+  "usable": zod.boolean(),
+  "reason": zod.string(),
+  "reasons": zod.array(zod.string()),
+  "observedAt": zod.coerce.date()
+}),
   "notes": zod.array(zod.string())
 })
 
@@ -1969,7 +2039,17 @@ export const GetAnalystDailyBoardGameSummaryResponse = zod.object({
   "boardFrozenAt": zod.string()
 }).describe('One persisted confidence record. Model values are generated only by a\nverified ACTIVE artifact with accepted calibration; no betting fields are\npart of this contract.\n'))
 })),
-  "total": zod.number().int().min(getAnalystDailyBoardGameSummaryResponseTotalMin)
+  "total": zod.number().int().min(getAnalystDailyBoardGameSummaryResponseTotalMin),
+  "readiness": zod.object({
+  "currentDate": zod.string(),
+  "requestedDate": zod.string(),
+  "isCurrentDate": zod.boolean(),
+  "status": zod.enum(['READY', 'PARTIAL', 'BLOCKED', 'AUDIT_ONLY']),
+  "usable": zod.boolean(),
+  "reason": zod.string(),
+  "reasons": zod.array(zod.string()),
+  "observedAt": zod.coerce.date()
+})
 })
 
 

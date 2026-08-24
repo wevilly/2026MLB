@@ -6,10 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DailyBoardGameSummaryGame } from './dailyBoardGameSummaryGame';
+import type { OperationalReadiness } from './operationalReadiness';
 
 export interface DailyBoardGameSummary {
   date: Date;
   games: DailyBoardGameSummaryGame[];
   /** @minimum 0 */
   total: number;
+  readiness: OperationalReadiness;
 }

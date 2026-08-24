@@ -9,7 +9,7 @@ import {
 } from '@workspace/api-client-react';
 import { AlertTriangle, CalendarDays, Info, Layers, Plus, RefreshCw, Search, X } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Badge, Kicker, LoadingPanel, Panel, QueryMessage, SectionHeading, toneFor } from '../App';
+import { Badge, Kicker, LoadingPanel, Panel, QueryMessage, ReadinessStrip, SectionHeading, toneFor } from '../App';
 
 type ResearchMarket = Extract<MarketResearchCandidate['market'], 'TB' | 'XBH' | 'WALK' | 'HR'>;
 type BoardId = 'rr1' | 'rr2' | 'rr3' | 'rr4' | 'rr5';
@@ -164,7 +164,7 @@ export default function RoundRobinPage() {
 
   const researchQuery = useGetAnalystMarketResearch({ date });
   const slateQuery = useGetAnalystToday({ date });
-  const healthQuery = useGetAnalystDataHealth();
+  const healthQuery = useGetAnalystDataHealth({ date });
   const activeBoard = BOARDS.find((board) => board.id === activeBoardId) ?? BOARDS[0];
   const manualConstructionDisabled = true;
   const comparisonQuery = useGetAnalystRoundRobinComparison({ date, board: activeBoardId.toUpperCase() as 'RR1' | 'RR2' | 'RR3' | 'RR4' | 'RR5' });
@@ -311,13 +311,14 @@ export default function RoundRobinPage() {
         </div>
         <div>
           <span>Research context</span>
-          <Badge tone={toneFor(activeHealth?.overall ?? 'NOT RUN')}>{activeHealth?.overall ?? 'NOT RUN'}</Badge>
+          <Badge tone={toneFor(activeHealth?.readiness.status ?? 'NOT RUN')}>{activeHealth?.readiness.status ?? 'NOT RUN'}</Badge>
         </div>
         <div>
           <span>Usable records</span>
           <strong>{selectableCandidateCount.toLocaleString()}</strong>
         </div>
       </div>
+      <ReadinessStrip health={activeHealth} />
 
       <div className="round-robin-tabs" role="tablist" aria-label="Round Robin boards">
         {BOARDS.map((board) => (
@@ -432,6 +433,7 @@ export default function RoundRobinPage() {
                             <span>{candidate.primaryMechanism?.replaceAll('_', ' ') ?? 'NOT FOUND'}</span>
                             {candidate.missingStaleEvidence && <small className="round-robin-missing"> · {candidate.missingStaleEvidence}</small>}
                             {selectionBlockLabel && <small className="round-robin-missing"> · {selectionBlockLabel}</small>}
+                            {candidate.auditReason && <small className="round-robin-missing"> · {candidate.auditReason}</small>}
                           </td>
                            <td className="text-xs" data-testid={`bvp-round-robin-${candidate.playerId}-${candidate.market}`}>
                              {candidate.bvpEvidence ? (

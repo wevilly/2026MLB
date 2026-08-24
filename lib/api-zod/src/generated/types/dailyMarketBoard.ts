@@ -7,6 +7,7 @@
  */
 import type { DailyMarketBoardEntry } from './dailyMarketBoardEntry';
 import type { DailyMarketBoardMarket } from './dailyMarketBoardMarket';
+import type { OperationalReadiness } from './operationalReadiness';
 
 export interface DailyMarketBoard {
   date: Date;
@@ -15,5 +16,6 @@ export interface DailyMarketBoard {
   entries: DailyMarketBoardEntry[];
   /** @minimum 0 */
   total: number;
+  readiness: OperationalReadiness;
   notes: string[];
 }

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { MarketResearchCandidate } from './marketResearchCandidate';
+import type { OperationalReadiness } from './operationalReadiness';
 
 /**
  * Market research board for a given date/market/game.
@@ -28,4 +29,5 @@ export interface MarketResearch {
      */
   selectableCandidateCount: number;
   systemNote: string;
+  readiness: OperationalReadiness;
 }

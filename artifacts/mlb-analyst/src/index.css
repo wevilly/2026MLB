@@ -550,6 +550,20 @@ button:active:not(:disabled), a:active {
 .source-title, .issue-head, .connection-head { display: flex; align-items: center; gap: 8px; }
 .source-title strong, .issue-head strong, .connection-head strong { font-size: 11px; }
 .source-row p, .connection-row p { margin: 4px 0 0; color: hsl(var(--muted-foreground)); font-size: 10px; }
+.readiness-strip { display: grid; grid-template-columns: minmax(220px, 1.3fr) minmax(170px, .8fr); gap: 14px 20px; margin: 0 0 20px; padding: 14px 16px; border: 1px solid hsl(var(--border)); border-left: 4px solid hsl(var(--muted-foreground)); background: hsl(var(--card)); }
+.readiness-strip.readiness-good { border-left-color: hsl(var(--chart-2)); }
+.readiness-strip.readiness-warn { border-left-color: hsl(var(--chart-5)); }
+.readiness-strip.readiness-bad, .readiness-strip.readiness-unavailable { border-left-color: hsl(var(--destructive)); }
+.readiness-main { display: flex; gap: 10px; align-items: flex-start; }
+.readiness-main strong { display: block; color: hsl(var(--foreground)); font-family: var(--font-mono); font-size: 12px; letter-spacing: .06em; }
+.readiness-main p { margin: 3px 0 0; color: hsl(var(--muted-foreground)); font-size: 11px; line-height: 1.45; }
+.readiness-meta { display: grid; align-content: center; gap: 4px; color: hsl(var(--muted-foreground)); font-family: var(--font-mono); font-size: 9px; }
+.readiness-meta b, .readiness-source b { color: hsl(var(--foreground)); font-weight: 600; }
+.readiness-sources { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px; border-top: 1px solid hsl(var(--border)); }
+.readiness-source { padding: 4px 6px; border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); background: hsl(var(--background) / .45); font-family: var(--font-mono); font-size: 9px; line-height: 1.35; }
+.readiness-source.source-bad { border-color: hsl(var(--destructive) / .55); }
+.readiness-source.source-warn { border-color: hsl(var(--chart-5) / .55); }
+@media (max-width: 640px) { .readiness-strip { grid-template-columns: 1fr; gap: 12px; padding: 13px; } .readiness-sources { max-height: 112px; overflow-y: auto; } }
 .source-meta { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; gap: 3px; color: hsl(var(--foreground)); font-family: var(--font-mono); font-size: 9px; }
 .source-meta small { color: hsl(var(--muted-foreground)); font-size: 8px; }
 .panel-link { display: flex; align-items: center; gap: 5px; width: fit-content; padding: 16px 0 19px; color: hsl(var(--foreground)); font-family: var(--font-mono); font-size: 10px; text-decoration: none; }

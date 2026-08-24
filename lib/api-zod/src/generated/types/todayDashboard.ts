@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { IdentityCoverage } from './identityCoverage';
+import type { OperationalReadiness } from './operationalReadiness';
 import type { SlateGame } from './slateGame';
 import type { SourceBadge } from './sourceBadge';
 
@@ -15,5 +16,6 @@ export interface TodayDashboard {
   games: SlateGame[];
   sources: SourceBadge[];
   identityCoverage: IdentityCoverage;
+  readiness: OperationalReadiness;
   alerts: string[];
 }

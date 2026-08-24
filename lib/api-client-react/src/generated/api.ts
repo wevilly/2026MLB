@@ -81,6 +81,7 @@ import type {
   GetAnalystDailyBoardGameSummaryParams,
   GetAnalystDailyMarketBoard400,
   GetAnalystDailyMarketBoardParams,
+  GetAnalystDataHealthParams,
   GetAnalystFeatureStoreParams,
   GetAnalystGameLabParams,
   GetAnalystMarketResearchParams,
@@ -423,20 +424,27 @@ export function useGetAnalystProjections<TData = Awaited<ReturnType<typeof getAn
 
 
 
-export const getGetAnalystDataHealthUrl = () => {
+export const getGetAnalystDataHealthUrl = (params?: GetAnalystDataHealthParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/analyst/data-health`
+  return stringifiedParams.length > 0 ? `/api/analyst/data-health?${stringifiedParams}` : `/api/analyst/data-health`
 }
 
 /**
  * @summary Get source freshness and data-quality state
  */
-export const getAnalystDataHealth = async ( options?: Parameters<typeof customFetch>[1]): Promise<DataHealth> => {
+export const getAnalystDataHealth = async (params?: GetAnalystDataHealthParams, options?: Parameters<typeof customFetch>[1]): Promise<DataHealth> => {
 
-  return customFetch<DataHealth>(getGetAnalystDataHealthUrl(),
+  return customFetch<DataHealth>(getGetAnalystDataHealthUrl(params),
   {
     ...options,
     method: 'GET'
@@ -449,23 +457,23 @@ export const getAnalystDataHealth = async ( options?: Parameters<typeof customFe
 
 
 
-export const getGetAnalystDataHealthQueryKey = () => {
+export const getGetAnalystDataHealthQueryKey = (params?: GetAnalystDataHealthParams,) => {
     return [
-    `/api/analyst/data-health`
+    `/api/analyst/data-health`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getGetAnalystDataHealthQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystDataHealth>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystDataHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetAnalystDataHealthQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystDataHealth>>, TError = ErrorType<unknown>>(params?: GetAnalystDataHealthParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystDataHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getGetAnalystDataHealthQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getGetAnalystDataHealthQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystDataHealth>>> = ({ signal }) => getAnalystDataHealth({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAnalystDataHealth>>> = ({ signal }) => getAnalystDataHealth(params, { signal, ...requestOptions });
 
 
 
@@ -483,11 +491,11 @@ export type GetAnalystDataHealthQueryError = ErrorType<unknown>
  */
 
 export function useGetAnalystDataHealth<TData = Awaited<ReturnType<typeof getAnalystDataHealth>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystDataHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+ params?: GetAnalystDataHealthParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystDataHealth>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
-  const queryOptions = getGetAnalystDataHealthQueryOptions(options)
+  const queryOptions = getGetAnalystDataHealthQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

@@ -17,6 +17,35 @@ export interface SourceBadge {
   lastSuccess: string | null;
   rowCount: number;
   detail: string;
+  /** @nullable */
+  effectiveDate: string | null;
+  /**
+     * @minimum 0
+     * @nullable
+     */
+  ageMinutes: number | null;
+  isCurrentDate: boolean;
+}
+
+export type OperationalReadinessStatus = typeof OperationalReadinessStatus[keyof typeof OperationalReadinessStatus];
+
+
+export const OperationalReadinessStatus = {
+  READY: 'READY',
+  PARTIAL: 'PARTIAL',
+  BLOCKED: 'BLOCKED',
+  AUDIT_ONLY: 'AUDIT_ONLY',
+} as const;
+
+export interface OperationalReadiness {
+  currentDate: string;
+  requestedDate: string;
+  isCurrentDate: boolean;
+  status: OperationalReadinessStatus;
+  usable: boolean;
+  reason: string;
+  reasons: string[];
+  observedAt: string;
 }
 
 export interface Starter {
@@ -72,6 +101,7 @@ export interface TodayDashboard {
   games: SlateGame[];
   sources: SourceBadge[];
   identityCoverage: IdentityCoverage;
+  readiness: OperationalReadiness;
   alerts: string[];
 }
 
@@ -161,6 +191,7 @@ export interface DataHealth {
   identityCoverage: IdentityCoverage;
   researchHealth: ResearchHealth;
   lastRun: string;
+  readiness: OperationalReadiness;
 }
 
 export interface ConnectionStatus {
@@ -1303,6 +1334,17 @@ export const MarketResearchCandidateSelectionBlockReason = {
 } as const;
 
 /**
+ * Separates rows currently safe for operations from retained audit evidence.
+ */
+export type MarketResearchCandidateOperationalState = typeof MarketResearchCandidateOperationalState[keyof typeof MarketResearchCandidateOperationalState];
+
+
+export const MarketResearchCandidateOperationalState = {
+  USABLE: 'USABLE',
+  AUDIT_ONLY: 'AUDIT_ONLY',
+} as const;
+
+/**
  * One research candidate for a player-market-slate_date-game combination.
  * RANK_DONT_GATE: research_rank is ordinal only; it implies no threshold, gate, or probability.
  * Ties share the same integer rank and are never collapsed.
@@ -1341,6 +1383,10 @@ export interface MarketResearchCandidate {
      * @nullable
      */
   selectionBlockReason: MarketResearchCandidateSelectionBlockReason;
+  /** Separates rows currently safe for operations from retained audit evidence. */
+  operationalState: MarketResearchCandidateOperationalState;
+  /** @nullable */
+  auditReason: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1366,6 +1412,7 @@ export interface MarketResearch {
      */
   selectableCandidateCount: number;
   systemNote: string;
+  readiness: OperationalReadiness;
 }
 
 export type RoundRobinLegMarket = typeof RoundRobinLegMarket[keyof typeof RoundRobinLegMarket];
@@ -1547,6 +1594,7 @@ export interface RoundRobinComparison {
   date: string;
   board: RoundRobinComparisonBoard;
   games: RoundRobinGameComparison[];
+  readiness: OperationalReadiness;
   prohibitedFields: string[];
 }
 
@@ -1638,6 +1686,7 @@ export interface DailyMarketBoard {
   entries: DailyMarketBoardEntry[];
   /** @minimum 0 */
   total: number;
+  readiness: OperationalReadiness;
   notes: string[];
 }
 
@@ -1704,6 +1753,7 @@ export interface DailyBoardGameSummary {
   games: DailyBoardGameSummaryGame[];
   /** @minimum 0 */
   total: number;
+  readiness: OperationalReadiness;
 }
 
 export interface ErrorResponse {
@@ -2468,6 +2518,10 @@ date?: string;
 };
 
 export type GetAnalystProjectionsParams = {
+date?: string;
+};
+
+export type GetAnalystDataHealthParams = {
 date?: string;
 };
 

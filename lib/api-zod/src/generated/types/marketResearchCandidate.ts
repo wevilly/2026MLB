@@ -9,6 +9,7 @@ import type { BatterPitcherEvidence } from './batterPitcherEvidence';
 import type { MarketResearchCandidateBullpenPathEvidence } from './marketResearchCandidateBullpenPathEvidence';
 import type { MarketResearchCandidateCounterEvidence } from './marketResearchCandidateCounterEvidence';
 import type { MarketResearchCandidateMarket } from './marketResearchCandidateMarket';
+import type { MarketResearchCandidateOperationalState } from './marketResearchCandidateOperationalState';
 import type { MarketResearchCandidateOpportunityEvidence } from './marketResearchCandidateOpportunityEvidence';
 import type { MarketResearchCandidateParkEvidence } from './marketResearchCandidateParkEvidence';
 import type { MarketResearchCandidateRecentVsSeasonVsCareer } from './marketResearchCandidateRecentVsSeasonVsCareer';
@@ -55,6 +56,10 @@ export interface MarketResearchCandidate {
      * @nullable
      */
   selectionBlockReason: MarketResearchCandidateSelectionBlockReason;
+  /** Separates rows currently safe for operations from retained audit evidence. */
+  operationalState: MarketResearchCandidateOperationalState;
+  /** @nullable */
+  auditReason: string | null;
   createdAt: string;
   updatedAt: string;
 }

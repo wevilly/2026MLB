@@ -7,6 +7,7 @@
  */
 import type { HealthIssue } from './healthIssue';
 import type { IdentityCoverage } from './identityCoverage';
+import type { OperationalReadiness } from './operationalReadiness';
 import type { ResearchHealth } from './researchHealth';
 import type { SourceBadge } from './sourceBadge';
 
@@ -18,4 +19,5 @@ export interface DataHealth {
   identityCoverage: IdentityCoverage;
   researchHealth: ResearchHealth;
   lastRun: string;
+  readiness: OperationalReadiness;
 }
