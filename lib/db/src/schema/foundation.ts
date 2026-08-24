@@ -528,8 +528,70 @@ export const venues = pgTable("venues", {
   name: text("name").notNull(),
   timezone: text("timezone"),
   orientation: text("orientation"),
+  /** Coordinates, required to request a forecast for the venue. */
+  latitude: numeric("latitude"),
+  longitude: numeric("longitude"),
+  /**
+   * Compass bearing from home plate to centre field, in degrees. Wind speed
+   * alone is not usable: a 15 mph wind blowing in and a 15 mph wind blowing out
+   * have opposite signs, and the sign is only recoverable against this bearing.
+   */
+  orientationDegrees: integer("orientation_degrees"),
+  /** OPEN, DOME, RETRACTABLE or UNKNOWN. A dome is neutral weather, not missing weather. */
+  roofType: text("roof_type"),
   metadata: jsonb("metadata").notNull().default({}),
 });
+
+/**
+ * Per-game weather, stored append-only.
+ *
+ * Weather is forecast data and it changes. Each retrieval writes a new row, so
+ * a post-freeze weather change is visible AS a change rather than overwriting
+ * the pregame state that a frozen feature vector was built from.
+ *
+ * There was previously no weather ingestion, no weather table, no weather
+ * feature and no weather term in any scoring function: a 34 degree game with a
+ * 15 mph wind blowing in ranked identically to a 78 degree game with the same
+ * wind blowing out.
+ */
+export const gameWeatherObservations = pgTable("game_weather_observations", {
+  observationId: uuid("observation_id").primaryKey().defaultRandom(),
+  gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
+  venueId: integer("venue_id").references(() => venues.venueId),
+  slateDate: date("slate_date").notNull(),
+  /** The first-pitch time this forecast targets. */
+  forecastForUtc: timestamp("forecast_for_utc", { withTimezone: true }),
+  temperatureF: numeric("temperature_f"),
+  windSpeedMph: numeric("wind_speed_mph"),
+  /** Meteorological convention: the compass bearing the wind is coming FROM. */
+  windDirectionDegrees: integer("wind_direction_degrees"),
+  /** Signed wind component along home plate to centre field. Positive is blowing out. */
+  windOutComponentMph: numeric("wind_out_component_mph"),
+  /** OUT, IN, CROSS, CALM or UNKNOWN. */
+  windComponent: text("wind_component"),
+  precipitationProbability: numeric("precipitation_probability"),
+  humidityPercent: numeric("humidity_percent"),
+  /** OPEN, CLOSED, NONE for an open-air venue, or UNKNOWN. */
+  roofState: text("roof_state"),
+  /**
+   * True when the venue is playing under a closed roof. A closed roof means
+   * weather is NEUTRAL, which is a different fact from weather being MISSING,
+   * and the two must never be conflated.
+   */
+  weatherNeutral: boolean("weather_neutral").notNull().default(false),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  /** Upstream forecast issue time. Never the time this row was computed. */
+  sourceFreshness: timestamp("source_freshness", { withTimezone: true }),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull().defaultNow(),
+  /** Content hash, so an unchanged forecast does not append an identical row. */
+  observationChecksum: text("observation_checksum").notNull(),
+  raw: jsonb("raw").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  gameChecksumIdx: uniqueIndex("game_weather_game_source_checksum_idx")
+    .on(table.gamePk, table.sourceId, table.observationChecksum),
+  gameRetrievedIdx: index("game_weather_game_retrieved_idx").on(table.gamePk, table.retrievedAt),
+}));
 
 export const games = pgTable("games", {
   gamePk: bigint("game_pk", { mode: "number" }).primaryKey(),

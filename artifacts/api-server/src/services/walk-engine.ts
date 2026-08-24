@@ -37,6 +37,7 @@
 
 import { pool } from "@workspace/db";
 import { conflictsFor, querySlateLineupPlayers } from "./lineup-sources";
+import { getSlateWeather, weatherAdjustment, type GameWeather } from "./weather-foundation";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
 
@@ -384,6 +385,7 @@ function checkCounterEvidence(
   pitcherThrows: string | null,
   hitterPA: N,
   pitcherBF: N,
+  weather: GameWeather | null = null,
 ): string[] {
   const counters: string[] = [];
   const side = resolveBatterSide(bats, pitcherThrows);
@@ -411,6 +413,12 @@ function checkCounterEvidence(
     counters.push("INSUFFICIENT_SAMPLE");
   }
 
+
+  // Weather extremes. Flags rather than score nudges: their effect is not
+  // linear, and the coefficients that suppress total bases and home runs are
+  // not the coefficients that apply to walks.
+  counters.push(...weatherAdjustment("WALK", weather).flags);
+
   return counters;
 }
 
@@ -422,6 +430,7 @@ function computeEvidenceScore(
   bats: string | null,
   pitcherThrows: string | null,
   counterEvidence: string[],
+  weather: GameWeather | null = null,
 ): number {
   const side = resolveBatterSide(bats, pitcherThrows);
 
@@ -481,6 +490,12 @@ function computeEvidenceScore(
     else if (c === "FIRST_PITCH_STRIKE_HEAVY") score -= 1;
     // INSUFFICIENT_SAMPLE: noted but no score penalty (data quality flag)
   }
+
+
+  // Weather, as a bounded second-order adjustment with WALK-specific
+  // coefficients. A closed roof contributes exactly zero and is distinguishable
+  // in the evidence from weather that is simply missing.
+  score += weatherAdjustment("WALK", weather).adjustment;
 
   return score;
 }
@@ -865,6 +880,8 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
     const pitcherCache = new Map<number, FeatureMap>();
     const parkCache    = new Map<number, FeatureMap>();
     const bullpenCache = new Map<string, BullpenWalkSummary>();
+    // One query for the whole slate rather than one per candidate.
+    const slateWeather = await getSlateWeather(slateDate);
 
     const candidates: WALKCandidate[] = [];
 
@@ -926,14 +943,16 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
       );
       const hitterPA  = n(hitterFeatures, "pa");
       const pitcherBF = n(pitcherFeatures, "bf") ?? n(pitcherFeatures, "pa");
+      const gameWeather = slateWeather.get(player.gamePk) ?? null;
       const counterEvidence = checkCounterEvidence(
         hitterFeatures, pitcherFeatures,
         player.bats, starter.throws,
-        hitterPA, pitcherBF,
+        hitterPA, pitcherBF, gameWeather,
       );
       const baseEvidenceScore = computeEvidenceScore(
         hitterFeatures, pitcherFeatures, bullpen,
         player.battingOrder, player.bats, starter.throws, counterEvidence,
+        gameWeather,
       );
       const bvp = starter.playerId === null ? null : await getBatterPitcherEvidence(player.playerId, starter.playerId, slateDate, "WALK");
       const evidenceScore = baseEvidenceScore + (bvp?.rankAdjustment ?? 0);

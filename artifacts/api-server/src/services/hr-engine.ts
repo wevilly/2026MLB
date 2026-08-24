@@ -40,6 +40,7 @@
 
 import { pool } from "@workspace/db";
 import { conflictsFor, querySlateLineupPlayers } from "./lineup-sources";
+import { getSlateWeather, weatherAdjustment, type GameWeather } from "./weather-foundation";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
 
@@ -492,6 +493,7 @@ function checkCounterEvidence(
   park: FeatureMap,
   hitterPA: N,
   pitcherBF: N,
+  weather: GameWeather | null = null,
 ): string[] {
   const counters: string[] = [];
 
@@ -528,6 +530,12 @@ function checkCounterEvidence(
     counters.push("INSUFFICIENT_SAMPLE");
   }
 
+
+  // Weather extremes. Flags rather than score nudges: their effect is not
+  // linear, and the coefficients that suppress total bases and home runs are
+  // not the coefficients that apply to walks.
+  counters.push(...weatherAdjustment("HR", weather).flags);
+
   return counters;
 }
 
@@ -540,6 +548,7 @@ function computeEvidenceScore(
   bats: string | null,
   pitcherThrows: string | null,
   counterEvidence: string[],
+  weather: GameWeather | null = null,
 ): number {
   const side = resolveBatterSide(bats, pitcherThrows);
 
@@ -634,6 +643,12 @@ function computeEvidenceScore(
     else if (c === "NEUTRAL_PARK")         score -= 1;
     // INSUFFICIENT_SAMPLE: noted but no score penalty
   }
+
+
+  // Weather, as a bounded second-order adjustment with HR-specific
+  // coefficients. A closed roof contributes exactly zero and is distinguishable
+  // in the evidence from weather that is simply missing.
+  score += weatherAdjustment("HR", weather).adjustment;
 
   return score;
 }
@@ -1062,6 +1077,8 @@ export async function runHREngine(slateDate: string): Promise<HREngineResult> {
     const pitcherCache = new Map<number, FeatureMap>();
     const parkCache    = new Map<number, FeatureMap>();
     const bullpenCache = new Map<string, BullpenHRSummary>();
+    // One query for the whole slate rather than one per candidate.
+    const slateWeather = await getSlateWeather(slateDate);
 
     const candidates: HRCandidate[] = [];
 
@@ -1125,12 +1142,14 @@ export async function runHREngine(slateDate: string): Promise<HREngineResult> {
       const hitterPA  = n(hitterFeatures, "pa");
       const pitcherBF = n(pitcherFeatures, "bf") ?? n(pitcherFeatures, "pa");
 
+      const gameWeather = slateWeather.get(player.gamePk) ?? null;
       const counterEvidence = checkCounterEvidence(
-        hitterFeatures, pitcherFeatures, parkFeatures, hitterPA, pitcherBF,
+        hitterFeatures, pitcherFeatures, parkFeatures, hitterPA, pitcherBF, gameWeather,
       );
       const baseEvidenceScore = computeEvidenceScore(
         hitterFeatures, pitcherFeatures, parkFeatures, bullpen,
         player.battingOrder, player.bats, starter.throws, counterEvidence,
+        gameWeather,
       );
       const bvp = starter.playerId === null ? null : await getBatterPitcherEvidence(player.playerId, starter.playerId, slateDate, "HR");
       const evidenceScore = baseEvidenceScore + (bvp?.rankAdjustment ?? 0);

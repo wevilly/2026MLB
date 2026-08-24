@@ -3,6 +3,7 @@ import { logger } from "../lib/logger";
 import { ingestFantasyPros, ingestMlbOfficial } from "./data-foundation";
 import { ingestResearch, researchHealth } from "./research-foundation";
 import { refreshBullpen } from "./bullpen-foundation";
+import { refreshWeather } from "./weather-foundation";
 import { runTBEngine } from "./tb-engine";
 import { runXBHEngine } from "./xbh-engine";
 import { runWALKEngine } from "./walk-engine";
@@ -30,7 +31,7 @@ export type RunStep = {
 
 const STEP_NAMES = [
   "fantasypros_ingest", "fantasypros_baseline", "research_refresh", "bullpen_refresh",
-  "tb_engine", "xbh_engine", "walk_engine", "hr_engine", "hrrbi_engine", "market_board",
+  "weather_refresh", "tb_engine", "xbh_engine", "walk_engine", "hr_engine", "hrrbi_engine", "market_board",
   "model_training", "health_check", "feature_snapshot_freeze",
 ] as const;
 
@@ -322,6 +323,9 @@ async function executeRun(runId: string, slateDate: string) {
     const scheduledGames = await scheduledGameCount(slateDate);
     await runStep(runId, steps, "research_refresh", () => ingestResearch(slateDate), true, scheduledGames);
     await runStep(runId, steps, "bullpen_refresh", () => refreshBullpen(slateDate), true, scheduledGames);
+    // Weather must land before the engines: they read the slate's observations
+    // and score a bounded weather term from them.
+    await runStep(runId, steps, "weather_refresh", () => refreshWeather(slateDate), true, scheduledGames);
     await runStep(runId, steps, "tb_engine", () => runTBEngine(slateDate), true, scheduledGames);
     await runStep(runId, steps, "xbh_engine", () => runXBHEngine(slateDate), true, scheduledGames);
     await runStep(runId, steps, "walk_engine", () => runWALKEngine(slateDate), true, scheduledGames);

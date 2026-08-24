@@ -30,6 +30,11 @@ import { pool } from "@workspace/db";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
 import { conflictsFor, querySlateLineupPlayers } from "./lineup-sources";
+import {
+  getSlateWeather,
+  weatherAdjustment,
+  type GameWeather,
+} from "./weather-foundation";
 
 // ── Source ID ─────────────────────────────────────────────────────────────────
 
@@ -118,6 +123,7 @@ interface TBCandidate {
   hitterFeatures: FeatureMap;
   pitcherFeatures: FeatureMap;
   parkFeatures: FeatureMap;
+  weather: GameWeather | null;
   bullpen: BullpenSummary;
   mechanism: TBMechanism;
   secondaryMechanism: TBMechanism | null;
@@ -155,6 +161,164 @@ const hk = (metricKey: string, pitcherHand: string | null) =>
 /** Key for pitcher features split by batter side */
 const pk = (metricKey: string, batterSide: string | null) =>
   batterSide ? `${metricKey}:${batterSide}` : metricKey;
+
+/**
+ * Composite total-bases park factor.
+ *
+ * buildParkEvidence carried the note "Park factors are context only, not used
+ * to gate or boost rank directly" and computeEvidenceScore read no park feature
+ * at all, so Coors Field and Oracle Park ranked identically for an otherwise
+ * identical hitter and matchup. The park research tables, the ingestion and the
+ * per-side splits were all built and then not used.
+ *
+ * The raw HR factor is the wrong input on its own. A total-bases outcome is a
+ * weighted mix of singles, doubles and home runs, so an HR-only factor
+ * materially misprices a park whose doubles factor diverges from its HR factor,
+ * which is precisely the interesting case.
+ *
+ * The weights approximate each component's share of total bases in a
+ * league-average run environment: singles are the largest share of hits but
+ * contribute one base each, doubles contribute two, home runs four. hits_factor
+ * stands in for the contact component because the park research tables publish
+ * no singles-only factor.
+ */
+export const TB_PARK_FACTOR_WEIGHTS = {
+  hits: 0.40,
+  doubles: 0.25,
+  homeRuns: 0.35,
+} as const;
+
+/** Park factors are published on a 100 = neutral scale. */
+const PARK_NEUTRAL = 100;
+
+/**
+ * Points of evidence score per 10 percent of park effect, and the hard cap.
+ *
+ * Park is a real effect but a second-order one. The cap is strictly below the
+ * pitcher matchup term's maximum of 3 points, so the park can never outweigh
+ * the starting pitcher.
+ */
+const PARK_SENSITIVITY = 1.0;
+export const PARK_MAX_ADJUSTMENT = 2.0;
+
+/**
+ * Composite factors beyond these are structural, not a nudge.
+ *
+ * The composite total-bases factor spans a much narrower range than the HR
+ * factor does, because singles and doubles vary far less across parks than home
+ * runs do. Roughly 92 to 116 covers the league, so these thresholds pick out the
+ * genuine outliers at each end rather than relabelling every hitter-friendly or
+ * pitcher-friendly park as structural.
+ */
+export const PARK_EXTREME_HIGH = 115;
+export const PARK_EXTREME_LOW = 92;
+
+/**
+ * Resolves a park metric, preferring the batter-side split.
+ *
+ * getParkFeatures already retrieves batter_side keyed rows and the code then
+ * read only the unsplit key.
+ */
+function resolveParkMetric(map: FeatureMap, metricKey: string, batterSide: string | null): N {
+  const split = batterSide ? n(map, `${metricKey}:${batterSide}`) : null;
+  return split ?? n(map, metricKey);
+}
+
+export type ParkContext = {
+  composite: N;
+  hitsFactor: N;
+  doublesFactor: N;
+  hrFactor: N;
+  usedBatterSideSplit: boolean;
+  adjustment: number;
+  environment: "EXTREME_HITTER_PARK" | "SUPPRESSIVE_PARK" | "NEUTRAL" | "UNKNOWN";
+};
+
+export function computeParkContext(park: FeatureMap, batterSide: string | null): ParkContext {
+  const hitsFactor = resolveParkMetric(park, "hits_factor", batterSide);
+  const doublesFactor = resolveParkMetric(park, "doubles_factor", batterSide);
+  const hrFactor = resolveParkMetric(park, "hr_factor", batterSide);
+
+  // Renormalise over whichever components are present so a missing factor does
+  // not silently pull the composite toward zero.
+  const components: Array<[N, number]> = [
+    [hitsFactor, TB_PARK_FACTOR_WEIGHTS.hits],
+    [doublesFactor, TB_PARK_FACTOR_WEIGHTS.doubles],
+    [hrFactor, TB_PARK_FACTOR_WEIGHTS.homeRuns],
+  ];
+  let weighted = 0;
+  let weight = 0;
+  for (const [value, componentWeight] of components) {
+    if (value === null) continue;
+    weighted += value * componentWeight;
+    weight += componentWeight;
+  }
+  const composite = weight > 0 ? weighted / weight : null;
+  const usedBatterSideSplit = Boolean(batterSide) && [
+    "hits_factor", "doubles_factor", "hr_factor",
+  ].some((key) => n(park, `${key}:${batterSide}`) !== null);
+
+  if (composite === null) {
+    return {
+      composite: null, hitsFactor, doublesFactor, hrFactor, usedBatterSideSplit,
+      adjustment: 0, environment: "UNKNOWN",
+    };
+  }
+  const raw = ((composite - PARK_NEUTRAL) / 10) * PARK_SENSITIVITY;
+  const adjustment = Math.max(-PARK_MAX_ADJUSTMENT, Math.min(PARK_MAX_ADJUSTMENT, raw));
+  const environment = composite >= PARK_EXTREME_HIGH
+    ? "EXTREME_HITTER_PARK"
+    : composite <= PARK_EXTREME_LOW
+      ? "SUPPRESSIVE_PARK"
+      : "NEUTRAL";
+  return {
+    composite: Number(composite.toFixed(4)),
+    hitsFactor, doublesFactor, hrFactor, usedBatterSideSplit,
+    adjustment: Number(adjustment.toFixed(4)),
+    environment,
+  };
+}
+
+/**
+ * Expected plate appearances by lineup slot.
+ *
+ * A HEURISTIC, not a fitted quantity. Real expected plate appearance by lineup
+ * slot is close to linear and well measured; the four-bucket step function this
+ * replaces threw away most of that resolution.
+ *
+ * Known limitation, deliberately not modelled here: team run environment shifts
+ * the whole curve, and once the modelling layer works this term is a candidate
+ * to be learned rather than hand-specified.
+ */
+export const EXPECTED_PLATE_APPEARANCES_BY_SLOT: readonly number[] = [
+  4.65, 4.55, 4.44, 4.34, 4.23, 4.13, 4.02, 3.92, 3.81,
+];
+export const EXPECTED_PA_IS_HEURISTIC = true;
+
+export function expectedPlateAppearances(battingOrder: number | null): N {
+  if (battingOrder === null) return null;
+  const index = Math.round(battingOrder) - 1;
+  if (index < 0 || index >= EXPECTED_PLATE_APPEARANCES_BY_SLOT.length) return null;
+  return EXPECTED_PLATE_APPEARANCES_BY_SLOT[index];
+}
+
+/**
+ * Scores opportunity on the continuous expected plate appearance value.
+ *
+ * Calibrated to reproduce the old endpoints exactly, +3 for the leadoff slot
+ * and -1 for the ninth, so the change is a gain in resolution between them
+ * rather than a change in overall weight.
+ */
+const PA_AT_LOWEST_SLOT = EXPECTED_PLATE_APPEARANCES_BY_SLOT[8];
+const PA_AT_HIGHEST_SLOT = EXPECTED_PLATE_APPEARANCES_BY_SLOT[0];
+const OPPORTUNITY_SPAN = 4;
+
+export function opportunityScore(battingOrder: number | null): number {
+  const expected = expectedPlateAppearances(battingOrder);
+  if (expected === null) return 0;
+  const slope = OPPORTUNITY_SPAN / (PA_AT_HIGHEST_SLOT - PA_AT_LOWEST_SLOT);
+  return Number(((expected - PA_AT_LOWEST_SLOT) * slope - 1).toFixed(4));
+}
 
 /**
  * Metrics deliberately read unsplit, each with its reason.
@@ -438,6 +602,7 @@ function checkCounterEvidence(
   pitcherThrows: string | null,
   hitterPA: N,
   pitcherBF: N,
+  weather: GameWeather | null = null,
 ): string[] {
   const counters: string[] = [];
   const effectiveBatterSide = resolveBatterSide(bats, pitcherThrows);
@@ -461,6 +626,11 @@ function checkCounterEvidence(
     counters.push("STRONG_RELIEF_PATH");
   }
 
+  // Weather extremes. Encoded as flags rather than score nudges because their
+  // effect is not linear: a 15 mph wind blowing in does not suppress total
+  // bases three times as much as a 5 mph wind blowing in.
+  counters.push(...weatherAdjustment("TB", weather).flags);
+
   // Insufficient sample
   if ((hitterPA !== null && hitterPA < MIN_HITTER_PA) || (pitcherBF !== null && pitcherBF < MIN_PITCHER_BF)) {
     counters.push("INSUFFICIENT_SAMPLE");
@@ -476,6 +646,8 @@ function computeEvidenceScore(
   bats: string | null,
   pitcherThrows: string | null,
   counterEvidence: string[],
+  park: FeatureMap = new Map(),
+  weather: GameWeather | null = null,
 ): number {
   const side = resolveBatterSide(bats, pitcherThrows);
   const effectiveBatterSide = side;
@@ -487,13 +659,9 @@ function computeEvidenceScore(
 
   let score = 0;
 
-  // Batting order (PA opportunity)
-  if (battingOrder !== null) {
-    if (battingOrder <= 2) score += 3;
-    else if (battingOrder <= 4) score += 2;
-    else if (battingOrder <= 6) score += 1;
-    else score -= 1;
-  }
+  // Opportunity, scored on the continuous expected plate appearance value
+  // rather than a four-bucket step function on batting order.
+  score += opportunityScore(battingOrder);
 
   // Hitter xSLG
   if (xslg !== null) {
@@ -515,12 +683,25 @@ function computeEvidenceScore(
   if (barrel !== null && barrel >= 8.0) score += 1;
   if (iso !== null && iso >= 0.200) score += 1;
 
+  // Park, as a bounded second-order adjustment. Capped strictly below the
+  // pitcher matchup term's maximum of 3, so the venue can never outweigh the
+  // starting pitcher.
+  score += computeParkContext(park, side).adjustment;
+
+  // Weather, as a bounded second-order adjustment with market-specific
+  // coefficients. A closed roof contributes exactly zero and is distinguishable
+  // in the evidence from weather that is simply missing.
+  score += weatherAdjustment("TB", weather).adjustment;
+
   // Counter-evidence penalties
   for (const c of counterEvidence) {
     if (c === "HIGH_PITCHER_K_RATE") score -= 1.5;
     else if (c === "LOW_PA_SLOT") score -= 1.5;
     else if (c === "PLATOON_RISK") score -= 1.0;
     else if (c === "STRONG_RELIEF_PATH") score -= 0.5;
+    else if (c === "EXTREME_COLD") score -= 1.0;
+    else if (c === "STRONG_WIND_IN") score -= 1.0;
+    else if (c === "STRONG_WIND_OUT") score += 1.0;
     // INSUFFICIENT_SAMPLE: noted but no score penalty (data quality, not opponent quality)
   }
 
@@ -563,9 +744,18 @@ function assignCompetitionRanks(candidates: TBCandidate[]): void {
 // ── Evidence payload builders ─────────────────────────────────────────────────
 
 function buildOpportunityEvidence(c: TBCandidate): object {
+  const expectedPA = expectedPlateAppearances(c.battingOrder);
   return {
     battingOrder: c.battingOrder,
     lineupState: c.lineupState,
+    // The actual figure, not only the label. The label is retained because
+    // consumers read it, but it is now derived from the number rather than
+    // being the only thing the engine knows.
+    expectedPlateAppearances: expectedPA,
+    expectedPlateAppearancesBasis: "HEURISTIC",
+    expectedPlateAppearancesNote:
+      "Hand-specified expected plate appearances by lineup slot. A heuristic, not a fitted "
+      + "quantity, and it does not yet account for team run environment.",
     paOpportunity: c.battingOrder === null ? "UNKNOWN"
       : c.battingOrder <= 2 ? "HIGH"
         : c.battingOrder <= 4 ? "ABOVE_AVERAGE"
@@ -614,10 +804,27 @@ function buildBullpenPathEvidence(c: TBCandidate): object {
 }
 
 function buildParkEvidence(c: TBCandidate): object {
+  const side = resolveBatterSide(c.hitterBats, c.starterThrows);
+  const context = computeParkContext(c.parkFeatures, side);
   return {
-    hrFactor: n(c.parkFeatures, "hr_factor"),
-    doublesFactor: n(c.parkFeatures, "doubles_factor"),
-    note: "Park factors are context only — not used to gate or boost rank directly",
+    compositeTotalBasesFactor: context.composite,
+    compositeWeights: TB_PARK_FACTOR_WEIGHTS,
+    hitsFactor: context.hitsFactor,
+    doublesFactor: context.doublesFactor,
+    hrFactor: context.hrFactor,
+    batterSide: side,
+    usedBatterSideSplit: context.usedBatterSideSplit,
+    rankAdjustment: context.adjustment,
+    maxRankAdjustment: PARK_MAX_ADJUSTMENT,
+    environment: context.environment,
+    note: context.environment === "EXTREME_HITTER_PARK"
+      ? `Structural hitter park: composite total-bases factor ${context.composite}. `
+        + "This is an environment override, not a nudge."
+      : context.environment === "SUPPRESSIVE_PARK"
+        ? `Structural suppressive park: composite total-bases factor ${context.composite}. `
+          + "This is an environment override, not a nudge."
+        : "Park is a bounded ranking input: a composite total-bases factor "
+          + `worth at most ${PARK_MAX_ADJUSTMENT} points, which cannot outweigh the starting pitcher term.`,
   };
 }
 
@@ -796,14 +1003,67 @@ export function buildEvidenceBlocks(c: TBCandidate): EvidenceBlock[] {
         : `Bullpen path unavailable: ${c.bullpen.reason}`,
       rawEvidence: buildBullpenPathEvidence(c),
     },
-    {
-      blockType: "PARK", metricKey: "park_hr_factor", metricLabel: "Park HR factor",
-      value: n(c.parkFeatures, "hr_factor"), unit: "factor", sampleSize: null,
-      direction: (() => { const v = n(c.parkFeatures, "hr_factor"); return v === null ? "UNKNOWN" : v >= 110 ? "FAVORABLE" : v >= 90 ? "NEUTRAL" : "UNFAVORABLE"; })(),
-      strength: "CONTEXT_ONLY",
-      narrative: "Park HR factor (Baseball Savant Statcast). Context only — not used to gate or boost rank.",
-      rawEvidence: buildParkEvidence(c),
-    },
+    (() => {
+      const weather = weatherAdjustment("TB", c.weather);
+      return {
+        blockType: "PARK",
+        metricKey: "weather_wind_out_component",
+        metricLabel: "Wind component along centre field",
+        value: c.weather?.windOutComponentMph ?? null,
+        unit: "mph",
+        sampleSize: null,
+        direction: weather.environment === "CLOSED_ROOF"
+          ? "NEUTRAL"
+          : c.weather?.windOutComponentMph == null
+            ? "UNKNOWN"
+            : c.weather.windOutComponentMph > 0 ? "FAVORABLE" : "UNFAVORABLE",
+        strength: weather.flags.length ? "STRUCTURAL_ENVIRONMENT" : "BOUNDED_RANK_INPUT",
+        narrative: `${weather.detail} Worth ${weather.adjustment} rank points`
+          + `${weather.flags.length ? `, plus flags ${weather.flags.join(", ")}` : ""}.`,
+        rawEvidence: {
+          environment: weather.environment,
+          temperatureF: c.weather?.temperatureF ?? null,
+          windSpeedMph: c.weather?.windSpeedMph ?? null,
+          windDirectionDegrees: c.weather?.windDirectionDegrees ?? null,
+          windOutComponentMph: c.weather?.windOutComponentMph ?? null,
+          windComponent: c.weather?.windComponent ?? "UNKNOWN",
+          roofState: c.weather?.roofState ?? "UNKNOWN",
+          weatherNeutral: c.weather?.weatherNeutral ?? false,
+          sourceFreshness: c.weather?.sourceFreshness ?? null,
+          retrievedAt: c.weather?.retrievedAt ?? null,
+          rankAdjustment: weather.adjustment,
+          flags: weather.flags,
+          note: weather.environment === "CLOSED_ROOF"
+            ? "A closed roof is neutral weather, which is a different fact from missing weather."
+            : weather.environment === "UNKNOWN"
+              ? "No usable weather observation. This is missing weather, not neutral weather."
+              : "Weather is a bounded ranking input with market-specific coefficients.",
+        },
+      };
+    })(),
+    (() => {
+      const side = resolveBatterSide(c.hitterBats, c.starterThrows);
+      const park = computeParkContext(c.parkFeatures, side);
+      return {
+        blockType: "PARK",
+        metricKey: "park_total_bases_factor",
+        metricLabel: "Composite total bases park factor",
+        value: park.composite,
+        unit: "factor",
+        sampleSize: null,
+        direction: park.composite === null
+          ? "UNKNOWN"
+          : park.composite >= 110 ? "FAVORABLE" : park.composite >= 90 ? "NEUTRAL" : "UNFAVORABLE",
+        strength: park.environment === "NEUTRAL" || park.environment === "UNKNOWN"
+          ? "BOUNDED_RANK_INPUT"
+          : "STRUCTURAL_ENVIRONMENT",
+        narrative: `Composite total bases park factor ${park.composite ?? "unavailable"}, weighted `
+          + `${TB_PARK_FACTOR_WEIGHTS.hits} hits / ${TB_PARK_FACTOR_WEIGHTS.doubles} doubles / `
+          + `${TB_PARK_FACTOR_WEIGHTS.homeRuns} home runs. Worth ${park.adjustment} rank points, `
+          + `bounded at ${PARK_MAX_ADJUSTMENT} so it cannot outweigh the starting pitcher.`,
+        rawEvidence: buildParkEvidence(c),
+      };
+    })(),
   ];
 
   if (c.counterEvidence.length > 0) {
@@ -981,6 +1241,8 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
     const parkCache = new Map<number, FeatureMap>();
     const bullpenCache = new Map<string, BullpenSummary>();
     const bvpCache = new Map<string, Awaited<ReturnType<typeof getBatterPitcherEvidence>>>();
+    // One query for the whole slate rather than one per candidate.
+    const slateWeather = await getSlateWeather(slateDate);
 
     const candidates: TBCandidate[] = [];
 
@@ -1041,14 +1303,16 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
       const hitterPA = resolveHitterMetric(hitterFeatures, "pa", null);
       const pitcherBF = resolvePitcherMetric(pitcherFeatures, "bf", null)
         ?? resolvePitcherMetric(pitcherFeatures, "pa", null);
+      const gameWeather = slateWeather.get(player.gamePk) ?? null;
       const counterEvidence = checkCounterEvidence(
         hitterFeatures, pitcherFeatures, bullpen,
         player.battingOrder, player.bats, starter.throws,
-        hitterPA, pitcherBF,
+        hitterPA, pitcherBF, gameWeather,
       );
       const baseEvidenceScore = computeEvidenceScore(
         hitterFeatures, pitcherFeatures,
         player.battingOrder, player.bats, starter.throws, counterEvidence,
+        parkFeatures, gameWeather,
       );
       // Cached by (batter, starter). The same starter faces every hitter in the
       // opposing lineup, so this was one uncached lookup per candidate.
@@ -1071,6 +1335,7 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
         hitterBats: player.bats, starterPlayerId: starter.playerId,
         starterThrows: starter.throws, starterState: starter.starterState,
         hitterFeatures, pitcherFeatures, parkFeatures, bullpen,
+        weather: gameWeather,
         mechanism, secondaryMechanism, researchState, counterEvidence,
         evidenceScore, researchRank: null, missingData,
       });
