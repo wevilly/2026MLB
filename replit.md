@@ -233,6 +233,15 @@ Exactly one ACTIVE model per market, enforced by the partial unique index
 
 ## Known open work
 
+`docs/MLB_Analyst_Next_Session_Plan_20260824.docx` is the starting point. It
+sequences the deployment steps that have to run before the system produces
+anything, the two decisions that need an operator answer, the measurements still
+owed, and the audit backlog by severity.
+
+Read it first, because the remediation is merged but not deployed: the
+migrations have not been applied and no model has been retrained under the new
+fitter, so the board still emits RESEARCH_ONLY for every row.
+
 `docs/audit-extension-2026-08-24.md` holds the findings for every service the
 original audit did not read, plus the frontend. Seventeen items are scheduled
 there, with severity and with which earlier task each repeats. The one to read
