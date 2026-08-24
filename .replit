@@ -8,16 +8,17 @@ deploymentTarget = "autoscale"
 args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
 
-[workflows]
-runButton = "Project"
-
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 180000
+# A frozen-lockfile install on a cold pnpm store, plus pre-push migrations, a
+# full schema push and 121 immutability statements, does not reliably fit in
+# three minutes. A postMerge that is killed mid-push leaves the schema half
+# applied, which is the state this hook exists to prevent.
+timeoutMs = 600000
 
 [nix]
 channel = "stable-25_05"
