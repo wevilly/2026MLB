@@ -1,4 +1,5 @@
 import { pool } from "@workspace/db";
+import { prohibitedBettingTermInProse } from "./betting-content-guard";
 
 export const BETTOR_MARKETS = ["TB", "XBH", "WALK", "HR"] as const;
 export type BettorMarket = (typeof BETTOR_MARKETS)[number];
@@ -48,6 +49,31 @@ const SHORT_MARKET: Record<string, BettorMarket> = {
 
 export class BettorIntelligenceValidationError extends Error {}
 export class BettorIntelligenceConflictError extends Error {}
+
+/**
+ * Audit S3. This service never applied the prohibited-betting check at all,
+ * on the one surface whose entire purpose is accepting content written outside
+ * the system. Everything it ingests is authored by someone else, so the check
+ * belongs here more than anywhere.
+ *
+ * No odds, prices, expected value, implied probability, CLV, stake or vig, in
+ * any code path. Pricing is handled outside this system by the operator at the
+ * book, and a bettor's post is exactly where it would otherwise arrive.
+ *
+ * Identifiers get the full vocabulary. Free-form rationale gets the prose
+ * variant, which still rejects every unambiguous pricing term and only spares
+ * "over" and "under", because "over the last 15 games" is research and
+ * refusing it would stop no pricing from entering.
+ */
+function assertNoBettingContentInProse(value: string | null | undefined, field: string): void {
+  if (typeof value !== "string" || !value) return;
+  const prohibited = prohibitedBettingTermInProse(value);
+  if (prohibited) {
+    throw new BettorIntelligenceValidationError(
+      `${field} contains prohibited betting content ("${prohibited}"). Record the baseball mechanism, never the price.`,
+    );
+  }
+}
 
 export type BettorSourceInput = {
   platform: string;
@@ -682,8 +708,23 @@ export async function ingestBettorPick(input: BettorPickInput) {
     throw new BettorIntelligenceValidationError("postedAt must be a valid date-time");
   }
 
+  // Audit S3. reasoning is free text written outside this system and is the
+  // one field on this surface that carries content rather than identity, so it
+  // is the field betting data would actually arrive in. Checked before it is
+  // summarised, so an oversized rationale cannot smuggle a price past the
+  // retention limit into the paraphrase.
+  //
+  // platform, accountHandle, personIdentityKey and sourceUrl are deliberately
+  // NOT filtered. They are identity and provenance, not content: an account
+  // legitimately named for odds is still an account, and the URL a pick was
+  // posted at is lineage. Refusing them would lose the record of who said what
+  // and where, while stopping no pricing from entering.
+  assertNoBettingContentInProse(input.reasoning, "reasoning");
+
   const summary = summarizeReasoning(input.reasoning, input.mechanismTags);
   const sourceUrl = normalizedOptional(input.sourceUrl, "sourceUrl", 2048);
+  // Defence in depth: the paraphrase is what is persisted and returned.
+  assertNoBettingContentInProse(summary.reasoningParaphrase, "reasoningParaphrase");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");

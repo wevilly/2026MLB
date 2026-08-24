@@ -14,6 +14,9 @@
 
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
+// The prohibited-betting vocabulary is shared with bettor-intelligence, which
+// audit S3 found was applying no such check at all. See betting-content-guard.
+import { prohibitedBettingTerm } from "./betting-content-guard";
 
 type JsonObject = Record<string, unknown>;
 
@@ -68,54 +71,8 @@ const REQUIRED_FEATURE_VECTOR_KEYS = [
   "parkFeatures",
 ] as const;
 
-const PROHIBITED_BETTING_TOKENS = new Set([
-  "bet",
-  "bets",
-  "betting",
-  "clv",
-  "juice",
-  "moneyline",
-  "odds",
-  "odd",
-  "over",
-  "payout",
-  "price",
-  "sportsbook",
-  "sportsbooks",
-  "sportsbook",
-  "spread",
-  "stake",
-  "stakes",
-  "under",
-  "vig",
-  "wager",
-  "wagers",
-]);
-
-const PROHIBITED_BETTING_PHRASES = [
-  "american odds",
-  "closing line value",
-  "decimal odds",
-  "expected value",
-  "fractional odds",
-  "implied probability",
-  "implied prob",
-  "money line",
-  "point spread",
-  "sports book",
-];
-
 function isPlainJsonObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizedWords(value: string): string {
-  return value
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .replace(/\s+/g, " ");
 }
 
 function normalizedDateOnly(value: string | Date): string {
@@ -124,28 +81,6 @@ function normalizedDateOnly(value: string | Date): string {
     throw new FeatureStoreValidationError("Feature vector slateDate must use YYYY-MM-DD");
   }
   return date;
-}
-
-function prohibitedBettingTerm(value: string): string | null {
-  const normalized = normalizedWords(value);
-  if (!normalized) return null;
-  if (PROHIBITED_BETTING_PHRASES.some((phrase) => normalized.includes(phrase))) {
-    return normalized;
-  }
-  const words = normalized.split(" ");
-  for (const [index, word] of words.entries()) {
-    if (word === "ev") {
-      // Baseball research commonly uses avg_ev / max_ev for average or maximum
-      // exit velocity. A standalone `ev` key is still prohibited expected-value
-      // betting data, while these established baseball metric names are valid.
-      if (!["avg", "average", "max", "maximum", "mean", "median"].includes(words[index - 1] ?? "")) {
-        return word;
-      }
-      continue;
-    }
-    if (PROHIBITED_BETTING_TOKENS.has(word)) return word;
-  }
-  return null;
 }
 
 function assertNoBettingData(value: unknown, path: string, depth = 0): void {
