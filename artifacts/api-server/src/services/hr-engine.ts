@@ -39,6 +39,7 @@
  */
 
 import { pool } from "@workspace/db";
+import { MARKET_TO_DB } from "./market-codes";
 import { conflictsFor, querySlateLineupPlayers } from "./lineup-sources";
 import { getSlateWeather, weatherAdjustment, type GameWeather } from "./weather-foundation";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
@@ -47,7 +48,7 @@ import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
 // ── Source / market constants ─────────────────────────────────────────────────
 
 const HR_ENGINE_SOURCE = "HR_ENGINE";
-const MARKET = "HOME_RUN";
+const MARKET = MARKET_TO_DB.HR;
 
 // ── Mechanism thresholds ──────────────────────────────────────────────────────
 

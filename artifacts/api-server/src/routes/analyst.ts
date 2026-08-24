@@ -74,6 +74,7 @@ import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFa
 import { getBatterPitcherEvidence, refreshBatterPitcherSlate, type BvpMarket } from "../services/batter-pitcher-research";
 import { compareRoundRobinGame, type RoundRobinBoardId, type RoundRobinCandidate } from "../services/round-robin-comparison";
 import { LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter } from "../services/lineup-sources";
+import { RR_DB_TO_MARKET, RR_MARKET_TO_DB } from "../services/market-codes";
 
 /**
  * Accepted (source, state) pairs for the Round Robin lineup read, in precedence
@@ -1006,20 +1007,10 @@ router.post("/analyst/refresh/batter-pitcher", async (req, res, next) => {
  * market_research_candidates.market (marketTypeEnum).
  * Engines 3A–3D write using the DB enum; the API exposes short codes.
  */
-const MARKET_SHORTCODE_TO_DB: Record<string, string> = {
-  TB: "TOTAL_BASES_2_PLUS",
-  XBH: "EXTRA_BASE_HIT",
-  WALK: "BATTER_WALK",
-  HR: "HOME_RUN",
-  H_R_RBI: "HITS_RUNS_RBI_2_PLUS",
-};
-const MARKET_DB_TO_SHORTCODE: Record<string, string> = {
-  TOTAL_BASES_2_PLUS: "TB",
-  EXTRA_BASE_HIT: "XBH",
-  BATTER_WALK: "WALK",
-  HOME_RUN: "HR",
-  HITS_RUNS_RBI_2_PLUS: "H_R_RBI",
-};
+// The vocabulary lives in market-codes.ts. These aliases keep the existing call
+// sites readable without a second copy of the mapping in this file.
+const MARKET_SHORTCODE_TO_DB: Record<string, string> = RR_MARKET_TO_DB;
+const MARKET_DB_TO_SHORTCODE: Record<string, string> = RR_DB_TO_MARKET;
 
 const RANK_DONT_GATE_SEMANTICS =
   "RANK_DONT_GATE: research_rank is an ordinal integer only; " +

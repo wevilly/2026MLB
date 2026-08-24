@@ -62,3 +62,30 @@ export function toShortMarket(dbMarket: string): ModelMarket {
 export function toShortMarketOrNull(dbMarket: string): ModelMarket | null {
   return DB_TO_MARKET[dbMarket as DbModelMarket] ?? null;
 }
+
+
+// ── Round Robin vocabulary ────────────────────────────────────────────────────
+//
+// The Round Robin board carries a fifth market, H+R+RBI, which is research-only
+// and has no model contract. It belongs in this module rather than in a second
+// record literal inside the routes.
+
+export const ROUND_ROBIN_MARKETS = ["TB", "XBH", "WALK", "HR", "H_R_RBI"] as const;
+export type RoundRobinMarketCode = (typeof ROUND_ROBIN_MARKETS)[number];
+
+export const HRRBI_DB_MARKET = "HITS_RUNS_RBI_2_PLUS";
+
+export const RR_MARKET_TO_DB: Record<RoundRobinMarketCode, string> = {
+  ...MARKET_TO_DB,
+  H_R_RBI: HRRBI_DB_MARKET,
+};
+
+export const RR_DB_TO_MARKET: Record<string, RoundRobinMarketCode> = {
+  ...DB_TO_MARKET,
+  [HRRBI_DB_MARKET]: "H_R_RBI",
+};
+
+/** Database enum value to Round Robin short code, or null when unknown. */
+export function toRoundRobinMarketOrNull(dbMarket: string): RoundRobinMarketCode | null {
+  return RR_DB_TO_MARKET[dbMarket] ?? null;
+}

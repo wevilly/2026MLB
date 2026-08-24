@@ -576,7 +576,6 @@ export function computeHeuristicAvailability(data: {
  * Looks back 3 days of relief_appearance_log data.
  */
 async function computeTeamAvailability(teamId: number, slateDate: string): Promise<number> {
-  let count = 0;
   const d1 = dateOffset(slateDate, -1);
   const d2 = dateOffset(slateDate, -2);
   const d3 = dateOffset(slateDate, -3);
@@ -593,41 +592,82 @@ async function computeTeamAvailability(teamId: number, slateDate: string): Promi
   // that window is derived from, including the absence of appearances. Where
   // the window holds no observation at all, it is null and the state is
   // UNKNOWN rather than AVAILABLE.
-  const observation = await pool.query<{ recorded_at: string | null; game_date: string | null }>(
-    `SELECT max(recorded_at)::text AS recorded_at, max(game_date)::text AS game_date
-       FROM relief_appearance_log
-      WHERE team_id = $1 AND game_date IN ($2, $3, $4)`,
-    [teamId, d1, d2, d3],
-  );
+  const season = Number(slateDate.slice(0, 4));
+  const [observation, relievers, windowAppearances, overrides] = await Promise.all([
+    pool.query<{ recorded_at: string | null; game_date: string | null }>(
+      `SELECT max(recorded_at)::text AS recorded_at, max(game_date)::text AS game_date
+         FROM relief_appearance_log
+        WHERE team_id = $1 AND game_date IN ($2, $3, $4)`,
+      [teamId, d1, d2, d3],
+    ),
+    pool.query<{ player_id: number }>(
+      `SELECT DISTINCT rp.player_id FROM reliever_profiles rp
+        WHERE rp.team_id = $1 AND rp.season = $2 AND rp.active_roster = true`,
+      [teamId, season],
+    ),
+    // Every appearance in the window for the whole team, grouped in memory.
+    // This was two queries per reliever per team, roughly 1,500 sequential
+    // round trips across thirty teams.
+    pool.query<{
+      player_id: number; game_date: string; pitch_count: number | null; is_multi_inning: boolean;
+    }>(
+      `SELECT player_id, game_date::text AS game_date, pitch_count, is_multi_inning
+         FROM relief_appearance_log
+        WHERE team_id = $1 AND game_date IN ($2, $3, $4)`,
+      [teamId, d1, d2, d3],
+    ),
+    pool.query<{ player_id: number; manager_override: string | null; manager_override_note: string | null }>(
+      `SELECT player_id, manager_override, manager_override_note
+         FROM bullpen_availability_observations
+        WHERE team_id = $1 AND slate_date = $2`,
+      [teamId, slateDate],
+    ),
+  ]);
+
   const sourceFreshness = observation.rows[0]?.recorded_at ?? null;
   const sourceObservationGameDate = observation.rows[0]?.game_date ?? null;
   const teamWindowObserved = sourceFreshness !== null;
+  if (!relievers.rows.length) return 0;
 
-  // Get all active relievers for this team this season
-  const season = Number(slateDate.slice(0, 4));
-  const relievers = await pool.query<{ player_id: number }>(
-    `SELECT DISTINCT rp.player_id FROM reliever_profiles rp
-     WHERE rp.team_id = $1 AND rp.season = $2 AND rp.active_roster = true`,
-    [teamId, season],
-  );
+  const appearanceByPlayerDate = new Map<string, { pitch_count: number | null; is_multi_inning: boolean }>();
+  for (const row of windowAppearances.rows) {
+    appearanceByPlayerDate.set(`${row.player_id}:${row.game_date}`, row);
+  }
+  const overrideByPlayer = new Map(overrides.rows.map((row) => [row.player_id, row]));
+
+  // Players with no appearance anywhere in the window need their last
+  // appearance date, which is one query for the whole team rather than one per
+  // reliever.
+  const restedPlayerIds = relievers.rows
+    .map((row) => row.player_id)
+    .filter((playerId) => ![d1, d2, d3].some((date) => appearanceByPlayerDate.has(`${playerId}:${date}`)));
+  const lastUse = new Map<number, number | null>();
+  if (restedPlayerIds.length) {
+    const lastUseQuery = await pool.query<{ player_id: number; days_since_last_use: number | null }>(
+      `SELECT DISTINCT ON (player_id) player_id, ($4::date - game_date)::int AS days_since_last_use
+         FROM relief_appearance_log
+        WHERE player_id = ANY($1) AND team_id = $2 AND game_date < $3
+        ORDER BY player_id, game_date DESC`,
+      [restedPlayerIds, teamId, d1, slateDate],
+    );
+    for (const row of lastUseQuery.rows) {
+      lastUse.set(row.player_id, asInteger(row.days_since_last_use));
+    }
+  }
+
+  type ObservationRow = [
+    number, number, string,
+    number | null, number | null, number | null,
+    number, boolean, number | null,
+    string, string | null, string | null, string, string,
+    string | null, boolean, boolean, boolean, string | null,
+  ];
+  const rows: ObservationRow[] = [];
 
   for (const { player_id: playerId } of relievers.rows) {
-    // Fetch appearances for D-1, D-2, D-3
-    const apps = await pool.query<{
-      game_date: string;
-      pitch_count: number | null;
-      is_multi_inning: boolean;
-    }>(
-      `SELECT game_date, pitch_count, is_multi_inning
-       FROM relief_appearance_log
-       WHERE player_id = $1 AND team_id = $2 AND game_date IN ($3, $4, $5)`,
-      [playerId, teamId, d1, d2, d3],
-    );
-
-    const byDate = new Map(apps.rows.map((row) => [row.game_date, row]));
-    const d1Row = byDate.get(d1);
-    const d2Row = byDate.get(d2);
-    const d3Row = byDate.get(d3);
+    const d1Row = appearanceByPlayerDate.get(`${playerId}:${d1}`);
+    const d2Row = appearanceByPlayerDate.get(`${playerId}:${d2}`);
+    const d3Row = appearanceByPlayerDate.get(`${playerId}:${d3}`);
 
     // Appearance and pitch count are tracked separately. A logged appearance
     // with a null pitch_count used to be coerced to 1, conflating "appeared,
@@ -635,97 +675,72 @@ async function computeTeamAvailability(teamId: number, slateDate: string): Promi
     const d1Appeared = Boolean(d1Row);
     const d2Appeared = Boolean(d2Row);
     const d3Appeared = Boolean(d3Row);
-    // Keep values sent to integer columns finite and integral even if a driver
-    // returns a numeric field as a string or an invalid value. Null now means
-    // the count is genuinely unknown.
     const d1Pitches = asInteger(d1Row?.pitch_count);
     const d2Pitches = asInteger(d2Row?.pitch_count);
     const d3Pitches = asInteger(d3Row?.pitch_count);
     const multiInningYesterday = d1Row?.is_multi_inning ?? false;
 
-    const usedD1 = d1Appeared;
-    const usedD2 = d2Appeared;
-    const usedD3 = d3Appeared;
-    const consecutiveDaysUsed = usedD1 ? (usedD2 ? (usedD3 ? 3 : 2) : 1) : 0;
-
-    // Days since last use
-    let daysSinceLastUse: number | null = null;
-    if (!usedD1 && !usedD2 && !usedD3) {
-      // Calculate the date difference in PostgreSQL. This avoids relying on
-      // the runtime's parser for the DATE value and guarantees an integer
-      // result for the integer availability column.
-      const lastApp = await pool.query<{ days_since_last_use: number | null }>(
-        `SELECT ($4::date - game_date)::int AS days_since_last_use
-         FROM relief_appearance_log
-         WHERE player_id = $1 AND team_id = $2 AND game_date < $3
-         ORDER BY game_date DESC LIMIT 1`,
-        [playerId, teamId, d1, slateDate],
-      );
-      if (lastApp.rows[0]) {
-        daysSinceLastUse = asInteger(lastApp.rows[0].days_since_last_use);
-      }
-    } else {
-      daysSinceLastUse = usedD1 ? 1 : usedD2 ? 2 : 3;
-    }
+    const consecutiveDaysUsed = d1Appeared ? (d2Appeared ? (d3Appeared ? 3 : 2) : 1) : 0;
+    const daysSinceLastUse = d1Appeared ? 1 : d2Appeared ? 2 : d3Appeared ? 3 : lastUse.get(playerId) ?? null;
 
     const heuristic = computeHeuristicAvailability({
       d1Pitches, d2Pitches, d3Pitches, multiInningYesterday,
       d1Appeared, d2Appeared, d3Appeared, teamWindowObserved,
     });
 
-    // Check for existing manager override
-    const existingObs = await pool.query<{
-      manager_override: string | null;
-      manager_override_note: string | null;
-    }>(
-      `SELECT manager_override, manager_override_note
-       FROM bullpen_availability_observations
-       WHERE player_id = $1 AND slate_date = $2`,
-      [playerId, slateDate],
-    );
-
-    const override = existingObs.rows[0]?.manager_override ?? null;
-    const overrideNote = existingObs.rows[0]?.manager_override_note ?? null;
+    const existing = overrideByPlayer.get(playerId);
+    const override = existing?.manager_override ?? null;
+    const overrideNote = existing?.manager_override_note ?? null;
     const finalState = override ?? heuristic;
     const confidence = override ? "MANAGER_OVERRIDE" : (heuristic === "UNKNOWN" ? "UNKNOWN" : "HEURISTIC");
 
-    await pool.query(
-      `INSERT INTO bullpen_availability_observations
-         (player_id, team_id, slate_date, d1_pitches, d2_pitches, d3_pitches,
-          consecutive_days_used, multi_inning_yesterday, days_since_last_use,
-          heuristic_availability, manager_override, manager_override_note,
-          final_state, confidence, source_freshness,
-          d1_appeared, d2_appeared, d3_appeared, source_observation_game_date, computed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,now())
-       ON CONFLICT (player_id, slate_date) DO UPDATE SET
-         d1_pitches            = EXCLUDED.d1_pitches,
-         d2_pitches            = EXCLUDED.d2_pitches,
-         d3_pitches            = EXCLUDED.d3_pitches,
-         d1_appeared           = EXCLUDED.d1_appeared,
-         d2_appeared           = EXCLUDED.d2_appeared,
-         d3_appeared           = EXCLUDED.d3_appeared,
-         consecutive_days_used = EXCLUDED.consecutive_days_used,
-         multi_inning_yesterday= EXCLUDED.multi_inning_yesterday,
-         days_since_last_use   = EXCLUDED.days_since_last_use,
-         heuristic_availability= EXCLUDED.heuristic_availability,
-         final_state           = EXCLUDED.final_state,
-         confidence            = EXCLUDED.confidence,
-         source_freshness      = EXCLUDED.source_freshness,
-         source_observation_game_date = EXCLUDED.source_observation_game_date,
-         computed_at           = now()`,
-      [
-        playerId, teamId, slateDate, d1Pitches, d2Pitches, d3Pitches,
-        consecutiveDaysUsed, multiInningYesterday, daysSinceLastUse,
-        heuristic, override, overrideNote, finalState, confidence,
-        // The upstream observation time, not now(). computed_at already
-        // records when this row was computed.
-        sourceFreshness,
-        d1Appeared, d2Appeared, d3Appeared, sourceObservationGameDate,
-      ],
-    );
-    count++;
+    rows.push([
+      playerId, teamId, slateDate, d1Pitches, d2Pitches, d3Pitches,
+      consecutiveDaysUsed, multiInningYesterday, daysSinceLastUse,
+      heuristic, override, overrideNote, finalState, confidence,
+      // The upstream observation time, not now(). computed_at already records
+      // when this row was computed.
+      sourceFreshness,
+      d1Appeared, d2Appeared, d3Appeared, sourceObservationGameDate,
+    ]);
   }
-  return count;
+
+  // One multi-row upsert per team instead of one per reliever.
+  const COLUMNS = 19;
+  const values: unknown[] = [];
+  const placeholders = rows.map((row, index) => {
+    values.push(...row);
+    const base = index * COLUMNS;
+    return `(${Array.from({ length: COLUMNS }, (_, column) => `$${base + column + 1}`).join(",")},now())`;
+  });
+  if (!placeholders.length) return 0;
+  await pool.query(
+    `INSERT INTO bullpen_availability_observations
+       (player_id, team_id, slate_date, d1_pitches, d2_pitches, d3_pitches,
+        consecutive_days_used, multi_inning_yesterday, days_since_last_use,
+        heuristic_availability, manager_override, manager_override_note,
+        final_state, confidence, source_freshness,
+        d1_appeared, d2_appeared, d3_appeared, source_observation_game_date, computed_at)
+     VALUES ${placeholders.join(",")}
+     ON CONFLICT (player_id, slate_date) DO UPDATE SET
+       d1_pitches            = EXCLUDED.d1_pitches,
+       d2_pitches            = EXCLUDED.d2_pitches,
+       d3_pitches            = EXCLUDED.d3_pitches,
+       d1_appeared           = EXCLUDED.d1_appeared,
+       d2_appeared           = EXCLUDED.d2_appeared,
+       d3_appeared           = EXCLUDED.d3_appeared,
+       consecutive_days_used = EXCLUDED.consecutive_days_used,
+       multi_inning_yesterday= EXCLUDED.multi_inning_yesterday,
+       days_since_last_use   = EXCLUDED.days_since_last_use,
+       heuristic_availability= EXCLUDED.heuristic_availability,
+       final_state           = EXCLUDED.final_state,
+       confidence            = EXCLUDED.confidence,
+       source_freshness      = EXCLUDED.source_freshness,
+       source_observation_game_date = EXCLUDED.source_observation_game_date,
+       computed_at           = now()`,
+    values,
+  );
+  return rows.length;
 }
 
 /**
@@ -1095,10 +1110,33 @@ export async function getBullpenRoom(slateDate: string, teamFilter?: string): Pr
   );
 
   const result: BullpenTeamData[] = [];
+  const teamIds = teamsQuery.rows.map((team) => team.team_id);
+  const d1Date = dateOffset(slateDate, -1);
+  const d2Date = dateOffset(slateDate, -2);
+  const d3Date = dateOffset(slateDate, -3);
 
-  for (const team of teamsQuery.rows) {
-    // Get arms with availability observations
-    const arms = await pool.query<{
+  // Four queries for every requested team, grouped in memory.
+  //
+  // These four used to run per team inside the loop, so a full bullpen room was
+  // roughly 120 sequential round trips. A slow refresh that runs close to first
+  // pitch is a refresh that misses the freeze window, which makes this a
+  // correctness-adjacent concern rather than a cosmetic one.
+  if (!teamIds.length) {
+    return {
+      date: slateDate,
+      requestedTeam: teamFilter ?? null,
+      staleFreshnessWindowSeconds: Math.round(freshnessThresholdMs / 1000),
+      teams: [],
+      summary: {
+        teamsWithData: 0, teamsStale: 0, totalArms: 0,
+        armsAvailable: 0, armsLikelyAvailable: 0, armsDoubtful: 0,
+        armsOut: 0, armsUnknown: 0,
+      },
+    };
+  }
+
+  const allArmsQuery = await pool.query<{
+      team_id: number;
       player_id: number;
       full_name: string;
       throws: string | null;
@@ -1117,7 +1155,7 @@ export async function getBullpenRoom(slateDate: string, teamFilter?: string): Pr
       source_freshness: string | null;
       computed_at: string | null;
     }>(
-      `SELECT p.player_id, p.full_name, rp.throws, rp.role,
+      `SELECT rp.team_id, p.player_id, p.full_name, rp.throws, rp.role,
               obs.d1_pitches, obs.d2_pitches, obs.d3_pitches,
               COALESCE(obs.consecutive_days_used, 0) AS consecutive_days_used,
               COALESCE(obs.multi_inning_yesterday, false) AS multi_inning_yesterday,
@@ -1132,17 +1170,26 @@ export async function getBullpenRoom(slateDate: string, teamFilter?: string): Pr
        JOIN players p ON p.player_id = rp.player_id
        LEFT JOIN bullpen_availability_observations obs
          ON obs.player_id = rp.player_id AND obs.slate_date = $1
-       WHERE rp.team_id = $2 AND rp.season = $3 AND rp.active_roster = true
-       ORDER BY CASE rp.role
+       WHERE rp.team_id = ANY($2) AND rp.season = $3 AND rp.active_roster = true
+       ORDER BY rp.team_id, CASE rp.role
          WHEN 'CLOSER' THEN 1 WHEN 'PRIMARY_SETUP' THEN 2 WHEN 'SETUP' THEN 3
          WHEN 'MIDDLE' THEN 4 WHEN 'LEFTY_SPECIALIST' THEN 5 WHEN 'SWING' THEN 6
          WHEN 'LONG_MAN' THEN 7 WHEN 'OPENER' THEN 8 ELSE 9 END,
          p.full_name`,
-      [slateDate, team.team_id, season],
+      [slateDate, teamIds, season],
     );
 
-    // Get leverage map
-    const lmRow = await pool.query<{
+  type ArmRow = (typeof allArmsQuery.rows)[number];
+  const armsByTeam = new Map<number, ArmRow[]>();
+  for (const row of allArmsQuery.rows) {
+    if (!armsByTeam.has(row.team_id)) armsByTeam.set(row.team_id, []);
+    armsByTeam.get(row.team_id)!.push(row);
+  }
+  const allArmPlayerIds = allArmsQuery.rows.map((row) => row.player_id);
+
+  const [allLeverage, allUsage, allRoleHistory] = await Promise.all([
+    pool.query<{
+      team_id: number;
       projected_9th: number | null;
       projected_8th: number | null;
       projected_7th: number | null;
@@ -1154,15 +1201,14 @@ export async function getBullpenRoom(slateDate: string, teamFilter?: string): Pr
       notes: string | null;
       computed_at: string | null;
     }>(
-      `SELECT projected_9th, projected_8th, projected_7th, highest_leverage_lefty,
+      `SELECT team_id, projected_9th, projected_8th, projected_7th, highest_leverage_lefty,
               long_man, highest_walk_reliever, lowest_walk_reliever,
               role_uncertainty, notes, computed_at::text AS computed_at
-       FROM bullpen_leverage_maps WHERE team_id = $1 AND slate_date = $2`,
-      [team.team_id, slateDate],
-    );
-
-    // Get D-1/D-2/D-3 usage grid
-    const usageQuery = await pool.query<{
+       FROM bullpen_leverage_maps WHERE team_id = ANY($1) AND slate_date = $2`,
+      [teamIds, slateDate],
+    ),
+    pool.query<{
+      team_id: number;
       game_date: string;
       player_id: number;
       full_name: string;
@@ -1170,21 +1216,18 @@ export async function getBullpenRoom(slateDate: string, teamFilter?: string): Pr
       innings_pitched: string | null;
       is_multi_inning: boolean;
     }>(
-      `SELECT ral.game_date, ral.player_id, p.full_name,
+      `SELECT ral.team_id, ral.game_date::text AS game_date, ral.player_id, p.full_name,
               ral.pitch_count, ral.innings_pitched::text, ral.is_multi_inning
        FROM relief_appearance_log ral
        JOIN players p ON p.player_id = ral.player_id
-       WHERE ral.team_id = $1
+       WHERE ral.team_id = ANY($1)
          AND ral.game_date IN ($2, $3, $4)
-       ORDER BY ral.game_date DESC, ral.pitch_count DESC NULLS LAST`,
-      [team.team_id,
-       dateOffset(slateDate, -1), dateOffset(slateDate, -2), dateOffset(slateDate, -3)],
-    );
-
-    // Role-change history: batch-load for all arms on this team in one query
-    const armPlayerIds = arms.rows.map((a) => a.player_id);
-    const roleHistoryQuery = armPlayerIds.length > 0
-      ? await pool.query<{
+       ORDER BY ral.team_id, ral.game_date DESC, ral.pitch_count DESC NULLS LAST`,
+      [teamIds, d1Date, d2Date, d3Date],
+    ),
+    allArmPlayerIds.length
+      ? pool.query<{
+          team_id: number;
           player_id: number;
           change_id: string;
           previous_role: string | null;
@@ -1195,35 +1238,52 @@ export async function getBullpenRoom(slateDate: string, teamFilter?: string): Pr
           notes: string | null;
           recorded_at: string;
         }>(
-          `SELECT player_id, change_id::text, previous_role, new_role, change_type,
+          `SELECT team_id, player_id, change_id::text, previous_role, new_role, change_type,
                   effective_date::text, source, notes, recorded_at::text
            FROM role_change_log
-           WHERE player_id = ANY($1) AND team_id = $2
+           WHERE player_id = ANY($1) AND team_id = ANY($2)
            ORDER BY recorded_at ASC`,
-          [armPlayerIds, team.team_id],
+          [allArmPlayerIds, teamIds],
         )
-      : { rows: [] as { player_id: number; change_id: string; previous_role: string | null; new_role: string; change_type: string; effective_date: string; source: string; notes: string | null; recorded_at: string }[] };
+      : Promise.resolve({ rows: [] as Array<{
+          team_id: number; player_id: number; change_id: string;
+          previous_role: string | null; new_role: string; change_type: string;
+          effective_date: string; source: string; notes: string | null; recorded_at: string;
+        }> }),
+  ]);
 
+  const leverageByTeam = new Map(allLeverage.rows.map((row) => [row.team_id, row]));
+  const usageByTeam = new Map<number, (typeof allUsage.rows)>();
+  for (const row of allUsage.rows) {
+    if (!usageByTeam.has(row.team_id)) usageByTeam.set(row.team_id, []);
+    usageByTeam.get(row.team_id)!.push(row);
+  }
+  const roleHistoryByTeamAndPlayer = new Map<string, RoleHistoryEntry[]>();
+  for (const row of allRoleHistory.rows) {
+    const key = `${row.team_id}:${row.player_id}`;
+    if (!roleHistoryByTeamAndPlayer.has(key)) roleHistoryByTeamAndPlayer.set(key, []);
+    roleHistoryByTeamAndPlayer.get(key)!.push({
+      changeId: row.change_id,
+      previousRole: row.previous_role,
+      newRole: row.new_role,
+      changeType: row.change_type,
+      effectiveDate: row.effective_date,
+      source: row.source,
+      notes: row.notes,
+      recordedAt: row.recorded_at,
+    });
+  }
+
+  for (const team of teamsQuery.rows) {
+    const arms = { rows: armsByTeam.get(team.team_id) ?? [] };
+    const lmRow = { rows: leverageByTeam.has(team.team_id) ? [leverageByTeam.get(team.team_id)!] : [] };
+    const usageQuery = { rows: usageByTeam.get(team.team_id) ?? [] };
     const roleHistoryByPlayer = new Map<number, RoleHistoryEntry[]>();
-    for (const row of roleHistoryQuery.rows) {
-      if (!roleHistoryByPlayer.has(row.player_id)) {
-        roleHistoryByPlayer.set(row.player_id, []);
-      }
-      roleHistoryByPlayer.get(row.player_id)!.push({
-        changeId: row.change_id,
-        previousRole: row.previous_role,
-        newRole: row.new_role,
-        changeType: row.change_type,
-        effectiveDate: row.effective_date,
-        source: row.source,
-        notes: row.notes,
-        recordedAt: row.recorded_at,
-      });
+    for (const row of arms.rows) {
+      const history = roleHistoryByTeamAndPlayer.get(`${team.team_id}:${row.player_id}`);
+      if (history) roleHistoryByPlayer.set(row.player_id, history);
     }
 
-    const d1Date = dateOffset(slateDate, -1);
-    const d2Date = dateOffset(slateDate, -2);
-    const d3Date = dateOffset(slateDate, -3);
     const usageByDate = (date: string) =>
       usageQuery.rows.filter((r) => r.game_date === date).map((r) => ({
         playerId: r.player_id,

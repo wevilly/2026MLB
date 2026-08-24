@@ -27,6 +27,7 @@
  */
 
 import { pool } from "@workspace/db";
+import { MARKET_TO_DB } from "./market-codes";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
 import { conflictsFor, querySlateLineupPlayers } from "./lineup-sources";
@@ -39,7 +40,7 @@ import {
 // ── Source ID ─────────────────────────────────────────────────────────────────
 
 const TB_ENGINE_SOURCE = "TB_ENGINE";
-const MARKET = "TOTAL_BASES_2_PLUS";
+const MARKET = MARKET_TO_DB.TB;
 
 // ── Mechanism thresholds ──────────────────────────────────────────────────────
 

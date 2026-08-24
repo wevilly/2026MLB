@@ -1,21 +1,19 @@
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
+import {
+  DB_TO_MARKET,
+  MARKET_TO_DB,
+  MODEL_MARKETS,
+  toShortMarketOrNull,
+} from "./market-codes";
 
 const MLB_SOURCE = "MLB_OFFICIAL";
 const MLB_GAME_FEED_URL = "https://statsapi.mlb.com/api/v1.1/game";
-const MARKETS = ["TB", "XBH", "WALK", "HR"] as const;
-const DB_MARKETS = {
-  TB: "TOTAL_BASES_2_PLUS",
-  XBH: "EXTRA_BASE_HIT",
-  WALK: "BATTER_WALK",
-  HR: "HOME_RUN",
-} as const;
-const SHORT_MARKETS: Record<string, Market | undefined> = {
-  TOTAL_BASES_2_PLUS: "TB",
-  EXTRA_BASE_HIT: "XBH",
-  BATTER_WALK: "WALK",
-  HOME_RUN: "HR",
-};
+// The market vocabulary lives in market-codes.ts. It used to be a record
+// literal here and a chain of ternaries in three more places in this file.
+const MARKETS = MODEL_MARKETS;
+const DB_MARKETS = MARKET_TO_DB;
+const SHORT_MARKETS: Record<string, Market | undefined> = DB_TO_MARKET;
 export const CORRECTION_REASONS = [
   "LATE_SCRATCH",
   "LINEUP_ERROR",
@@ -677,7 +675,7 @@ export async function createMarketPostmortem(input: {
     outcomeId: row.outcome_id,
     playerId: row.player_id,
     gamePk: Number(row.game_pk),
-    market: row.market === "TOTAL_BASES_2_PLUS" ? "TB" : row.market === "EXTRA_BASE_HIT" ? "XBH" : row.market === "BATTER_WALK" ? "WALK" : "HR",
+    market: toShortMarketOrNull(row.market),
     outcomeValue: Number(row.outcome_value),
     outcomeHit: row.outcome_hit,
     researchRank: row.research_rank,
@@ -721,7 +719,7 @@ export async function querySettlements(filters: { gamePk?: number | null; player
     playerName: row.full_name,
     gamePk: Number(row.game_pk),
     slateDate: row.slate_date,
-    market: row.market === "TOTAL_BASES_2_PLUS" ? "TB" : row.market === "EXTRA_BASE_HIT" ? "XBH" : row.market === "BATTER_WALK" ? "WALK" : "HR",
+    market: toShortMarketOrNull(row.market),
     outcomeValue: Number(row.outcome_value),
     outcomeHit: row.outcome_hit,
     components: { singles: row.singles, doubles: row.doubles, triples: row.triples, homeRuns: row.home_runs, walks: row.walks, plateAppearances: row.plate_appearances, atBats: row.at_bats },
@@ -758,7 +756,7 @@ export async function queryMarketPostmortems(filters: { playerId?: number | null
     playerId: row.player_id,
     playerName: row.full_name,
     gamePk: Number(row.game_pk),
-    market: row.market === "TOTAL_BASES_2_PLUS" ? "TB" : row.market === "EXTRA_BASE_HIT" ? "XBH" : row.market === "BATTER_WALK" ? "WALK" : "HR",
+    market: toShortMarketOrNull(row.market),
     snapshotFeatureHash: row.snapshot_feature_hash,
     outcomeValue: Number(row.outcome_value),
     outcomeHit: row.outcome_hit,

@@ -35,6 +35,7 @@
  */
 
 import { pool } from "@workspace/db";
+import { MARKET_TO_DB } from "./market-codes";
 import { conflictsFor, querySlateLineupPlayers } from "./lineup-sources";
 import { getSlateWeather, weatherAdjustment, type GameWeather } from "./weather-foundation";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
@@ -43,7 +44,7 @@ import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
 // ── Source ID ─────────────────────────────────────────────────────────────────
 
 const XBH_ENGINE_SOURCE = "XBH_ENGINE";
-const MARKET = "EXTRA_BASE_HIT";
+const MARKET = MARKET_TO_DB.XBH;
 
 // ── Mechanism thresholds ──────────────────────────────────────────────────────
 
