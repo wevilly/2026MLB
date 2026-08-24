@@ -9,43 +9,16 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { readFileSync } from "node:fs";
-import { build } from "../artifacts/api-server/node_modules/esbuild/lib/main.js";
+import { bundleService } from "./helpers/bundle.ts";
 import {
   CALIBRATION_ECE_THRESHOLD,
   MIN_FOLD_COUNT,
   SHARPNESS_MIN_STD_DEV,
 } from "../artifacts/api-server/src/services/model-math.ts";
 
-const STUBS: Record<string, string> = {
-  "@workspace/db": "export const pool = { query() { throw new Error('no database in this test'); } };\nexport const db = {};\n",
-};
 
-const stubPlugin = {
-  name: "promotion-stubs",
-  setup(pluginBuild: any) {
-    pluginBuild.onResolve({ filter: /^@workspace\/db$/ }, () => ({
-      path: "@workspace/db",
-      namespace: "promotion-stub",
-    }));
-    pluginBuild.onLoad({ filter: /.*/, namespace: "promotion-stub" }, (args: any) => ({
-      contents: STUBS[args.path],
-      loader: "js",
-    }));
-  },
-};
 
-const loaded = (async () => {
-  const result = await build({
-    entryPoints: ["artifacts/api-server/src/services/model-promotion.ts"],
-    bundle: true,
-    platform: "node",
-    format: "esm",
-    write: false,
-    plugins: [stubPlugin],
-  });
-  const source = Buffer.from(result.outputFiles[0].contents).toString("utf8");
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-})();
+const loaded = bundleService("artifacts/api-server/src/services/model-promotion.ts");
 
 /** A version that satisfies every promotion condition. */
 function promotable(overrides: Record<string, unknown> = {}) {

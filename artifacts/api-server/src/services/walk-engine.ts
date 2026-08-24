@@ -911,11 +911,15 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
       for (const conflict of conflictsFor(resolvedLineups, player.gamePk, player.playerId)) {
         missingData.push(conflict.detail);
       }
-      if (bullpen.status !== "CURRENT") {
-        missingData.push(`Bullpen path ${bullpen.status.toLowerCase()}: ${bullpen.reason}`);
-      } else if (bullpen.metricArmCount !== bullpen.armIds.length) {
-        missingData.push(`Bullpen role-path BB% research incomplete (${bullpen.metricArmCount}/${bullpen.armIds.length} arms)`);
-      }
+      // Bullpen state is disclosed on the candidate's bullpen evidence block and
+      // is deliberately NOT written into missing_stale_evidence.
+      //
+      // getMarketResearchSelectionEligibility treats any non-empty
+      // missing_stale_evidence as a blocking gap, so writing bullpen state here
+      // made an incomplete or stale bullpen path a hard veto on selection
+      // through the back door, which is exactly the gate task 2.2 removed from
+      // sideResult. Task 3.4 makes the freshness signal honest, and an honest
+      // signal attached to a veto would eliminate most pairs on most slates.
 
       const { primary: mechanism, secondary: secondaryMechanism } = classifyMechanism(
         hitterFeatures, bullpen, player.bats, starter.throws,

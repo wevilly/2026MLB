@@ -80,6 +80,15 @@ async function trainAndValidateMarkets() {
   return { markets: outcomes, promoted: false, note: "Promotion is operator-initiated and is never performed here." };
 }
 
+/** Games scheduled on the slate. The denominator for every expected-volume check. */
+async function scheduledGameCount(slateDate: string): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM games WHERE game_date = $1`,
+    [slateDate],
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
 function currentEasternDate(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
@@ -182,7 +191,44 @@ function responseDetail(value: unknown) {
   return "completed";
 }
 
-async function runStep(runId: string, steps: RunStep[], name: string, action: () => Promise<unknown>, warning = false) {
+/**
+ * Counts a step reports that describe how much work it actually did.
+ *
+ * A step that "completed with warnings" and a step that returned an empty
+ * result were previously indistinguishable in the ledger: everything after the
+ * baseline runs warning-tolerant, so a step that produced nothing on a day with
+ * a real slate looked exactly like a step that produced everything.
+ */
+const PRODUCED_COUNT_KEYS = [
+  "candidatesWritten", "candidatesProcessed", "appearancesNormalized",
+  "modeledRows", "candidatesFound", "normalized", "rowCount",
+] as const;
+
+function producedCount(value: unknown): number | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  for (const key of PRODUCED_COUNT_KEYS) {
+    const count = record[key];
+    if (typeof count === "number" && Number.isFinite(count)) return count;
+  }
+  return null;
+}
+
+/** A step's own reported status, when it reports one. */
+function reportedStatus(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const status = (value as { status?: unknown }).status;
+  return typeof status === "string" ? status : null;
+}
+
+async function runStep(
+  runId: string,
+  steps: RunStep[],
+  name: string,
+  action: () => Promise<unknown>,
+  warning = false,
+  expectedSlateWork = 0,
+) {
   const step = steps.find((candidate) => candidate.name === name)!;
   // A restart resumes from the persisted ledger. Completed work is never rerun.
   if (step.status === "SUCCESS" || step.status === "WARNING" || step.status === "FAILED") return true;
@@ -198,8 +244,23 @@ async function runStep(runId: string, steps: RunStep[], name: string, action: ()
   await persistSteps(runId, steps);
   try {
     const result = await action();
-    step.status = warning ? "WARNING" : "SUCCESS";
-    step.detail = responseDetail(result);
+    const detail = responseDetail(result);
+    const produced = producedCount(result);
+    const reported = reportedStatus(result);
+    // A step that returned an empty result on a day with a real slate is at
+    // least a WARNING, even in a warning-tolerant position, and the expected
+    // versus actual counts are recorded in the step detail.
+    const emptyOnRealSlate = produced === 0 && expectedSlateWork > 0;
+    if (reported === "FAILED") {
+      step.status = "FAILED";
+    } else if (warning || reported === "PARTIAL" || emptyOnRealSlate) {
+      step.status = "WARNING";
+    } else {
+      step.status = "SUCCESS";
+    }
+    step.detail = emptyOnRealSlate
+      ? `${detail} | produced 0 with ${expectedSlateWork} scheduled game(s) on this slate`
+      : detail;
   } catch (error) {
     step.status = "FAILED";
     step.detail = error instanceof Error ? error.message : String(error);
@@ -255,14 +316,18 @@ async function executeRun(runId: string, slateDate: string) {
     // below is optional enrichment and may not erase or delay it. Record any
     // failure in the ledger, but continue so one unavailable research source
     // cannot turn a usable projected-lineup slate into a blocked slate.
-    await runStep(runId, steps, "research_refresh", () => ingestResearch(slateDate), true);
-    await runStep(runId, steps, "bullpen_refresh", () => refreshBullpen(slateDate), true);
-    await runStep(runId, steps, "tb_engine", () => runTBEngine(slateDate), true);
-    await runStep(runId, steps, "xbh_engine", () => runXBHEngine(slateDate), true);
-    await runStep(runId, steps, "walk_engine", () => runWALKEngine(slateDate), true);
-    await runStep(runId, steps, "hr_engine", () => runHREngine(slateDate), true);
-    await runStep(runId, steps, "hrrbi_engine", () => runHRRBIEngine(slateDate), true);
-    await runStep(runId, steps, "market_board", () => populateDailyMarketBoard(slateDate), true);
+    // How much work this slate should have produced. A warning-tolerant step
+    // that returns nothing on a day with real games is recorded as a WARNING
+    // with the expected versus actual counts, not as a clean pass.
+    const scheduledGames = await scheduledGameCount(slateDate);
+    await runStep(runId, steps, "research_refresh", () => ingestResearch(slateDate), true, scheduledGames);
+    await runStep(runId, steps, "bullpen_refresh", () => refreshBullpen(slateDate), true, scheduledGames);
+    await runStep(runId, steps, "tb_engine", () => runTBEngine(slateDate), true, scheduledGames);
+    await runStep(runId, steps, "xbh_engine", () => runXBHEngine(slateDate), true, scheduledGames);
+    await runStep(runId, steps, "walk_engine", () => runWALKEngine(slateDate), true, scheduledGames);
+    await runStep(runId, steps, "hr_engine", () => runHREngine(slateDate), true, scheduledGames);
+    await runStep(runId, steps, "hrrbi_engine", () => runHRRBIEngine(slateDate), true, scheduledGames);
+    await runStep(runId, steps, "market_board", () => populateDailyMarketBoard(slateDate), true, scheduledGames);
     // Train and validate every market on each run. The pipeline never trained
     // or validated anything, which is why the model tables were stale and no
     // version had ever accumulated validation history.
@@ -541,7 +606,19 @@ type SettlementAutomationRun = {
   attempted: boolean;
   slateDate: string;
   nextAttemptAt: string | null;
+  /** True once the retry ceiling is reached and the date will not be retried. */
+  terminal?: boolean;
+  attempts?: number;
 };
+
+/**
+ * Maximum settlement attempts for one date.
+ *
+ * The retry was a fixed fifteen minutes with no ceiling and no terminal state,
+ * so a date that could never settle retried forever, filling the audit log and
+ * hiding the fact that it needed a human.
+ */
+export const SETTLEMENT_MAX_ATTEMPTS = 8;
 type SettlementDependencies = {
   ingestOfficial: (slateDate: string) => Promise<unknown>;
   automate: (slateDate: string) => Promise<{
@@ -602,14 +679,30 @@ export async function runNightlySettlement(
        ON CONFLICT (slate_date) DO NOTHING`,
       [slateDate],
     );
-    const existing = await client.query<{ status: SettlementAutomationRun["status"]; next_attempt_at: string | null }>(
-      `SELECT status, next_attempt_at::text FROM settlement_automation_runs WHERE slate_date = $1`,
+    const existing = await client.query<{
+      status: SettlementAutomationRun["status"];
+      next_attempt_at: string | null;
+      attempts: number;
+    }>(
+      `SELECT status, next_attempt_at::text, attempts FROM settlement_automation_runs WHERE slate_date = $1`,
       [slateDate],
     );
     const prior = existing.rows[0];
     if (prior?.status === "SUCCESS") return { slateDate, status: "SUCCESS", attempted: false, nextAttemptAt: null };
+    // Retry ceiling. The fixed fifteen-minute retry had no attempt limit and no
+    // terminal state, so a permanently broken date retried forever.
+    if (prior && prior.attempts >= SETTLEMENT_MAX_ATTEMPTS) {
+      return {
+        slateDate,
+        status: "FAILED",
+        attempted: false,
+        nextAttemptAt: null,
+        terminal: true,
+        attempts: prior.attempts,
+      };
+    }
     if (prior?.status === "FAILED" && prior.next_attempt_at && Date.parse(prior.next_attempt_at) > Date.now()) {
-      return { slateDate, status: "FAILED", attempted: false, nextAttemptAt: prior.next_attempt_at };
+      return { slateDate, status: "FAILED", attempted: false, nextAttemptAt: prior.next_attempt_at, attempts: prior.attempts };
     }
     await client.query(
       `UPDATE settlement_automation_runs
@@ -663,20 +756,34 @@ export async function runNightlySettlement(
       return { slateDate, status: "SUCCESS", attempted: true, nextAttemptAt: null };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const failed = await client.query<{ next_attempt_at: string }>(
+      // Exponential backoff up to the ceiling, then a terminal state with no
+      // next attempt at all.
+      const failed = await client.query<{ next_attempt_at: string | null; attempts: number }>(
         `UPDATE settlement_automation_runs
          SET status = 'FAILED', finished_at = now(), error_message = $2,
-             next_attempt_at = now() + interval '15 minutes', updated_at = now()
+             next_attempt_at = CASE
+               WHEN attempts >= $3 THEN NULL
+               ELSE now() + (interval '15 minutes' * power(2, least(attempts - 1, 4)))
+             END,
+             updated_at = now()
          WHERE slate_date = $1
-         RETURNING next_attempt_at::text`,
-        [slateDate, message],
+         RETURNING next_attempt_at::text, attempts`,
+        [slateDate, message, SETTLEMENT_MAX_ATTEMPTS],
       );
+      const attempts = failed.rows[0]?.attempts ?? 0;
+      const terminal = attempts >= SETTLEMENT_MAX_ATTEMPTS;
       await recordAuditEvent({
         actor: "SCHEDULER",
-        action: "settlement.nightly_failed",
+        action: terminal ? "settlement.nightly_terminal" : "settlement.nightly_failed",
         resourceType: "slate",
         resourceId: slateDate,
-        metadata: { retryAt: failed.rows[0]?.next_attempt_at ?? null, error: message },
+        metadata: {
+          retryAt: failed.rows[0]?.next_attempt_at ?? null,
+          attempts,
+          maxAttempts: SETTLEMENT_MAX_ATTEMPTS,
+          terminal,
+          error: message,
+        },
       });
       throw error;
     }
@@ -689,12 +796,19 @@ export async function runNightlySettlement(
 /** Process every overdue durable settlement record, including jobs stranded across midnight or a restart. */
 export async function processDueSettlementRuns() {
   const due = await pool.query<{ slate_date: string }>(
+    // A FAILED row with no next_attempt_at is terminal, not due immediately.
+    // It used to mean "retry now", which is why a permanently broken date was
+    // re-picked on every scheduler tick forever.
     `SELECT slate_date::text
      FROM settlement_automation_runs
-     WHERE status IN ('PENDING', 'RUNNING')
-        OR (status = 'FAILED' AND (next_attempt_at IS NULL OR next_attempt_at <= now()))
+     WHERE attempts < $1
+       AND (
+         status IN ('PENDING', 'RUNNING')
+         OR (status = 'FAILED' AND next_attempt_at IS NOT NULL AND next_attempt_at <= now())
+       )
      ORDER BY slate_date ASC
      LIMIT 10`,
+    [SETTLEMENT_MAX_ATTEMPTS],
   );
   const results = [];
   for (const row of due.rows) {

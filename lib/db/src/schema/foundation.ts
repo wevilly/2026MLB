@@ -1026,9 +1026,18 @@ export const bullpenAvailabilityObservations = pgTable(
     playerId: integer("player_id").notNull().references(() => players.playerId),
     teamId: integer("team_id").notNull().references(() => teams.teamId),
     slateDate: date("slate_date").notNull(),
+    /**
+     * Pitch counts for the three-day window. Null means the count is genuinely
+     * unknown, not that the reliever threw one pitch: a logged appearance with
+     * a null pitch_count used to be coerced to 1.
+     */
     d1Pitches: integer("d1_pitches"),
     d2Pitches: integer("d2_pitches"),
     d3Pitches: integer("d3_pitches"),
+    /** Whether an appearance was logged at all, independent of its pitch count. */
+    d1Appeared: boolean("d1_appeared").notNull().default(false),
+    d2Appeared: boolean("d2_appeared").notNull().default(false),
+    d3Appeared: boolean("d3_appeared").notNull().default(false),
     consecutiveDaysUsed: integer("consecutive_days_used").notNull().default(0),
     multiInningYesterday: boolean("multi_inning_yesterday").notNull().default(false),
     daysSinceLastUse: integer("days_since_last_use"),
@@ -1037,7 +1046,16 @@ export const bullpenAvailabilityObservations = pgTable(
     managerOverrideNote: text("manager_override_note"),
     finalState: bullpenAvailabilityStateEnum("final_state").notNull().default("UNKNOWN"),
     confidence: bullpenConfidenceEnum("confidence").notNull().default("UNKNOWN"),
+    /**
+     * Feed retrieval time of the most recent relief appearance this state was
+     * derived from. It used to be written as now(), which is computed_at under
+     * a second name, so the freshness gate that read it always passed. Null
+     * means the three-day window holds no observation of this bullpen at all,
+     * and the state is UNKNOWN rather than AVAILABLE.
+     */
     sourceFreshness: text("source_freshness"),
+    /** Game date of that most recent observation. */
+    sourceObservationGameDate: date("source_observation_game_date"),
     computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({

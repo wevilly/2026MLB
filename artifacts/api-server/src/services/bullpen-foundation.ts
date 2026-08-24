@@ -18,6 +18,26 @@
  */
 
 import { pool } from "@workspace/db";
+import { logger } from "../lib/logger";
+
+/**
+ * A failure that was caught and counted rather than thrown.
+ *
+ * Three bare catch blocks in this file used to discard the error entirely:
+ * ingestActiveRosters returned a partial count, fetchGamesForDate returned an
+ * empty array, persistGameAppearances returned zeros. refreshBullpen then
+ * called finishRun with SUCCESS, so a complete MLB Stats API outage produced an
+ * ingest run marked SUCCESS with zero rows and the pipeline continued as though
+ * the data had arrived.
+ */
+export type IngestFailure = { scope: string; detail: string; fatal: boolean };
+
+function recordFailure(failures: IngestFailure[], scope: string, error: unknown, fatal = false) {
+  const detail = error instanceof Error ? error.message : String(error);
+  failures.push({ scope, detail, fatal });
+  logger.error({ scope, detail, fatal }, "bullpen ingest failure");
+  return detail;
+}
 
 const BULLPEN_SOURCE = "BULLPEN";
 const MLB_BASE = "https://statsapi.mlb.com/api/v1";
@@ -96,13 +116,14 @@ async function finishRun(
   status: "SUCCESS" | "PARTIAL" | "FAILED",
   counts: { rows: number; normalized: number; rejected: number; error?: string },
   started: number,
+  errorMessage?: string,
 ): Promise<void> {
   await pool.query(
     `UPDATE ingest_runs SET finished_at = now(), status = $2, row_count = $3,
        normalized_row_count = $4, rejected_row_count = $5, duration_ms = $6, error_message = $7
      WHERE ingest_run_id = $1`,
     [ingestRunId, status, counts.rows, counts.normalized, counts.rejected,
-     Date.now() - started, counts.error ?? null],
+     Date.now() - started, errorMessage ?? counts.error ?? null],
   );
 }
 
@@ -123,11 +144,19 @@ async function finishRun(
  *
  * Returns count of reliever profiles touched (inserted or refreshed).
  */
-async function ingestActiveRosters(season: number): Promise<number> {
+async function ingestActiveRosters(
+  season: number,
+  failures: IngestFailure[],
+): Promise<number> {
   let count = 0;
   try {
     const teamsRes = await fetch(`${MLB_BASE}/teams?sportId=1&season=${season}&gameType=R`);
-    if (!teamsRes.ok) return 0;
+    if (!teamsRes.ok) {
+      // The teams endpoint failing is fatal: without it there is no roster
+      // coverage at all and every downstream count is meaningless.
+      recordFailure(failures, "teams", new Error(`MLB teams endpoint returned HTTP ${teamsRes.status}`), true);
+      return 0;
+    }
     const teamsPayload = await teamsRes.json() as JsonObject;
 
     for (const team of asArray(teamsPayload.teams)) {
@@ -198,12 +227,13 @@ async function ingestActiveRosters(season: number): Promise<number> {
           );
           count++;
         }
-      } catch {
-        // Continue to next team on roster fetch failure
+      } catch (error) {
+        // One team's roster failing is partial, not fatal: continue, but count it.
+        recordFailure(failures, `roster:${teamId}`, error);
       }
     }
-  } catch {
-    // Return partial count on teams API failure
+  } catch (error) {
+    recordFailure(failures, "teams", error, true);
   }
   return count;
 }
@@ -212,11 +242,17 @@ async function ingestActiveRosters(season: number): Promise<number> {
  * Fetch all regular-season games on a given date.
  * Returns array of { gamePk, awayTeamId, homeTeamId, status }.
  */
-async function fetchGamesForDate(date: string): Promise<Array<{ gamePk: number; awayTeamId: number; homeTeamId: number; status: string }>> {
+async function fetchGamesForDate(
+  date: string,
+  failures: IngestFailure[],
+): Promise<Array<{ gamePk: number; awayTeamId: number; homeTeamId: number; status: string }>> {
   try {
     const url = `${MLB_BASE}/schedule?sportId=1&date=${date}&gameType=R,F,D,L,W`;
     const res = await fetch(url);
-    if (!res.ok) return [];
+    if (!res.ok) {
+      recordFailure(failures, `schedule:${date}`, new Error(`MLB schedule endpoint returned HTTP ${res.status}`));
+      return [];
+    }
     const payload = await res.json() as JsonObject;
     const games: Array<{ gamePk: number; awayTeamId: number; homeTeamId: number; status: string }> = [];
     for (const date_ of asArray(payload.dates)) {
@@ -231,7 +267,8 @@ async function fetchGamesForDate(date: string): Promise<Array<{ gamePk: number; 
       }
     }
     return games;
-  } catch {
+  } catch (error) {
+    recordFailure(failures, `schedule:${date}`, error);
     return [];
   }
 }
@@ -371,6 +408,7 @@ async function persistGameAppearances(
   gameDate: string,
   awayTeamId: number,
   homeTeamId: number,
+  failures: IngestFailure[],
 ): Promise<{ normalized: number; rejected: number }> {
   let normalized = 0;
   let rejected = 0;
@@ -469,35 +507,54 @@ async function persistGameAppearances(
           );
 
           normalized++;
-        } catch {
+        } catch (error) {
+          recordFailure(failures, `appearance:${gamePk}:${playerId}`, error);
           rejected++;
         }
       }
     }
-  } catch {
+  } catch (error) {
+    recordFailure(failures, `gameFeed:${gamePk}`, error);
     rejected++;
   }
   return { normalized, rejected };
 }
 
 /**
- * Derive heuristic availability state from D-1/D-2/D-3 pitch counts.
- * Returns state and confidence label HEURISTIC.
+ * Derive heuristic availability state from the D-1/D-2/D-3 window.
+ *
+ * "Appeared" and "threw N pitches" are separate facts. A logged appearance with
+ * a null pitch_count used to be coerced to 1, which made "appeared, count
+ * unknown" indistinguishable from "threw one pitch" everywhere downstream. The
+ * appearance flags carry the first fact and the pitch counts carry the second;
+ * a null count no longer invents a number.
+ *
+ * teamWindowObserved separates "this bullpen threw nobody in three days", which
+ * is a rested bullpen, from "we have no data about this bullpen at all", which
+ * is UNKNOWN. When it is not supplied the old rule applies, so the pure
+ * function still answers the historical cases identically.
  */
 export function computeHeuristicAvailability(data: {
   d1Pitches: number | null;
   d2Pitches: number | null;
   d3Pitches: number | null;
   multiInningYesterday: boolean;
+  d1Appeared?: boolean;
+  d2Appeared?: boolean;
+  d3Appeared?: boolean;
+  /** Whether any observation of this team's bullpen exists in the window. */
+  teamWindowObserved?: boolean;
 }): "AVAILABLE" | "LIKELY_AVAILABLE" | "DOUBTFUL" | "OUT" | "UNKNOWN" {
   const { d1Pitches, d2Pitches, d3Pitches, multiInningYesterday } = data;
 
-  // No data at all
-  if (d1Pitches === null && d2Pitches === null && d3Pitches === null) return "UNKNOWN";
+  const observed = data.teamWindowObserved
+    ?? (d1Pitches !== null || d2Pitches !== null || d3Pitches !== null);
+  // No data at all is not the same fact as no appearances.
+  if (!observed) return "UNKNOWN";
 
-  const usedD1 = (d1Pitches ?? 0) > 0;
-  const usedD2 = (d2Pitches ?? 0) > 0;
-  const usedD3 = (d3Pitches ?? 0) > 0;
+  const usedD1 = data.d1Appeared ?? (d1Pitches ?? 0) > 0;
+  const usedD2 = data.d2Appeared ?? (d2Pitches ?? 0) > 0;
+  const usedD3 = data.d3Appeared ?? (d3Pitches ?? 0) > 0;
 
   // OUT: 3 consecutive days
   if (usedD1 && usedD2 && usedD3) return "OUT";
@@ -523,6 +580,28 @@ async function computeTeamAvailability(teamId: number, slateDate: string): Promi
   const d1 = dateOffset(slateDate, -1);
   const d2 = dateOffset(slateDate, -2);
   const d3 = dateOffset(slateDate, -3);
+
+  // The upstream observation this team's availability is derived from.
+  //
+  // source_freshness used to be written as new Date().toISOString(), which is
+  // computed_at under a second name, and isCurrentBullpenTimestamp then checked
+  // that value as if it described the age of the MLB data. The gate always
+  // passed regardless of how stale the underlying feed was: a tautology.
+  //
+  // It is now the feed retrieval time of the most recent relief appearance in
+  // the D-1/D-2/D-3 window for this team, which is the evidence every state in
+  // that window is derived from, including the absence of appearances. Where
+  // the window holds no observation at all, it is null and the state is
+  // UNKNOWN rather than AVAILABLE.
+  const observation = await pool.query<{ recorded_at: string | null; game_date: string | null }>(
+    `SELECT max(recorded_at)::text AS recorded_at, max(game_date)::text AS game_date
+       FROM relief_appearance_log
+      WHERE team_id = $1 AND game_date IN ($2, $3, $4)`,
+    [teamId, d1, d2, d3],
+  );
+  const sourceFreshness = observation.rows[0]?.recorded_at ?? null;
+  const sourceObservationGameDate = observation.rows[0]?.game_date ?? null;
+  const teamWindowObserved = sourceFreshness !== null;
 
   // Get all active relievers for this team this season
   const season = Number(slateDate.slice(0, 4));
@@ -550,16 +629,23 @@ async function computeTeamAvailability(teamId: number, slateDate: string): Promi
     const d2Row = byDate.get(d2);
     const d3Row = byDate.get(d3);
 
+    // Appearance and pitch count are tracked separately. A logged appearance
+    // with a null pitch_count used to be coerced to 1, conflating "appeared,
+    // count unknown" with "threw one pitch".
+    const d1Appeared = Boolean(d1Row);
+    const d2Appeared = Boolean(d2Row);
+    const d3Appeared = Boolean(d3Row);
     // Keep values sent to integer columns finite and integral even if a driver
-    // returns a numeric field as a string or an invalid value.
-    const d1Pitches = asInteger(d1Row?.pitch_count) ?? (d1Row ? 1 : null);
-    const d2Pitches = asInteger(d2Row?.pitch_count) ?? (d2Row ? 1 : null);
-    const d3Pitches = asInteger(d3Row?.pitch_count) ?? (d3Row ? 1 : null);
+    // returns a numeric field as a string or an invalid value. Null now means
+    // the count is genuinely unknown.
+    const d1Pitches = asInteger(d1Row?.pitch_count);
+    const d2Pitches = asInteger(d2Row?.pitch_count);
+    const d3Pitches = asInteger(d3Row?.pitch_count);
     const multiInningYesterday = d1Row?.is_multi_inning ?? false;
 
-    const usedD1 = (d1Pitches ?? 0) > 0;
-    const usedD2 = (d2Pitches ?? 0) > 0;
-    const usedD3 = (d3Pitches ?? 0) > 0;
+    const usedD1 = d1Appeared;
+    const usedD2 = d2Appeared;
+    const usedD3 = d3Appeared;
     const consecutiveDaysUsed = usedD1 ? (usedD2 ? (usedD3 ? 3 : 2) : 1) : 0;
 
     // Days since last use
@@ -582,7 +668,10 @@ async function computeTeamAvailability(teamId: number, slateDate: string): Promi
       daysSinceLastUse = usedD1 ? 1 : usedD2 ? 2 : 3;
     }
 
-    const heuristic = computeHeuristicAvailability({ d1Pitches, d2Pitches, d3Pitches, multiInningYesterday });
+    const heuristic = computeHeuristicAvailability({
+      d1Pitches, d2Pitches, d3Pitches, multiInningYesterday,
+      d1Appeared, d2Appeared, d3Appeared, teamWindowObserved,
+    });
 
     // Check for existing manager override
     const existingObs = await pool.query<{
@@ -605,12 +694,16 @@ async function computeTeamAvailability(teamId: number, slateDate: string): Promi
          (player_id, team_id, slate_date, d1_pitches, d2_pitches, d3_pitches,
           consecutive_days_used, multi_inning_yesterday, days_since_last_use,
           heuristic_availability, manager_override, manager_override_note,
-          final_state, confidence, source_freshness, computed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
+          final_state, confidence, source_freshness,
+          d1_appeared, d2_appeared, d3_appeared, source_observation_game_date, computed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,now())
        ON CONFLICT (player_id, slate_date) DO UPDATE SET
          d1_pitches            = EXCLUDED.d1_pitches,
          d2_pitches            = EXCLUDED.d2_pitches,
          d3_pitches            = EXCLUDED.d3_pitches,
+         d1_appeared           = EXCLUDED.d1_appeared,
+         d2_appeared           = EXCLUDED.d2_appeared,
+         d3_appeared           = EXCLUDED.d3_appeared,
          consecutive_days_used = EXCLUDED.consecutive_days_used,
          multi_inning_yesterday= EXCLUDED.multi_inning_yesterday,
          days_since_last_use   = EXCLUDED.days_since_last_use,
@@ -618,12 +711,16 @@ async function computeTeamAvailability(teamId: number, slateDate: string): Promi
          final_state           = EXCLUDED.final_state,
          confidence            = EXCLUDED.confidence,
          source_freshness      = EXCLUDED.source_freshness,
+         source_observation_game_date = EXCLUDED.source_observation_game_date,
          computed_at           = now()`,
       [
         playerId, teamId, slateDate, d1Pitches, d2Pitches, d3Pitches,
         consecutiveDaysUsed, multiInningYesterday, daysSinceLastUse,
         heuristic, override, overrideNote, finalState, confidence,
-        new Date().toISOString(),
+        // The upstream observation time, not now(). computed_at already
+        // records when this row was computed.
+        sourceFreshness,
+        d1Appeared, d2Appeared, d3Appeared, sourceObservationGameDate,
       ],
     );
     count++;
@@ -847,11 +944,27 @@ export async function getBullpenRolePath(teamId: number, slateDate: string): Pro
  * Main ingestion entry point. Refreshes the last 3 days of game data and
  * recomputes availability observations and leverage maps for slateDate.
  */
+/**
+ * Whether the slate had scheduled games. An ingest that normalized zero
+ * appearances on a day that had a real slate is a failure, not a success.
+ */
+async function scheduledGamesInWindow(slateDate: string): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM games
+      WHERE game_date IN ($1::date - 3, $1::date - 2, $1::date - 1)`,
+    [slateDate],
+  );
+  return Number(result.rows[0]?.count ?? 0);
+}
+
 export async function refreshBullpen(slateDate: string): Promise<{
+  status: "SUCCESS" | "PARTIAL" | "FAILED";
   gamesProcessed: number;
   appearancesNormalized: number;
   appearancesRejected: number;
   teamsComputed: number;
+  expectedGames: number;
+  failures: IngestFailure[];
   error?: string;
 }> {
   await ensureBullpenSource();
@@ -862,6 +975,7 @@ export async function refreshBullpen(slateDate: string): Promise<{
   let appearancesNormalized = 0;
   let appearancesRejected = 0;
   let runError: string | undefined;
+  const failures: IngestFailure[] = [];
 
   const season = Number(slateDate.slice(0, 4));
 
@@ -869,16 +983,16 @@ export async function refreshBullpen(slateDate: string): Promise<{
     // Step 1: Ensure all active MLB pitchers have profiles (roster coverage).
     // This runs before game-feed ingestion so arms that haven't appeared recently
     // still show up in the bullpen room with UNKNOWN state.
-    await ingestActiveRosters(season);
+    await ingestActiveRosters(season, failures);
 
     // Step 2: Ingest last 3 days of completed game appearances.
     for (let offset = -3; offset <= -1; offset++) {
       const date = dateOffset(slateDate, offset);
-      const games = await fetchGamesForDate(date);
+      const games = await fetchGamesForDate(date, failures);
       for (const game of games) {
         if (!game.status.toLowerCase().includes("final")) continue;
         const { normalized, rejected } = await persistGameAppearances(
-          game.gamePk, date, game.awayTeamId, game.homeTeamId,
+          game.gamePk, date, game.awayTeamId, game.homeTeamId, failures,
         );
         appearancesNormalized += normalized;
         appearancesRejected += rejected;
@@ -899,13 +1013,42 @@ export async function refreshBullpen(slateDate: string): Promise<{
       teamsComputed++;
     }
 
-    await finishRun(runId, "SUCCESS", {
+    // Expected-volume check. Zero normalized appearances on a window that had
+    // scheduled games is a failure, whatever the sub-fetches reported.
+    const expectedGames = await scheduledGamesInWindow(slateDate);
+    const fatal = failures.some((failure) => failure.fatal);
+    const emptyDespiteSlate = expectedGames > 0 && appearancesNormalized === 0;
+    const status: "SUCCESS" | "PARTIAL" | "FAILED" = fatal || emptyDespiteSlate
+      ? "FAILED"
+      : failures.length
+        ? "PARTIAL"
+        : "SUCCESS";
+    if (status !== "SUCCESS") {
+      runError = fatal
+        ? `Bullpen ingest failed: ${failures.filter((f) => f.fatal).map((f) => `${f.scope}: ${f.detail}`).join("; ")}`
+        : emptyDespiteSlate
+          ? `Bullpen ingest normalized zero appearances across ${expectedGames} scheduled game(s).`
+          : `Bullpen ingest completed with ${failures.length} sub-fetch failure(s): `
+            + failures.slice(0, 5).map((f) => `${f.scope}: ${f.detail}`).join("; ");
+      logger.error({ slateDate, status, failures }, "bullpen refresh did not fully succeed");
+    }
+
+    await finishRun(runId, status, {
       rows: gamesProcessed,
       normalized: appearancesNormalized,
       rejected: appearancesRejected,
-    }, started);
+    }, started, runError);
 
-    return { gamesProcessed, appearancesNormalized, appearancesRejected, teamsComputed };
+    return {
+      status,
+      gamesProcessed,
+      appearancesNormalized,
+      appearancesRejected,
+      teamsComputed,
+      expectedGames,
+      failures,
+      ...(runError ? { error: runError } : {}),
+    };
   } catch (error) {
     runError = error instanceof Error ? error.message : String(error);
     await finishRun(runId, "FAILED", {
@@ -914,7 +1057,16 @@ export async function refreshBullpen(slateDate: string): Promise<{
       rejected: appearancesRejected,
       error: runError,
     }, started);
-    return { gamesProcessed, appearancesNormalized, appearancesRejected, teamsComputed: 0, error: runError };
+    return {
+      status: "FAILED",
+      gamesProcessed,
+      appearancesNormalized,
+      appearancesRejected,
+      teamsComputed: 0,
+      expectedGames: 0,
+      failures,
+      error: runError,
+    };
   }
 }
 

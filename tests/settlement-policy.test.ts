@@ -8,28 +8,10 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { readFileSync } from "node:fs";
-import { build } from "../artifacts/api-server/node_modules/esbuild/lib/main.js";
+import { bundleService } from "./helpers/bundle.ts";
 
-const STUB = "export const pool = { query() { throw new Error('no database in this test'); } };\nexport const db = {};\n";
 
-const settlement = (async () => {
-  const result = await build({
-    entryPoints: ["artifacts/api-server/src/services/settlement.ts"],
-    bundle: true,
-    platform: "node",
-    format: "esm",
-    write: false,
-    plugins: [{
-      name: "settlement-stubs",
-      setup(pluginBuild: any) {
-        pluginBuild.onResolve({ filter: /^@workspace\/db$/ }, () => ({ path: "db", namespace: "settle-stub" }));
-        pluginBuild.onLoad({ filter: /.*/, namespace: "settle-stub" }, () => ({ contents: STUB, loader: "js" }));
-      },
-    }],
-  });
-  const source = Buffer.from(result.outputFiles[0].contents).toString("utf8");
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-})();
+const settlement = bundleService("artifacts/api-server/src/services/settlement.ts");
 
 describe("Task 3.2 the walk definition is stated, not buried", () => {
   test("the active policy names itself and admits it is an assumption", async () => {

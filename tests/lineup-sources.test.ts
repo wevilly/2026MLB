@@ -9,28 +9,10 @@
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { readFileSync } from "node:fs";
-import { build } from "../artifacts/api-server/node_modules/esbuild/lib/main.js";
+import { bundleService } from "./helpers/bundle.ts";
 
-const STUB = "export const pool = { query() { throw new Error('no database in this test'); } };\nexport const db = {};\n";
 
-const lineups = (async () => {
-  const result = await build({
-    entryPoints: ["artifacts/api-server/src/services/lineup-sources.ts"],
-    bundle: true,
-    platform: "node",
-    format: "esm",
-    write: false,
-    plugins: [{
-      name: "lineup-stubs",
-      setup(pluginBuild: any) {
-        pluginBuild.onResolve({ filter: /^@workspace\/db$/ }, () => ({ path: "db", namespace: "lineup-stub" }));
-        pluginBuild.onLoad({ filter: /.*/, namespace: "lineup-stub" }, () => ({ contents: STUB, loader: "js" }));
-      },
-    }],
-  });
-  const source = Buffer.from(result.outputFiles[0].contents).toString("utf8");
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-})();
+const lineups = bundleService("artifacts/api-server/src/services/lineup-sources.ts");
 
 function entry(sourceId: string, gamePk: number, teamId: number, playerId: number, order: number, state: string) {
   return {

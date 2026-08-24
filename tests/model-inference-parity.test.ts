@@ -7,14 +7,14 @@
  * board scored the frozen artifact, and the two arithmetic paths were written
  * out separately in two files.
  *
- * The board service is bundled with esbuild rather than imported directly
- * because the api-server sources use extensionless relative imports, which the
- * build resolves and bare node does not.
+ * The board service is bundled rather than imported directly because the
+ * api-server sources use extensionless relative imports, which the build
+ * resolves and bare node does not. See tests/helpers/bundle.ts.
  */
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { readFileSync } from "node:fs";
-import { build } from "../artifacts/api-server/node_modules/esbuild/lib/main.js";
+import { bundleService } from "./helpers/bundle.ts";
 import {
   MODEL_ALGORITHM,
   MODEL_ARTIFACT_SCHEMA_VERSION,
@@ -24,50 +24,7 @@ import {
   type ModelArtifact,
 } from "../artifacts/api-server/src/services/model-math.ts";
 
-/**
- * Bundles a service with its database handle and its artifact storage client
- * stubbed out. confidenceFor touches neither, and stubbing them keeps the test
- * a pure unit test with no connection string and no bucket.
- */
-const STUBS: Record<string, string> = {
-  "@workspace/db": "export const pool = { query() { throw new Error('no database in this test'); } };\nexport const db = {};\n",
-  "model-artifact-storage": "export async function verifyModelArtifact() { throw new Error('no storage in this test'); }\nexport async function storeModelArtifact() { throw new Error('no storage in this test'); }\n",
-};
-
-const stubPlugin = {
-  name: "remediation-parity-stubs",
-  setup(pluginBuild: any) {
-    pluginBuild.onResolve({ filter: /(^@workspace\/db$|model-artifact-storage$)/ }, (args: any) => ({
-      path: args.path.includes("model-artifact-storage") ? "model-artifact-storage" : "@workspace/db",
-      namespace: "parity-stub",
-    }));
-    pluginBuild.onLoad({ filter: /.*/, namespace: "parity-stub" }, (args: any) => ({
-      contents: STUBS[args.path],
-      loader: "js",
-    }));
-  },
-};
-
-const bundles = new Map<string, Promise<Record<string, unknown>>>();
-
-async function loadBundled(entry: string): Promise<Record<string, unknown>> {
-  const cached = bundles.get(entry);
-  if (cached) return cached;
-  const loading = (async () => {
-    const result = await build({
-      entryPoints: [entry],
-      bundle: true,
-      platform: "node",
-      format: "esm",
-      write: false,
-      plugins: [stubPlugin],
-    });
-    const source = Buffer.from(result.outputFiles[0].contents).toString("utf8");
-    return import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
-  })();
-  bundles.set(entry, loading);
-  return loading;
-}
+const loadBundled = () => bundleService("artifacts/api-server/src/services/daily-market-board.ts");
 
 const CALIBRATION_SLOPE = 1.184;
 const CALIBRATION_INTERCEPT = -0.271;
@@ -150,7 +107,7 @@ function makeRows(count: number) {
 
 describe("Task 1.3 validator and board agree", () => {
   test("sixty rows produce identical probabilities to six decimal places", async () => {
-    const board = await loadBundled("artifacts/api-server/src/services/daily-market-board.ts");
+    const board = await loadBundled();
     const rows = makeRows(60);
     assert.equal(rows.length, 60);
 
@@ -192,7 +149,7 @@ describe("Task 1.3 validator and board agree", () => {
   });
 
   test("the board reports the model declining rather than rejecting it", async () => {
-    const board = await loadBundled("artifacts/api-server/src/services/daily-market-board.ts");
+    const board = await loadBundled();
     // A hitter well below the training mean against a pitcher well above it.
     const features = {
       hitterFeatures: { "statcast.xslg.all": 0.28, "statcast.iso.all": 0.06 },
@@ -215,7 +172,7 @@ describe("Task 1.3 validator and board agree", () => {
   });
 
   test("a failed artifact is ARTIFACT_INVALID, not a model that declined", async () => {
-    const board = await loadBundled("artifacts/api-server/src/services/daily-market-board.ts");
+    const board = await loadBundled();
     const result = board.confidenceFor("TB", "POSITIVE", undefined, {
       versionId: "tb-corrupt", market: "TOTAL_BASES_2_PLUS",
       featureSetHash: "x", algorithm: "y", artifactKey: "k",
@@ -228,7 +185,7 @@ describe("Task 1.3 validator and board agree", () => {
   });
 
   test("a partial feature vector is INSUFFICIENT_FEATURES, never a zero imputed probability", async () => {
-    const board = await loadBundled("artifacts/api-server/src/services/daily-market-board.ts");
+    const board = await loadBundled();
     const model = {
       model: {
         versionId: "tb-parity", market: "TOTAL_BASES_2_PLUS",
@@ -262,7 +219,7 @@ describe("Task 1.3 validator and board agree", () => {
   });
 
   test("a feature key the model has never seen is recorded, not failed on", async () => {
-    const board = await loadBundled("artifacts/api-server/src/services/daily-market-board.ts");
+    const board = await loadBundled();
     const model = {
       model: {
         versionId: "tb-parity", market: "TOTAL_BASES_2_PLUS",
