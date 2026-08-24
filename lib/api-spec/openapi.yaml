@@ -2627,8 +2627,15 @@ components:
           type: array
           items: { type: string, enum: [TB_TB, TB_WALK, XBH_WALK, HR_HR] }
         bestConstruction: { anyOf: [{ $ref: "#/components/schemas/RoundRobinConstruction" }, { type: "null" }] }
+        availabilityStatus:
+          type: string
+          enum: [AVAILABLE, NO_LINEUP, UNRESOLVED_IDENTITY, MISSING_STARTER, STALE_OR_INCOMPLETE_RESEARCH, NO_MARKET_CANDIDATES, NO_LEGAL_CONSTRUCTION, UNSUPPORTED_BOARD]
+          description: The safety prerequisite that prevents this side from forming a construction, when applicable.
+        availabilityDetail:
+          type: ["string", "null"]
+          description: Source-backed lineup, starter, identity, or research-readiness detail for the side's availability state.
         unavailableReason: { type: ["string", "null"] }
-      required: [side, team, evaluatedEligibleHitters, evaluatedIneligibleHitters, consideredConstructionTypes, bestConstruction, unavailableReason]
+      required: [side, team, evaluatedEligibleHitters, evaluatedIneligibleHitters, consideredConstructionTypes, bestConstruction, availabilityStatus, availabilityDetail, unavailableReason]
     RoundRobinGameComparison:
       type: object
       properties:
@@ -2637,8 +2644,12 @@ components:
         home: { $ref: "#/components/schemas/RoundRobinSideComparison" }
         selectedSide: { type: ["string", "null"], enum: [AWAY, HOME, null] }
         selectedConstruction: { anyOf: [{ $ref: "#/components/schemas/RoundRobinConstruction" }, { type: "null" }] }
+        comparisonStatus:
+          type: string
+          enum: [SELECTED, NO_COMPARISON, VALID_TIE]
+          description: Distinguishes an unavailable game from an exact source-backed comparison tie.
         comparisonReason: { type: string }
-      required: [gamePk, away, home, selectedSide, selectedConstruction, comparisonReason]
+      required: [gamePk, away, home, selectedSide, selectedConstruction, comparisonStatus, comparisonReason]
     RoundRobinComparison:
       type: object
       description: Both teams are evaluated before a game construction is selected. It contains no odds, prices, EV, CLV, vig, or probabilities.

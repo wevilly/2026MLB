@@ -147,7 +147,12 @@ function SideConstruction({ side, selected }: { side: RoundRobinSideComparison; 
           </ol>
           <p className="round-robin-comparison-summary">{construction.evidenceSummary}</p>
         </>
-      ) : <p className="round-robin-missing">{side.unavailableReason}</p>}
+      ) : (
+        <div className="round-robin-missing" data-testid={`round-robin-availability-${side.side.toLowerCase()}`}>
+          <strong>{side.availabilityStatus.replaceAll("_", " ")}</strong>
+          <p>{side.availabilityDetail ?? side.unavailableReason}</p>
+        </div>
+      )}
     </article>
   );
 }
@@ -367,7 +372,7 @@ export default function RoundRobinPage() {
                       <div><Kicker>Game {game.gamePk}</Kicker><h3>{game.away.team} @ {game.home.team}</h3></div>
                       {game.selectedConstruction
                         ? <Badge tone="good">{game.selectedSide} selected · {game.selectedConstruction.constructionLabel}</Badge>
-                        : <Badge tone="warn">No selected side</Badge>}
+                        : <Badge tone="warn">{game.comparisonStatus === "VALID_TIE" ? "Valid comparison tie" : "No selected side"}</Badge>}
                     </header>
                     <div className="round-robin-side-grid">
                       <SideConstruction side={game.away} selected={game.selectedSide === 'AWAY'} />

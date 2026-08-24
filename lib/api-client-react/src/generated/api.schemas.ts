@@ -1572,6 +1572,23 @@ export const RoundRobinSideComparisonConsideredConstructionTypesItem = {
   HR_HR: 'HR_HR',
 } as const;
 
+/**
+ * The safety prerequisite that prevents this side from forming a construction, when applicable.
+ */
+export type RoundRobinSideComparisonAvailabilityStatus = typeof RoundRobinSideComparisonAvailabilityStatus[keyof typeof RoundRobinSideComparisonAvailabilityStatus];
+
+
+export const RoundRobinSideComparisonAvailabilityStatus = {
+  AVAILABLE: 'AVAILABLE',
+  NO_LINEUP: 'NO_LINEUP',
+  UNRESOLVED_IDENTITY: 'UNRESOLVED_IDENTITY',
+  MISSING_STARTER: 'MISSING_STARTER',
+  STALE_OR_INCOMPLETE_RESEARCH: 'STALE_OR_INCOMPLETE_RESEARCH',
+  NO_MARKET_CANDIDATES: 'NO_MARKET_CANDIDATES',
+  NO_LEGAL_CONSTRUCTION: 'NO_LEGAL_CONSTRUCTION',
+  UNSUPPORTED_BOARD: 'UNSUPPORTED_BOARD',
+} as const;
+
 export interface RoundRobinSideComparison {
   side: RoundRobinSideComparisonSide;
   team: string;
@@ -1581,6 +1598,13 @@ export interface RoundRobinSideComparison {
   evaluatedIneligibleHitters: number;
   consideredConstructionTypes: RoundRobinSideComparisonConsideredConstructionTypesItem[];
   bestConstruction: RoundRobinConstruction | null;
+  /** The safety prerequisite that prevents this side from forming a construction, when applicable. */
+  availabilityStatus: RoundRobinSideComparisonAvailabilityStatus;
+  /**
+     * Source-backed lineup, starter, identity, or research-readiness detail for the side's availability state.
+     * @nullable
+     */
+  availabilityDetail: string | null;
   /** @nullable */
   unavailableReason: string | null;
 }
@@ -1596,6 +1620,18 @@ export const RoundRobinGameComparisonSelectedSide = {
   HOME: 'HOME',
 } as const;
 
+/**
+ * Distinguishes an unavailable game from an exact source-backed comparison tie.
+ */
+export type RoundRobinGameComparisonComparisonStatus = typeof RoundRobinGameComparisonComparisonStatus[keyof typeof RoundRobinGameComparisonComparisonStatus];
+
+
+export const RoundRobinGameComparisonComparisonStatus = {
+  SELECTED: 'SELECTED',
+  NO_COMPARISON: 'NO_COMPARISON',
+  VALID_TIE: 'VALID_TIE',
+} as const;
+
 export interface RoundRobinGameComparison {
   gamePk: number;
   away: RoundRobinSideComparison;
@@ -1603,6 +1639,8 @@ export interface RoundRobinGameComparison {
   /** @nullable */
   selectedSide: RoundRobinGameComparisonSelectedSide;
   selectedConstruction: RoundRobinConstruction | null;
+  /** Distinguishes an unavailable game from an exact source-backed comparison tie. */
+  comparisonStatus: RoundRobinGameComparisonComparisonStatus;
   comparisonReason: string;
 }
 

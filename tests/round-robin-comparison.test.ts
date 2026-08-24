@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compareRoundRobinGame, type RoundRobinCandidate } from "../artifacts/api-server/src/services/round-robin-comparison.ts";
+import { compareRoundRobinGame, type RoundRobinCandidate, type RoundRobinSideContext } from "../artifacts/api-server/src/services/round-robin-comparison.ts";
 
 function candidate(overrides: Partial<RoundRobinCandidate>): RoundRobinCandidate {
   const id = overrides.candidateId ?? `${overrides.side ?? "AWAY"}-${overrides.market ?? "TB"}-${overrides.playerId ?? 1}`;
@@ -22,6 +22,7 @@ function candidate(overrides: Partial<RoundRobinCandidate>): RoundRobinCandidate
     bvpEvidence: null,
     arsenalStatus: "AVAILABLE",
     evidenceFreshness: "CURRENT",
+    evidenceFreshnessDetail: null,
     primaryMechanism: "Current aggregate evidence",
     opportunityEvidence: {},
     starterMatchupEvidence: {},
@@ -135,4 +136,92 @@ test("Round Robin blocks a malformed CURRENT bullpen payload", () => {
   ]);
   assert.equal(result.selectedSide, null);
   assert.match(result.away.unavailableReason ?? "", /complete, distinct projected 7th\/8th\/9th arm path/);
+});
+function context(overrides: Partial<RoundRobinSideContext> = {}): RoundRobinSideContext {
+  return {
+    lineup: {
+      present: true,
+      state: "PROJECTED",
+      source: "FANTASYPROS",
+      observedAt: "2026-08-24T12:00:00.000Z",
+      hitterCount: 9,
+    },
+    research: {
+      usable: true,
+      readinessStatus: "READY",
+      readinessReason: null,
+      observedAt: "2026-08-24T12:05:00.000Z",
+    },
+    ...overrides,
+  };
+}
+
+test("no lineup and no market research remain distinct audit states", () => {
+  const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [], {
+    AWAY: context({
+      lineup: {
+        present: false,
+        state: "UNKNOWN",
+        source: null,
+        observedAt: null,
+        hitterCount: 0,
+      },
+    }),
+    HOME: context(),
+  });
+  assert.equal(result.away.availabilityStatus, "NO_LINEUP");
+  assert.match(result.away.availabilityDetail ?? "", /No projected or posted lineup/);
+  assert.equal(result.home.availabilityStatus, "NO_MARKET_CANDIDATES");
+  assert.match(result.home.availabilityDetail ?? "", /No market candidates were produced/);
+  assert.equal(result.comparisonStatus, "NO_COMPARISON");
+});
+
+test("identity, starter, and stale research gates retain their specific causes", () => {
+  const identity = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+    candidate({ candidateId: "identity-tb", playerId: 1, selectable: false, selectionBlockReason: "UNRESOLVED_IDENTITY" }),
+  ]);
+  assert.equal(identity.away.availabilityStatus, "UNRESOLVED_IDENTITY");
+
+  const starter = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+    candidate({ candidateId: "starter-tb", playerId: 1, selectable: false, selectionBlockReason: "BLOCKED", starterState: "TBD" }),
+  ]);
+  assert.equal(starter.away.availabilityStatus, "MISSING_STARTER");
+
+  const stale = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+    candidate({
+      candidateId: "stale-tb",
+      playerId: 1,
+      selectable: false,
+      selectionBlockReason: "STALE",
+      evidenceFreshness: "STALE",
+      evidenceFreshnessDetail: "Bullpen ledger is stale.",
+    }),
+  ]);
+  assert.equal(stale.away.availabilityStatus, "STALE_OR_INCOMPLETE_RESEARCH");
+  assert.match(stale.away.availabilityDetail ?? "", /Bullpen ledger is stale/);
+});
+
+test("exact comparisons are reported as valid ties without selecting a side", () => {
+  const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+    candidate({ candidateId: "away-tb", side: "AWAY", playerId: 1, market: "TB", researchRank: 1 }),
+    candidate({ candidateId: "away-walk", side: "AWAY", playerId: 2, market: "WALK", researchRank: 2 }),
+    candidate({ candidateId: "home-tb", side: "HOME", team: "HOME", playerId: 3, market: "TB", researchRank: 1 }),
+    candidate({ candidateId: "home-walk", side: "HOME", team: "HOME", playerId: 4, market: "WALK", researchRank: 2 }),
+  ]);
+  assert.equal(result.selectedSide, null);
+  assert.equal(result.comparisonStatus, "VALID_TIE");
+  assert.match(result.comparisonReason, /Valid comparison tie/);
+});
+
+test("different construction labels do not break an otherwise exact comparison tie", () => {
+  const result = compareRoundRobinGame("RR5", 1, "AWAY", "HOME", [
+    candidate({ candidateId: "away-tb-1", side: "AWAY", playerId: 1, market: "TB", researchRank: 2 }),
+    candidate({ candidateId: "away-tb-2", side: "AWAY", playerId: 2, market: "TB", researchRank: 3 }),
+    candidate({ candidateId: "home-tb", side: "HOME", team: "HOME", playerId: 3, market: "TB", researchRank: 4 }),
+    candidate({ candidateId: "home-walk", side: "HOME", team: "HOME", playerId: 4, market: "WALK", researchRank: 1 }),
+  ]);
+  assert.equal(result.away.bestConstruction?.constructionLabel, "Same-team TB + TB");
+  assert.equal(result.home.bestConstruction?.constructionLabel, "Same-team TB + Walk");
+  assert.equal(result.selectedSide, null);
+  assert.equal(result.comparisonStatus, "VALID_TIE");
 });

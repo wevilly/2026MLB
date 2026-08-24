@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { RoundRobinConstruction } from './roundRobinConstruction';
+import type { RoundRobinSideComparisonAvailabilityStatus } from './roundRobinSideComparisonAvailabilityStatus';
 import type { RoundRobinSideComparisonConsideredConstructionTypesItem } from './roundRobinSideComparisonConsideredConstructionTypesItem';
 import type { RoundRobinSideComparisonSide } from './roundRobinSideComparisonSide';
 
@@ -18,6 +19,13 @@ export interface RoundRobinSideComparison {
   evaluatedIneligibleHitters: number;
   consideredConstructionTypes: RoundRobinSideComparisonConsideredConstructionTypesItem[];
   bestConstruction: RoundRobinConstruction | null;
+  /** The safety prerequisite that prevents this side from forming a construction, when applicable. */
+  availabilityStatus: RoundRobinSideComparisonAvailabilityStatus;
+  /**
+     * Source-backed lineup, starter, identity, or research-readiness detail for the side's availability state.
+     * @nullable
+     */
+  availabilityDetail: string | null;
   /** @nullable */
   unavailableReason: string | null;
 }

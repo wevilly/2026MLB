@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { RoundRobinConstruction } from './roundRobinConstruction';
+import type { RoundRobinGameComparisonComparisonStatus } from './roundRobinGameComparisonComparisonStatus';
 import type { RoundRobinGameComparisonSelectedSide } from './roundRobinGameComparisonSelectedSide';
 import type { RoundRobinSideComparison } from './roundRobinSideComparison';
 
@@ -16,5 +17,7 @@ export interface RoundRobinGameComparison {
   /** @nullable */
   selectedSide: RoundRobinGameComparisonSelectedSide;
   selectedConstruction: RoundRobinConstruction | null;
+  /** Distinguishes an unavailable game from an exact source-backed comparison tie. */
+  comparisonStatus: RoundRobinGameComparisonComparisonStatus;
   comparisonReason: string;
 }

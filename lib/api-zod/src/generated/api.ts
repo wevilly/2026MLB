@@ -979,6 +979,8 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "rankTotal": zod.number().int(),
   "evidenceSummary": zod.string()
 }),zod.null()]),
+  "availabilityStatus": zod.enum(['AVAILABLE', 'NO_LINEUP', 'UNRESOLVED_IDENTITY', 'MISSING_STARTER', 'STALE_OR_INCOMPLETE_RESEARCH', 'NO_MARKET_CANDIDATES', 'NO_LEGAL_CONSTRUCTION', 'UNSUPPORTED_BOARD']).describe('The safety prerequisite that prevents this side from forming a construction, when applicable.'),
+  "availabilityDetail": zod.string().nullable().describe('Source-backed lineup, starter, identity, or research-readiness detail for the side\'s availability state.'),
   "unavailableReason": zod.string().nullable()
 }),
   "home": zod.object({
@@ -1057,6 +1059,8 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "rankTotal": zod.number().int(),
   "evidenceSummary": zod.string()
 }),zod.null()]),
+  "availabilityStatus": zod.enum(['AVAILABLE', 'NO_LINEUP', 'UNRESOLVED_IDENTITY', 'MISSING_STARTER', 'STALE_OR_INCOMPLETE_RESEARCH', 'NO_MARKET_CANDIDATES', 'NO_LEGAL_CONSTRUCTION', 'UNSUPPORTED_BOARD']).describe('The safety prerequisite that prevents this side from forming a construction, when applicable.'),
+  "availabilityDetail": zod.string().nullable().describe('Source-backed lineup, starter, identity, or research-readiness detail for the side\'s availability state.'),
   "unavailableReason": zod.string().nullable()
 }),
   "selectedSide": zod.union([zod.literal('AWAY'),zod.literal('HOME'),zod.literal(null)]).nullable(),
@@ -1130,6 +1134,7 @@ export const GetAnalystRoundRobinComparisonResponse = zod.object({
   "rankTotal": zod.number().int(),
   "evidenceSummary": zod.string()
 }),zod.null()]),
+  "comparisonStatus": zod.enum(['SELECTED', 'NO_COMPARISON', 'VALID_TIE']).describe('Distinguishes an unavailable game from an exact source-backed comparison tie.'),
   "comparisonReason": zod.string()
 })),
   "readiness": zod.object({

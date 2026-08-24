@@ -1141,6 +1141,7 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
         bvpEvidence,
         arsenalStatus: bvpEvidence?.arsenal.status ?? "NOT_FOUND",
         evidenceFreshness,
+        evidenceFreshnessDetail: row.missing_stale_evidence,
         primaryMechanism: row.primary_mechanism,
         opportunityEvidence: stripProhibitedKeys(row.opportunity_evidence ?? {}) as Record<string, unknown>,
         starterMatchupEvidence: stripProhibitedKeys(row.starter_matchup_evidence ?? {}) as Record<string, unknown>,
@@ -1150,10 +1151,42 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
       } satisfies RoundRobinCandidate;
     }));
 
-    const gameMetadata = await pool.query<{ game_pk: number; away: string; home: string }>(
-      `SELECT g.game_pk::bigint, away.abbreviation AS away, home.abbreviation AS home
-       FROM games g JOIN teams away ON away.team_id = g.away_team_id JOIN teams home ON home.team_id = g.home_team_id
-       WHERE g.game_date = $1 ORDER BY g.start_time_utc NULLS LAST`,
+    const gameMetadata = await pool.query<{
+      game_pk: number; away: string; home: string;
+      away_lineup_state: "POSTED" | "PROJECTED" | null; away_lineup_source: string | null;
+      away_lineup_observed_at: string | null; away_lineup_hitters: number;
+      home_lineup_state: "POSTED" | "PROJECTED" | null; home_lineup_source: string | null;
+      home_lineup_observed_at: string | null; home_lineup_hitters: number;
+    }>(
+      `WITH latest_lineup AS (
+         SELECT DISTINCT ON (ls.game_pk, ls.team_id)
+           ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state, ls.source_id, ls.observed_at
+         FROM lineup_snapshots ls
+         JOIN games g ON g.game_pk = ls.game_pk
+         WHERE g.game_date = $1 AND ls.state IN ('POSTED', 'PROJECTED')
+         ORDER BY ls.game_pk, ls.team_id, (ls.state = 'POSTED') DESC, ls.observed_at DESC
+       ),
+       lineup_hitter_counts AS (
+         SELECT lineup_snapshot_id, count(*)::int AS hitter_count
+         FROM lineup_entries
+         GROUP BY lineup_snapshot_id
+       )
+       SELECT g.game_pk::bigint, away.abbreviation AS away, home.abbreviation AS home,
+              away_lineup.state AS away_lineup_state, away_lineup.source_id AS away_lineup_source,
+              away_lineup.observed_at::text AS away_lineup_observed_at,
+              COALESCE(away_count.hitter_count, 0)::int AS away_lineup_hitters,
+              home_lineup.state AS home_lineup_state, home_lineup.source_id AS home_lineup_source,
+              home_lineup.observed_at::text AS home_lineup_observed_at,
+              COALESCE(home_count.hitter_count, 0)::int AS home_lineup_hitters
+       FROM games g
+       JOIN teams away ON away.team_id = g.away_team_id
+       JOIN teams home ON home.team_id = g.home_team_id
+       LEFT JOIN latest_lineup away_lineup ON away_lineup.game_pk = g.game_pk AND away_lineup.team_id = g.away_team_id
+       LEFT JOIN lineup_hitter_counts away_count ON away_count.lineup_snapshot_id = away_lineup.lineup_snapshot_id
+       LEFT JOIN latest_lineup home_lineup ON home_lineup.game_pk = g.game_pk AND home_lineup.team_id = g.home_team_id
+       LEFT JOIN lineup_hitter_counts home_count ON home_count.lineup_snapshot_id = home_lineup.lineup_snapshot_id
+       WHERE g.game_date = $1
+       ORDER BY g.start_time_utc NULLS LAST`,
       [date],
     );
     const byGame = new Map<number, RoundRobinCandidate[]>();
@@ -1162,12 +1195,40 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
       gameCandidates.push(candidate);
       byGame.set(candidate.gamePk, gameCandidates);
     }
+    const researchContext = {
+      usable: operationallyUsable,
+      readinessStatus: health.readiness.status,
+      readinessReason: operationallyUsable ? null : health.readiness.reason,
+      observedAt: String(health.readiness.observedAt),
+    };
     const games = gameMetadata.rows.map((game) => compareRoundRobinGame(
       board as RoundRobinBoardId,
       Number(game.game_pk),
       game.away,
       game.home,
       byGame.get(Number(game.game_pk)) ?? [],
+      {
+        AWAY: {
+          lineup: {
+            present: Boolean(game.away_lineup_state && game.away_lineup_hitters > 0),
+            state: game.away_lineup_state ?? "UNKNOWN",
+            source: game.away_lineup_source,
+            observedAt: game.away_lineup_observed_at,
+            hitterCount: game.away_lineup_hitters,
+          },
+          research: researchContext,
+        },
+        HOME: {
+          lineup: {
+            present: Boolean(game.home_lineup_state && game.home_lineup_hitters > 0),
+            state: game.home_lineup_state ?? "UNKNOWN",
+            source: game.home_lineup_source,
+            observedAt: game.home_lineup_observed_at,
+            hitterCount: game.home_lineup_hitters,
+          },
+          research: researchContext,
+        },
+      },
     ));
     res.json(GetAnalystRoundRobinComparisonResponse.parse({
       date,
