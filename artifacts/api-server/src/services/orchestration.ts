@@ -500,8 +500,12 @@ export async function automateSettlementDate(rawDate: unknown) {
   const slateDate = dateOnly(rawDate);
   const settlement = await settleOfficialDate(slateDate);
   const links = await pool.query<{ snapshot_id: string; outcome_id: string; process_error_taxonomy: string | null }>(
+    // The outcome's own classified taxonomy first. It describes the settlement
+    // transition that actually occurred; the snapshot's correction reason
+    // describes a different event and was the only thing consulted before.
     `SELECT pfs.snapshot_id, ho.outcome_id,
-            COALESCE(pfs.correction_reason::text, correction.correction_reason::text) AS process_error_taxonomy
+            COALESCE(ho.process_error_taxonomy::text, pfs.correction_reason::text,
+                     correction.correction_reason::text) AS process_error_taxonomy
      FROM pregame_feature_snapshots pfs
      JOIN historical_outcomes ho ON ho.player_id = pfs.player_id AND ho.game_pk = pfs.game_pk AND ho.market = pfs.market
       LEFT JOIN pregame_feature_snapshots correction
@@ -544,6 +548,12 @@ type SettlementDependencies = {
     gamesFound: number;
     gamesSettled: number;
     outcomesWritten: number;
+    reconciliation?: {
+      boardCandidates: number;
+      settled: number;
+      settledWithoutSnapshot: number;
+      unsettleable: Array<{ playerId: number; market: string; reason: string; gamePk?: number }>;
+    };
   }>;
 };
 
@@ -618,6 +628,19 @@ export async function runNightlySettlement(
           + `${result.gamesSettled}/${result.gamesFound} terminal games settled.`,
         );
       }
+      // A board candidate that could not be settled at all blocks SUCCESS. It
+      // used to pass unnoticed because settlement only ever looked at frozen
+      // snapshots and the board was never consulted.
+      const unsettleable = result.reconciliation?.unsettleable ?? [];
+      if (unsettleable.length) {
+        const named = unsettleable
+          .slice(0, 5)
+          .map((entry) => `player ${entry.playerId} ${entry.market}${entry.gamePk ? ` (game ${entry.gamePk})` : ""}: ${entry.reason}`)
+          .join("; ");
+        throw new Error(
+          `${unsettleable.length} board candidate(s) could not be settled for ${slateDate}. ${named}`,
+        );
+      }
       await client.query(
         `UPDATE settlement_automation_runs
          SET status = 'SUCCESS', finished_at = now(), result = $2::jsonb, updated_at = now()
@@ -629,7 +652,13 @@ export async function runNightlySettlement(
         action: "settlement.nightly_completed",
         resourceType: "slate",
         resourceId: slateDate,
-        metadata: { gamesFound: result.gamesFound, gamesSettled: result.gamesSettled, outcomesWritten: result.outcomesWritten },
+        metadata: {
+          gamesFound: result.gamesFound,
+          gamesSettled: result.gamesSettled,
+          outcomesWritten: result.outcomesWritten,
+          boardCandidates: result.reconciliation?.boardCandidates ?? null,
+          settledWithoutSnapshot: result.reconciliation?.settledWithoutSnapshot ?? null,
+        },
       });
       return { slateDate, status: "SUCCESS", attempted: true, nextAttemptAt: null };
     } catch (error) {

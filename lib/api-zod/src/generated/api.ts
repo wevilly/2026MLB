@@ -1549,12 +1549,24 @@ export const refreshOfficialSettlementResponseOutcomesWrittenMin = 0;
 
 export const refreshOfficialSettlementResponseCorrectionsMin = 0;
 
+export const refreshOfficialSettlementResponseReconciliationBoardCandidatesMin = 0;
+
+export const refreshOfficialSettlementResponseReconciliationSettledMin = 0;
+
+export const refreshOfficialSettlementResponseReconciliationSettledWithoutSnapshotMin = 0;
+
 
 export const refreshOfficialSettlementResponseGamesItemLinesMin = 0;
 
 export const refreshOfficialSettlementResponseGamesItemOutcomesWrittenMin = 0;
 
 export const refreshOfficialSettlementResponseGamesItemCorrectionsMin = 0;
+
+export const refreshOfficialSettlementResponseGamesItemReconciliationBoardCandidatesMin = 0;
+
+export const refreshOfficialSettlementResponseGamesItemReconciliationSettledMin = 0;
+
+export const refreshOfficialSettlementResponseGamesItemReconciliationSettledWithoutSnapshotMin = 0;
 
 
 
@@ -1565,6 +1577,21 @@ export const RefreshOfficialSettlementResponse = zod.object({
   "gamesSettled": zod.number().int().min(refreshOfficialSettlementResponseGamesSettledMin),
   "outcomesWritten": zod.number().int().min(refreshOfficialSettlementResponseOutcomesWrittenMin),
   "corrections": zod.number().int().min(refreshOfficialSettlementResponseCorrectionsMin),
+  "reconciliation": zod.object({
+  "boardCandidates": zod.number().int().min(refreshOfficialSettlementResponseReconciliationBoardCandidatesMin),
+  "settled": zod.number().int().min(refreshOfficialSettlementResponseReconciliationSettledMin),
+  "settledWithoutSnapshot": zod.number().int().min(refreshOfficialSettlementResponseReconciliationSettledWithoutSnapshotMin).describe('Settled from the board with no frozen snapshot. A complete\noperational settle record, deliberately excluded from model\ntraining because it has no pregame feature vector.\n'),
+  "unsettleable": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "market": zod.string(),
+  "reason": zod.string(),
+  "gamePk": zod.number().int().optional()
+})),
+  "totalBasesDiscrepancies": zod.array(zod.string()).describe('Rows where the total bases computed from the components and the\ntotal bases the feed reported disagree. Settled DISPUTED rather\nthan silently taking one of the two.\n'),
+  "walkDefinition": zod.string().describe('The walk definition applied to this settlement, e.g. BB+IBB (assumed).'),
+  "walkDefinitionAssumed": zod.boolean(),
+  "walkDefinitionStatement": zod.string()
+}).describe('Every board candidate either settled or appears by name in unsettleable\nwith the reason it did not. Settlement previously iterated only frozen\nfeature snapshots, so a candidate that reached the board without a\nsnapshot was never settled and vanished from the record silently.\n'),
   "games": zod.array(zod.object({
   "gamePk": zod.number().int().min(1),
   "slateDate": zod.coerce.date(),
@@ -1572,7 +1599,22 @@ export const RefreshOfficialSettlementResponse = zod.object({
   "state": zod.enum(['PENDING', 'SETTLED', 'POSTPONED', 'NO_ACTION', 'DISPUTED']),
   "lines": zod.number().int().min(refreshOfficialSettlementResponseGamesItemLinesMin),
   "outcomesWritten": zod.number().int().min(refreshOfficialSettlementResponseGamesItemOutcomesWrittenMin),
-  "corrections": zod.number().int().min(refreshOfficialSettlementResponseGamesItemCorrectionsMin)
+  "corrections": zod.number().int().min(refreshOfficialSettlementResponseGamesItemCorrectionsMin),
+  "reconciliation": zod.object({
+  "boardCandidates": zod.number().int().min(refreshOfficialSettlementResponseGamesItemReconciliationBoardCandidatesMin),
+  "settled": zod.number().int().min(refreshOfficialSettlementResponseGamesItemReconciliationSettledMin),
+  "settledWithoutSnapshot": zod.number().int().min(refreshOfficialSettlementResponseGamesItemReconciliationSettledWithoutSnapshotMin).describe('Settled from the board with no frozen snapshot. A complete\noperational settle record, deliberately excluded from model\ntraining because it has no pregame feature vector.\n'),
+  "unsettleable": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "market": zod.string(),
+  "reason": zod.string(),
+  "gamePk": zod.number().int().optional()
+})),
+  "totalBasesDiscrepancies": zod.array(zod.string()).describe('Rows where the total bases computed from the components and the\ntotal bases the feed reported disagree. Settled DISPUTED rather\nthan silently taking one of the two.\n'),
+  "walkDefinition": zod.string().describe('The walk definition applied to this settlement, e.g. BB+IBB (assumed).'),
+  "walkDefinitionAssumed": zod.boolean(),
+  "walkDefinitionStatement": zod.string()
+}).optional().describe('Every board candidate either settled or appears by name in unsettleable\nwith the reason it did not. Settlement previously iterated only frozen\nfeature snapshots, so a candidate that reached the board without a\nsnapshot was never settled and vanished from the record silently.\n')
 }))
 })
 
@@ -1592,12 +1634,24 @@ export const ingestOfficialSettlementsResponseOutcomesWrittenMin = 0;
 
 export const ingestOfficialSettlementsResponseCorrectionsMin = 0;
 
+export const ingestOfficialSettlementsResponseReconciliationBoardCandidatesMin = 0;
+
+export const ingestOfficialSettlementsResponseReconciliationSettledMin = 0;
+
+export const ingestOfficialSettlementsResponseReconciliationSettledWithoutSnapshotMin = 0;
+
 
 export const ingestOfficialSettlementsResponseGamesItemLinesMin = 0;
 
 export const ingestOfficialSettlementsResponseGamesItemOutcomesWrittenMin = 0;
 
 export const ingestOfficialSettlementsResponseGamesItemCorrectionsMin = 0;
+
+export const ingestOfficialSettlementsResponseGamesItemReconciliationBoardCandidatesMin = 0;
+
+export const ingestOfficialSettlementsResponseGamesItemReconciliationSettledMin = 0;
+
+export const ingestOfficialSettlementsResponseGamesItemReconciliationSettledWithoutSnapshotMin = 0;
 
 
 
@@ -1608,6 +1662,21 @@ export const IngestOfficialSettlementsResponse = zod.object({
   "gamesSettled": zod.number().int().min(ingestOfficialSettlementsResponseGamesSettledMin),
   "outcomesWritten": zod.number().int().min(ingestOfficialSettlementsResponseOutcomesWrittenMin),
   "corrections": zod.number().int().min(ingestOfficialSettlementsResponseCorrectionsMin),
+  "reconciliation": zod.object({
+  "boardCandidates": zod.number().int().min(ingestOfficialSettlementsResponseReconciliationBoardCandidatesMin),
+  "settled": zod.number().int().min(ingestOfficialSettlementsResponseReconciliationSettledMin),
+  "settledWithoutSnapshot": zod.number().int().min(ingestOfficialSettlementsResponseReconciliationSettledWithoutSnapshotMin).describe('Settled from the board with no frozen snapshot. A complete\noperational settle record, deliberately excluded from model\ntraining because it has no pregame feature vector.\n'),
+  "unsettleable": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "market": zod.string(),
+  "reason": zod.string(),
+  "gamePk": zod.number().int().optional()
+})),
+  "totalBasesDiscrepancies": zod.array(zod.string()).describe('Rows where the total bases computed from the components and the\ntotal bases the feed reported disagree. Settled DISPUTED rather\nthan silently taking one of the two.\n'),
+  "walkDefinition": zod.string().describe('The walk definition applied to this settlement, e.g. BB+IBB (assumed).'),
+  "walkDefinitionAssumed": zod.boolean(),
+  "walkDefinitionStatement": zod.string()
+}).describe('Every board candidate either settled or appears by name in unsettleable\nwith the reason it did not. Settlement previously iterated only frozen\nfeature snapshots, so a candidate that reached the board without a\nsnapshot was never settled and vanished from the record silently.\n'),
   "games": zod.array(zod.object({
   "gamePk": zod.number().int().min(1),
   "slateDate": zod.coerce.date(),
@@ -1615,7 +1684,22 @@ export const IngestOfficialSettlementsResponse = zod.object({
   "state": zod.enum(['PENDING', 'SETTLED', 'POSTPONED', 'NO_ACTION', 'DISPUTED']),
   "lines": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemLinesMin),
   "outcomesWritten": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemOutcomesWrittenMin),
-  "corrections": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemCorrectionsMin)
+  "corrections": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemCorrectionsMin),
+  "reconciliation": zod.object({
+  "boardCandidates": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemReconciliationBoardCandidatesMin),
+  "settled": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemReconciliationSettledMin),
+  "settledWithoutSnapshot": zod.number().int().min(ingestOfficialSettlementsResponseGamesItemReconciliationSettledWithoutSnapshotMin).describe('Settled from the board with no frozen snapshot. A complete\noperational settle record, deliberately excluded from model\ntraining because it has no pregame feature vector.\n'),
+  "unsettleable": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "market": zod.string(),
+  "reason": zod.string(),
+  "gamePk": zod.number().int().optional()
+})),
+  "totalBasesDiscrepancies": zod.array(zod.string()).describe('Rows where the total bases computed from the components and the\ntotal bases the feed reported disagree. Settled DISPUTED rather\nthan silently taking one of the two.\n'),
+  "walkDefinition": zod.string().describe('The walk definition applied to this settlement, e.g. BB+IBB (assumed).'),
+  "walkDefinitionAssumed": zod.boolean(),
+  "walkDefinitionStatement": zod.string()
+}).optional().describe('Every board candidate either settled or appears by name in unsettleable\nwith the reason it did not. Settlement previously iterated only frozen\nfeature snapshots, so a candidate that reached the board without a\nsnapshot was never settled and vanished from the record silently.\n')
 }))
 })
 
@@ -1637,6 +1721,12 @@ export const settleOfficialGameResponseOutcomesWrittenMin = 0;
 
 export const settleOfficialGameResponseCorrectionsMin = 0;
 
+export const settleOfficialGameResponseReconciliationBoardCandidatesMin = 0;
+
+export const settleOfficialGameResponseReconciliationSettledMin = 0;
+
+export const settleOfficialGameResponseReconciliationSettledWithoutSnapshotMin = 0;
+
 
 
 export const SettleOfficialGameResponse = zod.object({
@@ -1646,7 +1736,22 @@ export const SettleOfficialGameResponse = zod.object({
   "state": zod.enum(['PENDING', 'SETTLED', 'POSTPONED', 'NO_ACTION', 'DISPUTED']),
   "lines": zod.number().int().min(settleOfficialGameResponseLinesMin),
   "outcomesWritten": zod.number().int().min(settleOfficialGameResponseOutcomesWrittenMin),
-  "corrections": zod.number().int().min(settleOfficialGameResponseCorrectionsMin)
+  "corrections": zod.number().int().min(settleOfficialGameResponseCorrectionsMin),
+  "reconciliation": zod.object({
+  "boardCandidates": zod.number().int().min(settleOfficialGameResponseReconciliationBoardCandidatesMin),
+  "settled": zod.number().int().min(settleOfficialGameResponseReconciliationSettledMin),
+  "settledWithoutSnapshot": zod.number().int().min(settleOfficialGameResponseReconciliationSettledWithoutSnapshotMin).describe('Settled from the board with no frozen snapshot. A complete\noperational settle record, deliberately excluded from model\ntraining because it has no pregame feature vector.\n'),
+  "unsettleable": zod.array(zod.object({
+  "playerId": zod.number().int(),
+  "market": zod.string(),
+  "reason": zod.string(),
+  "gamePk": zod.number().int().optional()
+})),
+  "totalBasesDiscrepancies": zod.array(zod.string()).describe('Rows where the total bases computed from the components and the\ntotal bases the feed reported disagree. Settled DISPUTED rather\nthan silently taking one of the two.\n'),
+  "walkDefinition": zod.string().describe('The walk definition applied to this settlement, e.g. BB+IBB (assumed).'),
+  "walkDefinitionAssumed": zod.boolean(),
+  "walkDefinitionStatement": zod.string()
+}).optional().describe('Every board candidate either settled or appears by name in unsettleable\nwith the reason it did not. Settlement previously iterated only frozen\nfeature snapshots, so a candidate that reached the board without a\nsnapshot was never settled and vanished from the record silently.\n')
 })
 
 

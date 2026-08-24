@@ -2379,6 +2379,47 @@ components:
         outcomeValue: { type: number }
         outcomeHit: { type: boolean }
       required: [outcomeId, outcomeValue, outcomeHit]
+    UnsettleableBoardCandidate:
+      type: object
+      properties:
+        playerId: { type: integer }
+        market: { type: string }
+        reason: { type: string }
+        gamePk: { type: integer }
+      required: [playerId, market, reason]
+    SettlementReconciliation:
+      type: object
+      description: |
+        Every board candidate either settled or appears by name in unsettleable
+        with the reason it did not. Settlement previously iterated only frozen
+        feature snapshots, so a candidate that reached the board without a
+        snapshot was never settled and vanished from the record silently.
+      properties:
+        boardCandidates: { type: integer, minimum: 0 }
+        settled: { type: integer, minimum: 0 }
+        settledWithoutSnapshot:
+          type: integer
+          minimum: 0
+          description: |
+            Settled from the board with no frozen snapshot. A complete
+            operational settle record, deliberately excluded from model
+            training because it has no pregame feature vector.
+        unsettleable:
+          type: array
+          items: { $ref: "#/components/schemas/UnsettleableBoardCandidate" }
+        totalBasesDiscrepancies:
+          type: array
+          description: |
+            Rows where the total bases computed from the components and the
+            total bases the feed reported disagree. Settled DISPUTED rather
+            than silently taking one of the two.
+          items: { type: string }
+        walkDefinition:
+          type: string
+          description: The walk definition applied to this settlement, e.g. BB+IBB (assumed).
+        walkDefinitionAssumed: { type: boolean }
+        walkDefinitionStatement: { type: string }
+      required: [boardCandidates, settled, settledWithoutSnapshot, unsettleable, totalBasesDiscrepancies, walkDefinition, walkDefinitionAssumed, walkDefinitionStatement]
     OfficialGameSettlementResult:
       type: object
       properties:
@@ -2389,6 +2430,7 @@ components:
         lines: { type: integer, minimum: 0 }
         outcomesWritten: { type: integer, minimum: 0 }
         corrections: { type: integer, minimum: 0 }
+        reconciliation: { $ref: "#/components/schemas/SettlementReconciliation" }
       required: [gamePk, slateDate, ingestRunId, state, lines, outcomesWritten, corrections]
     OfficialSettlementRefreshResult:
       type: object
@@ -2399,10 +2441,11 @@ components:
         gamesSettled: { type: integer, minimum: 0 }
         outcomesWritten: { type: integer, minimum: 0 }
         corrections: { type: integer, minimum: 0 }
+        reconciliation: { $ref: "#/components/schemas/SettlementReconciliation" }
         games:
           type: array
           items: { $ref: "#/components/schemas/OfficialGameSettlementResult" }
-      required: [source, slateDate, gamesFound, gamesSettled, outcomesWritten, corrections, games]
+      required: [source, slateDate, gamesFound, gamesSettled, outcomesWritten, corrections, reconciliation, games]
     ModelTrainingResult:
       type: object
       additionalProperties: false

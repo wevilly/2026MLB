@@ -10,14 +10,56 @@ const DB_MARKETS = {
   WALK: "BATTER_WALK",
   HR: "HOME_RUN",
 } as const;
-const CORRECTION_REASONS = [
+const SHORT_MARKETS: Record<string, Market | undefined> = {
+  TOTAL_BASES_2_PLUS: "TB",
+  EXTRA_BASE_HIT: "XBH",
+  BATTER_WALK: "WALK",
+  HOME_RUN: "HR",
+};
+export const CORRECTION_REASONS = [
   "LATE_SCRATCH",
   "LINEUP_ERROR",
   "DATA_INGEST_FAILURE",
   "IDENTITY_ERROR",
   "SOURCE_UNAVAILABLE",
   "HUMAN_CORRECTION",
+  // Added by remediation task 3.3. Five of the six values above were
+  // unreachable because every correction was labelled DATA_INGEST_FAILURE, and
+  // the two real transitions below had no value at all.
+  "GAME_RESUMPTION",
+  "OFFICIAL_STAT_CORRECTION",
 ] as const;
+export type CorrectionReason = (typeof CORRECTION_REASONS)[number];
+
+/**
+ * The walk settlement definition.
+ *
+ * MLB's baseOnBalls includes intentional walks; intentionalWalks is exposed as
+ * a separate field, and hit by pitch is a third field that baseOnBalls does not
+ * include. Which of the three the operator is actually graded against at the
+ * book has NOT been established, so this preserves the behaviour that was
+ * already in place and labels it as an assumption rather than guessing a new
+ * one. Every settled row carries the definition that produced it.
+ *
+ * To change the policy: flip the flags here, set assumed to false, and re-grade
+ * historically. No feed re-fetch is required, because walks, intentional walks
+ * and hit by pitch are each persisted separately regardless of which definition
+ * is active.
+ */
+export const WALK_SETTLEMENT_POLICY = {
+  countIntentionalWalks: true,
+  countHitByPitch: false,
+  assumed: true,
+  statement:
+    "Walks are graded as MLB baseOnBalls, which includes intentional walks and excludes hit by pitch. "
+    + "This is the assumed definition, carried forward from the previous implementation, and has not been "
+    + "confirmed against the operator's settlement rule.",
+} as const;
+
+export function walkDefinitionLabel(policy = WALK_SETTLEMENT_POLICY): string {
+  return `BB${policy.countIntentionalWalks ? "+IBB" : "-IBB"}${policy.countHitByPitch ? "+HBP" : ""}`
+    + `${policy.assumed ? " (assumed)" : ""}`;
+}
 
 type JsonObject = Record<string, unknown>;
 type DbClient = Pick<typeof pool, "query">;
@@ -94,8 +136,14 @@ type BattingLine = {
   doubles: number;
   triples: number;
   homeRuns: number;
-  totalBases: number;
+  /** Total bases as the feed reported them, or null when the feed did not. */
+  reportedTotalBases: number | null;
+  /** MLB baseOnBalls, which includes intentional walks. */
   walks: number;
+  /** Intentional walks, reported separately by the feed. */
+  intentionalWalks: number;
+  /** Hit by pitch. Not included in baseOnBalls. */
+  hitByPitch: number;
   plateAppearances: number;
   atBats: number;
 };
@@ -117,8 +165,10 @@ function battingLines(payload: JsonObject): BattingLine[] {
         doubles,
         triples,
         homeRuns,
-        totalBases: number(line.totalBases) || singles + doubles * 2 + triples * 3 + homeRuns * 4,
+        reportedTotalBases: line.totalBases == null ? null : number(line.totalBases),
         walks: number(line.baseOnBalls ?? line.walks),
+        intentionalWalks: number(line.intentionalWalks),
+        hitByPitch: number(line.hitByPitch ?? line.hitBatsmen),
         plateAppearances: number(line.plateAppearances),
         atBats: number(line.atBats),
       }];
@@ -146,8 +196,10 @@ function battingLines(payload: JsonObject): BattingLine[] {
         doubles,
         triples,
         homeRuns,
-        totalBases: number(stats.totalBases) || singles + doubles * 2 + triples * 3 + homeRuns * 4,
+        reportedTotalBases: stats.totalBases == null ? null : number(stats.totalBases),
         walks: number(stats.baseOnBalls),
+        intentionalWalks: number(stats.intentionalWalks),
+        hitByPitch: number(stats.hitByPitch),
         plateAppearances: number(stats.plateAppearances),
         atBats: number(stats.atBats),
       }];
@@ -155,13 +207,39 @@ function battingLines(payload: JsonObject): BattingLine[] {
   });
 }
 
-function outcomeFor(market: Market, line: BattingLine) {
-  const value = market === "TB"
-    ? line.singles + line.doubles * 2 + line.triples * 3 + line.homeRuns * 4
-    : market === "XBH"
-      ? line.doubles + line.triples + line.homeRuns
-      : market === "WALK" ? line.walks : line.homeRuns;
-  return { value, hit: market === "TB" ? value >= 2 : value >= 1 };
+/**
+ * Grades one market from one batting line.
+ *
+ * Total bases are recomputed from the components AND cross-checked against the
+ * value the feed reported. The reported field was previously parsed and then
+ * ignored entirely, so a disagreement between the two was invisible. A
+ * disagreement now returns a discrepancy, and the caller settles that outcome
+ * DISPUTED rather than picking one of the two numbers and moving on.
+ *
+ * Walks are graded through WALK_SETTLEMENT_POLICY. The components are persisted
+ * separately whatever the policy says.
+ */
+function outcomeFor(market: Market, line: BattingLine, policy = WALK_SETTLEMENT_POLICY) {
+  const computedTotalBases = line.singles + line.doubles * 2 + line.triples * 3 + line.homeRuns * 4;
+  let discrepancy: string | null = null;
+  let value: number;
+  if (market === "TB") {
+    value = computedTotalBases;
+    if (line.reportedTotalBases !== null && line.reportedTotalBases !== computedTotalBases) {
+      discrepancy = `Total bases disagree for player ${line.playerId}: components give `
+        + `${computedTotalBases}, the feed reported ${line.reportedTotalBases}.`;
+    }
+  } else if (market === "XBH") {
+    value = line.doubles + line.triples + line.homeRuns;
+  } else if (market === "WALK") {
+    value = line.walks
+      - (policy.countIntentionalWalks ? 0 : line.intentionalWalks)
+      + (policy.countHitByPitch ? line.hitByPitch : 0);
+    value = Math.max(0, value);
+  } else {
+    value = line.homeRuns;
+  }
+  return { value, hit: market === "TB" ? value >= 2 : value >= 1, discrepancy };
 }
 
 async function startSettlementRun(effectiveDate: string) {
@@ -200,6 +278,39 @@ async function ensurePlayer(client: DbClient, playerId: number, fullName: string
   );
 }
 
+/**
+ * Classifies a correction from the transition that produced it.
+ *
+ * Every correction used to be labelled DATA_INGEST_FAILURE by
+ * `const taxonomy = correctionOf ? 'DATA_INGEST_FAILURE' : null`, which made
+ * five of the six taxonomy values unreachable and told an operator nothing
+ * about what had actually happened.
+ */
+export function classifyCorrection(input: {
+  priorState: SettlementState;
+  newState: SettlementState;
+  priorHadPlateAppearances: boolean;
+  newHasPlateAppearances: boolean;
+  statLineChanged: boolean;
+  lateScratch: boolean;
+}): CorrectionReason {
+  // A game that was postponed or suspended and later completed is a resumption,
+  // not an ingest failure.
+  if (input.priorState === "POSTPONED" && input.newState === "SETTLED") return "GAME_RESUMPTION";
+  // A player who was in the settled record with appearances and now has none was
+  // scratched after the record was written.
+  if (input.lateScratch || (input.priorHadPlateAppearances && !input.newHasPlateAppearances)) {
+    return "LATE_SCRATCH";
+  }
+  // A changed stat line on a game that was already final is MLB revising its
+  // own numbers.
+  if (input.priorState === "SETTLED" && input.newState === "SETTLED" && input.statLineChanged) {
+    return "OFFICIAL_STAT_CORRECTION";
+  }
+  if (input.priorState === "NO_ACTION" && input.newState === "SETTLED") return "GAME_RESUMPTION";
+  return "DATA_INGEST_FAILURE";
+}
+
 async function appendSettlementOutcome(
   client: DbClient,
   line: BattingLine,
@@ -209,8 +320,15 @@ async function appendSettlementOutcome(
   gamePkValue: number,
   ingestRunId: string,
   sourceMetadata: JsonObject,
+  options: { settledWithoutSnapshot?: boolean; lateScratch?: boolean } = {},
 ) {
-  const { value, hit } = outcomeFor(market, line);
+  const { value, hit, discrepancy } = outcomeFor(market, line);
+  // A disagreement between the components and the reported total is not settled
+  // as though one of them were right. DISPUTED is excluded from training by the
+  // settlement_state = 'SETTLED' filter every training query already applies.
+  const effectiveState: SettlementState = discrepancy && settlementState === "SETTLED"
+    ? "DISPUTED"
+    : settlementState;
   const dbMarket = DB_MARKETS[market];
   const existing = await client.query<{
     outcome_id: string;
@@ -221,13 +339,16 @@ async function appendSettlementOutcome(
     triples: number | null;
     home_runs: number | null;
     walks: number | null;
+    intentional_walks: number | null;
+    hit_by_pitch: number | null;
     plate_appearances: number | null;
     at_bats: number | null;
     settlement_state: SettlementState;
     correction_of: string | null;
   }>(
     `SELECT outcome_id, outcome_value, outcome_hit, singles, doubles, triples, home_runs,
-            walks, plate_appearances, at_bats, settlement_state, correction_of
+            walks, intentional_walks, hit_by_pitch, plate_appearances, at_bats,
+            settlement_state, correction_of
      FROM historical_outcomes
      WHERE player_id = $1 AND game_pk = $2 AND market = $3
      ORDER BY created_at DESC LIMIT 1`,
@@ -242,31 +363,63 @@ async function appendSettlementOutcome(
     && prior.triples === line.triples
     && prior.home_runs === line.homeRuns
     && prior.walks === line.walks
+    && prior.intentional_walks === line.intentionalWalks
+    && prior.hit_by_pitch === line.hitByPitch
     && prior.plate_appearances === line.plateAppearances
     && prior.at_bats === line.atBats
-    && prior.settlement_state === settlementState;
-  if (same) return { outcomeId: prior.outcome_id, created: false, corrected: false };
+    && prior.settlement_state === effectiveState;
+  if (same) return { outcomeId: prior.outcome_id, created: false, corrected: false, discrepancy, taxonomy: null };
 
   const correctionOf = prior && prior.settlement_state !== "PENDING" ? prior.outcome_id : null;
-  const taxonomy = correctionOf ? "DATA_INGEST_FAILURE" : null;
+  const statLineChanged = Boolean(prior) && (
+    prior.singles !== line.singles
+    || prior.doubles !== line.doubles
+    || prior.triples !== line.triples
+    || prior.home_runs !== line.homeRuns
+    || prior.walks !== line.walks
+    || prior.intentional_walks !== line.intentionalWalks
+    || prior.hit_by_pitch !== line.hitByPitch
+  );
+  const taxonomy = correctionOf
+    ? classifyCorrection({
+      priorState: prior!.settlement_state,
+      newState: effectiveState,
+      priorHadPlateAppearances: (prior!.plate_appearances ?? 0) > 0,
+      newHasPlateAppearances: line.plateAppearances > 0,
+      statLineChanged,
+      lateScratch: options.lateScratch === true,
+    })
+    : null;
   const result = await client.query<{ outcome_id: string }>(
     `INSERT INTO historical_outcomes
        (player_id, game_pk, slate_date, market, outcome_value, outcome_hit,
         plate_appearances, at_bats, singles, doubles, triples, home_runs, walks,
+        intentional_walks, hit_by_pitch, walk_definition, settled_without_snapshot,
         settlement_state, settled_at, source_id, ingest_run_id, official_source_metadata,
         correction_of, process_error_taxonomy, correction_note, raw)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-             $14, now(), $15, $16, $17, $18, $19, $20, '{}')
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+             $18, now(), $19, $20, $21, $22, $23, $24, '{}')
      RETURNING outcome_id`,
     [
       line.playerId, gamePkValue, slateDate, dbMarket, value, hit,
       line.plateAppearances, line.atBats, line.singles, line.doubles, line.triples,
-      line.homeRuns, line.walks, settlementState, MLB_SOURCE, ingestRunId, sourceMetadata,
+      line.homeRuns, line.walks, line.intentionalWalks, line.hitByPitch,
+      walkDefinitionLabel(), options.settledWithoutSnapshot === true,
+      effectiveState, MLB_SOURCE, ingestRunId,
+      discrepancy ? { ...sourceMetadata, totalBasesDiscrepancy: discrepancy } : sourceMetadata,
       correctionOf, taxonomy,
-      correctionOf ? "Official MLB result superseded a prior settled observation." : null,
+      correctionOf
+        ? `Official MLB result superseded a prior settled observation (${taxonomy}).`
+        : discrepancy ?? null,
     ],
   );
-  return { outcomeId: result.rows[0].outcome_id, created: true, corrected: Boolean(correctionOf) };
+  return {
+    outcomeId: result.rows[0].outcome_id,
+    created: true,
+    corrected: Boolean(correctionOf),
+    discrepancy,
+    taxonomy,
+  };
 }
 
 export async function settleOfficialGame(rawGamePk: unknown) {
@@ -295,6 +448,13 @@ export async function settleOfficialGame(rawGamePk: unknown) {
       return { gamePk: gamePkValue, slateDate, ingestRunId, state: "PENDING" as const, lines: 0, outcomesWritten: 0, corrections: 0 };
     }
     const lines = battingLines(payload);
+
+    // The settlement universe is the UNION of frozen snapshots and the daily
+    // market board.
+    //
+    // The loop used to iterate only pregame_feature_snapshots, so a candidate
+    // that reached the board but never got a snapshot was never settled, never
+    // entered historical_outcomes, and vanished from the record silently.
     const frozen = await pool.query<{ player_id: number; market: string }>(
       `SELECT DISTINCT ON (player_id, market) player_id, market
        FROM pregame_feature_snapshots
@@ -302,14 +462,26 @@ export async function settleOfficialGame(rawGamePk: unknown) {
        ORDER BY player_id, market, created_at DESC`,
       [gamePkValue, slateDate],
     );
+    const boarded = await pool.query<{ player_id: number; market: string }>(
+      `SELECT DISTINCT player_id, market::text AS market
+       FROM daily_market_board
+       WHERE game_pk = $1 AND slate_date = $2
+         AND market <> 'HITS_RUNS_RBI_2_PLUS'`,
+      [gamePkValue, slateDate],
+    );
     const linesByPlayer = new Map(lines.map((line) => [line.playerId, line]));
-    const frozenPlayers = new Map<number, Set<Market>>();
-    for (const row of frozen.rows) {
-      const market = row.market === "TOTAL_BASES_2_PLUS" ? "TB" : row.market === "EXTRA_BASE_HIT" ? "XBH" : row.market === "BATTER_WALK" ? "WALK" : "HR";
-      const markets = frozenPlayers.get(row.player_id) ?? new Set<Market>();
-      markets.add(market);
-      frozenPlayers.set(row.player_id, markets);
-    }
+    const universe = new Map<number, Map<Market, { hasSnapshot: boolean }>>();
+    const addToUniverse = (playerId: number, dbMarket: string, hasSnapshot: boolean) => {
+      const market = SHORT_MARKETS[dbMarket];
+      if (!market) return;
+      if (!universe.has(playerId)) universe.set(playerId, new Map());
+      const markets = universe.get(playerId)!;
+      const existing = markets.get(market);
+      markets.set(market, { hasSnapshot: hasSnapshot || existing?.hasSnapshot === true });
+    };
+    for (const row of frozen.rows) addToUniverse(row.player_id, row.market, true);
+    for (const row of boarded.rows) addToUniverse(row.player_id, row.market, false);
+    const boardCandidateCount = boarded.rows.length;
     const sourceMetadata = {
       provider: "MLB Stats API",
       endpoint,
@@ -321,28 +493,37 @@ export async function settleOfficialGame(rawGamePk: unknown) {
     const client = await pool.connect();
     let outcomesWritten = 0;
     let corrections = 0;
+    let settledWithoutSnapshot = 0;
+    const discrepancies: string[] = [];
+    const settledKeys = new Set<string>();
     try {
       await client.query("BEGIN");
       // One final game is one settlement unit. The transaction-scoped advisory
       // lock makes retrying refreshes idempotent instead of appending competing
       // original outcomes or sibling corrections.
       await client.query("SELECT pg_advisory_xact_lock($1, $2)", [gamePkValue, 4142]);
-      for (const [frozenPlayerId, markets] of frozenPlayers) {
-        const observed = linesByPlayer.get(frozenPlayerId);
-        const line = observed && observed.plateAppearances > 0
+      for (const [playerId, markets] of universe) {
+        const observed = linesByPlayer.get(playerId);
+        const line: BattingLine = observed && observed.plateAppearances > 0
           ? observed
           : {
-              playerId: frozenPlayerId,
-              fullName: observed?.fullName ?? `MLB player ${frozenPlayerId}`,
-              singles: 0, doubles: 0, triples: 0, homeRuns: 0, totalBases: 0,
-              walks: 0, plateAppearances: 0, atBats: 0,
+              playerId,
+              fullName: observed?.fullName ?? `MLB player ${playerId}`,
+              singles: 0, doubles: 0, triples: 0, homeRuns: 0, reportedTotalBases: null,
+              walks: 0, intentionalWalks: 0, hitByPitch: 0, plateAppearances: 0, atBats: 0,
             };
         await ensurePlayer(client, line.playerId, line.fullName);
         const state = terminalState === "PENDING" ? (observed && observed.plateAppearances > 0 ? "SETTLED" : "NO_ACTION") : terminalState;
-        for (const market of markets) {
-          const result = await appendSettlementOutcome(client, line, market, state, slateDate, gamePkValue, ingestRunId, sourceMetadata);
+        for (const [market, membership] of markets) {
+          const result = await appendSettlementOutcome(
+            client, line, market, state, slateDate, gamePkValue, ingestRunId, sourceMetadata,
+            { settledWithoutSnapshot: !membership.hasSnapshot },
+          );
           if (result.created) outcomesWritten += 1;
           if (result.corrected) corrections += 1;
+          if (!membership.hasSnapshot) settledWithoutSnapshot += 1;
+          if (result.discrepancy) discrepancies.push(result.discrepancy);
+          settledKeys.add(`${playerId}:${market}`);
         }
       }
       await client.query("COMMIT");
@@ -352,7 +533,40 @@ export async function settleOfficialGame(rawGamePk: unknown) {
     } finally {
       client.release();
     }
-    await finishSettlementRun(ingestRunId, "SUCCESS", outcomesWritten);
+    // Reconciliation. Every board candidate either settled or appears by name
+    // in unsettleable with the reason it did not.
+    const unsettleable = boarded.rows
+      .filter((row) => {
+        const market = SHORT_MARKETS[row.market];
+        return !market || !settledKeys.has(`${row.player_id}:${market}`);
+      })
+      .map((row) => ({
+        playerId: row.player_id,
+        market: row.market,
+        reason: SHORT_MARKETS[row.market]
+          ? "The candidate was on the board but produced no settlement row."
+          : `Market ${row.market} has no settlement contract.`,
+      }));
+    const reconciliation = {
+      boardCandidates: boardCandidateCount,
+      settled: settledKeys.size,
+      settledWithoutSnapshot,
+      unsettleable,
+      totalBasesDiscrepancies: discrepancies,
+      walkDefinition: walkDefinitionLabel(),
+      walkDefinitionAssumed: WALK_SETTLEMENT_POLICY.assumed,
+      walkDefinitionStatement: WALK_SETTLEMENT_POLICY.statement,
+    };
+    await finishSettlementRun(
+      ingestRunId,
+      unsettleable.length || discrepancies.length ? "PARTIAL" : "SUCCESS",
+      outcomesWritten,
+      unsettleable.length
+        ? `${unsettleable.length} board candidate(s) could not be settled.`
+        : discrepancies.length
+          ? `${discrepancies.length} total bases discrepancy/discrepancies were settled DISPUTED.`
+          : null,
+    );
     const resultState: SettlementState = terminalState === "PENDING" ? "SETTLED" : terminalState;
     return {
       gamePk: gamePkValue,
@@ -362,6 +576,7 @@ export async function settleOfficialGame(rawGamePk: unknown) {
       lines: lines.length,
       outcomesWritten,
       corrections,
+      reconciliation,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -381,6 +596,18 @@ export async function settleOfficialDate(rawDate: unknown) {
   );
   const results = [];
   for (const row of games.rows) results.push(await settleOfficialGame(row.game_pk));
+  const reconciliation = {
+    boardCandidates: results.reduce((total, r) => total + (r.reconciliation?.boardCandidates ?? 0), 0),
+    settled: results.reduce((total, r) => total + (r.reconciliation?.settled ?? 0), 0),
+    settledWithoutSnapshot: results.reduce((total, r) => total + (r.reconciliation?.settledWithoutSnapshot ?? 0), 0),
+    unsettleable: results.flatMap((r) => (r.reconciliation?.unsettleable ?? []).map(
+      (entry) => ({ ...entry, gamePk: r.gamePk }),
+    )),
+    totalBasesDiscrepancies: results.flatMap((r) => r.reconciliation?.totalBasesDiscrepancies ?? []),
+    walkDefinition: walkDefinitionLabel(),
+    walkDefinitionAssumed: WALK_SETTLEMENT_POLICY.assumed,
+    walkDefinitionStatement: WALK_SETTLEMENT_POLICY.statement,
+  };
   return {
     source: "MLB Official",
     slateDate,
@@ -388,6 +615,7 @@ export async function settleOfficialDate(rawDate: unknown) {
     gamesSettled: results.filter((result) => result.state !== "PENDING").length,
     outcomesWritten: results.reduce((total, result) => total + result.outcomesWritten, 0),
     corrections: results.reduce((total, result) => total + result.corrections, 0),
+    reconciliation,
     games: results,
   };
 }
@@ -541,5 +769,3 @@ export async function queryMarketPostmortems(filters: { playerId?: number | null
     createdAt: row.created_at,
   }));
 }
-
-export { CORRECTION_REASONS };

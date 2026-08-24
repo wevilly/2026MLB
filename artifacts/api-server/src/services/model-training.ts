@@ -119,6 +119,9 @@ export async function trainMarketModel(market: ModelMarket) {
         AND ho.market = pfs.market
         AND ho.settlement_state = 'SETTLED'
         AND ho.source_id = 'MLB_OFFICIAL'
+        -- A row settled without a frozen snapshot is a complete operational
+        -- settle record with no pregame feature vector. It must not train.
+        AND NOT ho.settled_without_snapshot
        WHERE pfs.market = $1
          AND g.start_time_utc IS NOT NULL
          AND pfs.frozen_at < g.start_time_utc

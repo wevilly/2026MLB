@@ -1564,6 +1564,10 @@ export const snapshotCorrectionReasonEnum = pgEnum("snapshot_correction_reason",
   "IDENTITY_ERROR",
   "SOURCE_UNAVAILABLE",
   "HUMAN_CORRECTION",
+  /** A postponed or suspended game that later completed. Not an ingest failure. */
+  "GAME_RESUMPTION",
+  /** MLB revising its own numbers on a game that was already final. */
+  "OFFICIAL_STAT_CORRECTION",
 ]);
 
 /**
@@ -1661,7 +1665,24 @@ export const historicalOutcomes = pgTable("historical_outcomes", {
   doubles: integer("doubles"),
   triples: integer("triples"),
   homeRuns: integer("home_runs"),
+  /** MLB baseOnBalls, which includes intentional walks. */
   walks: integer("walks"),
+  /**
+   * Intentional walks and hit by pitch, persisted separately from walks
+   * regardless of which definition is active, so the walk settlement policy can
+   * change later and be re-graded historically without re-fetching any feed.
+   */
+  intentionalWalks: integer("intentional_walks"),
+  hitByPitch: integer("hit_by_pitch"),
+  /** The walk definition that produced outcome_value on this row. */
+  walkDefinition: text("walk_definition"),
+  /**
+   * True when the candidate reached the daily market board but never got a
+   * frozen feature snapshot. Such a row is a complete operational settle record
+   * and is deliberately excluded from model training, because it has no pregame
+   * feature vector to train on.
+   */
+  settledWithoutSnapshot: boolean("settled_without_snapshot").notNull().default(false),
   settlementState: settlementStateEnum("settlement_state").notNull().default("PENDING"),
   settledAt: timestamp("settled_at", { withTimezone: true }).notNull().defaultNow(),
   sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),

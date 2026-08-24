@@ -152,6 +152,7 @@ async function queryFoldRowsAsOf(
           AND ho.slate_date ${isTraining ? "<" : "="} $2::date
           AND ho.settlement_state = 'SETTLED'
           AND ho.source_id = 'MLB_OFFICIAL'
+          AND NOT ho.settled_without_snapshot
            ${isTraining
              ? "AND ho.settled_at < $2::date AND ho.created_at < $2::date"
              : "AND ho.settled_at < ($2::date + interval '2 days') AND ho.created_at < ($2::date + interval '2 days')"}

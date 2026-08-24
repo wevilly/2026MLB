@@ -7,6 +7,7 @@
  */
 import type { OfficialGameSettlementResult } from './officialGameSettlementResult';
 import type { OfficialSettlementRefreshResultSource } from './officialSettlementRefreshResultSource';
+import type { SettlementReconciliation } from './settlementReconciliation';
 
 export interface OfficialSettlementRefreshResult {
   source: OfficialSettlementRefreshResultSource;
@@ -19,5 +20,6 @@ export interface OfficialSettlementRefreshResult {
   outcomesWritten: number;
   /** @minimum 0 */
   corrections: number;
+  reconciliation: SettlementReconciliation;
   games: OfficialGameSettlementResult[];
 }

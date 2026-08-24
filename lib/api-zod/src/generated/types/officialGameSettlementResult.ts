@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { OfficialGameSettlementResultState } from './officialGameSettlementResultState';
+import type { SettlementReconciliation } from './settlementReconciliation';
 
 export interface OfficialGameSettlementResult {
   /** @minimum 1 */
@@ -19,4 +20,5 @@ export interface OfficialGameSettlementResult {
   outcomesWritten: number;
   /** @minimum 0 */
   corrections: number;
+  reconciliation?: SettlementReconciliation;
 }

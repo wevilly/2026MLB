@@ -945,6 +945,44 @@ export interface WriteHistoricalOutcomeResult {
   outcomeHit: boolean;
 }
 
+export interface UnsettleableBoardCandidate {
+  playerId: number;
+  market: string;
+  reason: string;
+  gamePk?: number;
+}
+
+/**
+ * Every board candidate either settled or appears by name in unsettleable
+ * with the reason it did not. Settlement previously iterated only frozen
+ * feature snapshots, so a candidate that reached the board without a
+ * snapshot was never settled and vanished from the record silently.
+ */
+export interface SettlementReconciliation {
+  /** @minimum 0 */
+  boardCandidates: number;
+  /** @minimum 0 */
+  settled: number;
+  /**
+     * Settled from the board with no frozen snapshot. A complete
+     * operational settle record, deliberately excluded from model
+     * training because it has no pregame feature vector.
+     * @minimum 0
+     */
+  settledWithoutSnapshot: number;
+  unsettleable: UnsettleableBoardCandidate[];
+  /**
+     * Rows where the total bases computed from the components and the
+     * total bases the feed reported disagree. Settled DISPUTED rather
+     * than silently taking one of the two.
+     */
+  totalBasesDiscrepancies: string[];
+  /** The walk definition applied to this settlement, e.g. BB+IBB (assumed). */
+  walkDefinition: string;
+  walkDefinitionAssumed: boolean;
+  walkDefinitionStatement: string;
+}
+
 export type OfficialGameSettlementResultState = typeof OfficialGameSettlementResultState[keyof typeof OfficialGameSettlementResultState];
 
 
@@ -968,6 +1006,7 @@ export interface OfficialGameSettlementResult {
   outcomesWritten: number;
   /** @minimum 0 */
   corrections: number;
+  reconciliation?: SettlementReconciliation;
 }
 
 export type OfficialSettlementRefreshResultSource = typeof OfficialSettlementRefreshResultSource[keyof typeof OfficialSettlementRefreshResultSource];
@@ -988,6 +1027,7 @@ export interface OfficialSettlementRefreshResult {
   outcomesWritten: number;
   /** @minimum 0 */
   corrections: number;
+  reconciliation: SettlementReconciliation;
   games: OfficialGameSettlementResult[];
 }
 
