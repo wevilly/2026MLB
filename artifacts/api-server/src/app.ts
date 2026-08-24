@@ -59,25 +59,28 @@ app.use(express.json({ limit: "256kb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use((req, res, next) => {
   const isWrite = !["GET", "HEAD", "OPTIONS"].includes(req.method);
-  const isUnlock = req.path === "/api/analyst/ai/operator-session";
+  const isRoutineOperation = /^\/api\/analyst\/(?:orchestration|refresh\/|market-board\/refresh)/.test(req.path);
+  const isUnlock = req.path === "/api/analyst/operations/operator-session" || req.path === "/api/analyst/ai/operator-session";
   const requireOperatorApproval = isProduction || process.env.REQUIRE_OPERATOR_APPROVAL === "true";
   if (!requireOperatorApproval || !isWrite || isUnlock) return next();
   const secret = process.env.AI_ANALYST_OPERATOR_APPROVAL_KEY;
+  const requiredCapability = isRoutineOperation ? "OPERATIONS" : "AI_REVIEW";
+  const cookieName = requiredCapability === "OPERATIONS" ? "operations_operator_approval" : "ai_operator_approval";
   const rawCookie = req.headers.cookie?.split(";").map((value) => value.trim())
-    .find((value) => value.startsWith("ai_operator_approval="))?.slice("ai_operator_approval=".length);
+    .find((value) => value.startsWith(`${cookieName}=`))?.slice(`${cookieName}=`.length);
   if (!secret || !rawCookie || !rawCookie.includes(".")) {
-    res.status(403).json({ error: "A valid operator approval session is required for write actions.", requestId: req.id });
+    res.status(403).json({ error: `A valid ${requiredCapability === "OPERATIONS" ? "Operations" : "AI review"} approval session is required for this action.`, requestId: req.id });
     return;
   }
   const [payload, signature] = rawCookie.split(".");
   const expected = createHmac("sha256", secret).update(payload).digest("base64url");
   try {
     if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) throw new Error("signature mismatch");
-    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { expiresAt?: unknown };
-    if (typeof session.expiresAt !== "number" || session.expiresAt < Date.now()) throw new Error("expired");
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { expiresAt?: unknown; capability?: unknown };
+    if (session.capability !== requiredCapability || typeof session.expiresAt !== "number" || session.expiresAt < Date.now()) throw new Error("expired");
     next();
   } catch {
-    res.status(403).json({ error: "The operator approval session is expired or invalid.", requestId: req.id });
+    res.status(403).json({ error: "The required approval session is expired or invalid.", requestId: req.id });
   }
 });
 app.use((req, res, next) => {

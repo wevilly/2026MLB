@@ -416,16 +416,19 @@ async function identityCoverage(date: string) {
 }
 
 async function analystDataHealth(date: string) {
-  const [sources, issueResult, lastRun, coverage, research, slate, workflow] = await Promise.all([
+  const [sources, issueResult, lastRun, coverage, research, slate, workflow, bullpen, marketCandidates] = await Promise.all([
     sourceBadges(date),
     pool.query<{ issue_type: string; detail: string; severity: string }>(
-      `SELECT issue_type, detail, severity FROM ingest_issues WHERE resolved_at IS NULL
+      `SELECT ii.issue_type, ii.detail, ii.severity
+       FROM ingest_issues ii JOIN ingest_runs ir ON ir.ingest_run_id = ii.ingest_run_id
+       WHERE ii.resolved_at IS NULL AND ir.effective_date = $1
        UNION ALL
        SELECT 'IDENTITY_REVIEW' AS issue_type, CONCAT(raw_name, ' (FantasyPros ID ', external_player_id, ') requires review') AS detail, 'REVIEW' AS severity
        FROM identity_review_queue WHERE state = 'OPEN'
        ORDER BY issue_type LIMIT 50`,
+      [date],
     ),
-    pool.query<{ finished_at: string | null }>("SELECT max(finished_at) AS finished_at FROM ingest_runs WHERE effective_date <= $1", [date]),
+    pool.query<{ finished_at: string | null }>("SELECT max(finished_at) AS finished_at FROM ingest_runs WHERE effective_date = $1", [date]),
     identityCoverage(date),
     researchHealth(date),
     pool.query<{ games: number }>("SELECT count(*)::int AS games FROM games WHERE game_date = $1", [date]),
@@ -434,9 +437,20 @@ async function analystDataHealth(date: string) {
        WHERE run_date = $1 ORDER BY created_at DESC LIMIT 1`,
       [date],
     ),
+    pool.query<{ status: string; row_count: number | null }>(
+      `SELECT status, row_count FROM ingest_runs WHERE source_id = 'BULLPEN' AND effective_date = $1
+       ORDER BY started_at DESC LIMIT 1`,
+      [date],
+    ),
+    pool.query<{ candidates: number }>(
+      "SELECT count(*)::int AS candidates FROM market_research_candidates WHERE slate_date = $1",
+      [date],
+    ),
   ]);
   const currentDate = currentEasternDate();
   const phaseTwoSources = sources.filter((source) => !["FanGraphs", "Weather"].includes(source.name));
+  const mlbSource = sources.find((source) => source.name === "MLB Official");
+  const officialEmptySlate = !slate.rows[0]?.games && mlbSource?.status === "FRESH" && mlbSource.rowCount === 0;
   const phaseTwoReady = research.handednessCoverageScope === "FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE"
     && research.handednessIngestStatus === "SUCCESS"
     && research.missingHandednessSplits === 0
@@ -446,9 +460,17 @@ async function analystDataHealth(date: string) {
     && research.hitterProfilesMissingEvidence === 0
     && research.pitcherProfilesMissingEvidence === 0;
   const workflowRun = workflow.rows[0];
+  const bullpenReady = officialEmptySlate || bullpen.rows[0]?.status === "SUCCESS";
+  const marketReady = officialEmptySlate || Boolean(marketCandidates.rows[0]?.candidates);
+  const slateState = officialEmptySlate ? "EMPTY_OFFICIAL_SLATE"
+    : !slate.rows[0]?.games
+      ? mlbSource?.status === "BLOCKED" || mlbSource?.status === "PARTIAL" ? "FAILED_SOURCE" : "NO_INGEST_RUN"
+      : !phaseTwoReady || !bullpenReady || !marketReady ? "MISSING_DOWNSTREAM_STAGE" : "POPULATED";
   const blockingReasons = [
-    ...(slate.rows[0]?.games ? [] : [`No official MLB schedule records are available for ${date}.`]),
-    ...(!phaseTwoReady ? [`Same-day research coverage is incomplete for ${date}.`] : []),
+    ...(slate.rows[0]?.games || officialEmptySlate ? [] : [`No official MLB schedule records are available for ${date}.`]),
+    ...(phaseTwoReady || officialEmptySlate ? [] : [`Same-day research coverage is incomplete for ${date}.`]),
+    ...(!bullpenReady ? [`Bullpen availability has not completed successfully for ${date}.`] : []),
+    ...(marketReady ? [] : [`No market candidates were produced for ${date}.`]),
     ...(coverage.unresolvedActivePlayers || coverage.blockingProjectedLineupIssues
       ? [`${coverage.unresolvedActivePlayers + coverage.blockingProjectedLineupIssues} unresolved or blocking identity record(s) remain.`]
       : []),
@@ -468,7 +490,8 @@ async function analystDataHealth(date: string) {
   const isCurrentDate = date === currentDate;
   const status: OperationalReadiness["status"] = !isCurrentDate
     ? "AUDIT_ONLY"
-    : blockingReasons.length ? "BLOCKED"
+    : officialEmptySlate ? "READY"
+      : blockingReasons.length ? "BLOCKED"
       : partialReasons.length ? "PARTIAL"
         : "READY";
   const reasons = !isCurrentDate
@@ -485,8 +508,10 @@ async function analystDataHealth(date: string) {
     observedAt: new Date().toISOString(),
   };
   const readinessIssues = [
-    ...(!slate.rows[0]?.games ? [{ label: "CURRENT SLATE MISSING", detail: `No official MLB schedule records are available for ${date}.`, severity: "CRITICAL" }] : []),
-    ...(!phaseTwoReady ? [{ label: "CURRENT RESEARCH INCOMPLETE", detail: `Same-day research coverage is not complete for ${date}.`, severity: "CRITICAL" }] : []),
+    ...(slate.rows[0]?.games || officialEmptySlate ? [] : [{ label: "CURRENT SLATE MISSING", detail: `No official MLB schedule records are available for ${date}.`, severity: "CRITICAL" }]),
+    ...(phaseTwoReady || officialEmptySlate ? [] : [{ label: "CURRENT RESEARCH INCOMPLETE", detail: `Same-day research coverage is not complete for ${date}.`, severity: "CRITICAL" }]),
+    ...(bullpenReady ? [] : [{ label: "BULLPEN REFRESH INCOMPLETE", detail: `Bullpen availability is not ready for ${date}.`, severity: "CRITICAL" }]),
+    ...(marketReady ? [] : [{ label: "MARKET STAGE MISSING", detail: `No market candidates were produced for ${date}.`, severity: "CRITICAL" }]),
     ...(coverage.unresolvedActivePlayers || coverage.blockingProjectedLineupIssues
       ? [{ label: "CURRENT IDENTITY UNRESOLVED", detail: `${coverage.unresolvedActivePlayers + coverage.blockingProjectedLineupIssues} active identity record(s) are unresolved or blocking.`, severity: "CRITICAL" }]
       : []),
@@ -495,8 +520,17 @@ async function analystDataHealth(date: string) {
       : []),
   ];
   return {
+    selectedDate: date,
+    timezone: "America/New_York",
+    slateState,
     overall: readiness.status,
-    phase2aReady: phaseTwoReady,
+    phase2aReady: officialEmptySlate || phaseTwoReady,
+    readinessDiagnostics: [
+      { code: "OFFICIAL_SCHEDULE", label: "Official MLB schedule", status: officialEmptySlate || slate.rows[0]?.games ? "READY" : "BLOCKED", detail: officialEmptySlate ? `MLB published an official empty slate for ${date}.` : slate.rows[0]?.games ? `${slate.rows[0].games} official game(s) are available for ${date}.` : `No official MLB schedule records are available for ${date}.` },
+      { code: "RESEARCH", label: "Current-date research", status: officialEmptySlate || phaseTwoReady ? "READY" : "BLOCKED", detail: officialEmptySlate ? "Not required because MLB published an official empty slate." : phaseTwoReady ? "Required handedness and park coverage is complete." : `Research is incomplete for ${date}; inspect the named source rows.` },
+      { code: "BULLPEN", label: "Bullpen availability", status: bullpenReady ? "READY" : "BLOCKED", detail: officialEmptySlate ? "Not required because MLB published an official empty slate." : bullpenReady ? "Current-date bullpen availability was refreshed." : `Bullpen refresh has not completed successfully for ${date}.` },
+      { code: "MARKET_CANDIDATES", label: "Market research stage", status: marketReady ? "READY" : "BLOCKED", detail: officialEmptySlate ? "Not required because MLB published an official empty slate." : marketReady ? `${marketCandidates.rows[0]?.candidates ?? 0} current-date candidate(s) are available.` : `No market candidates were produced for ${date}.` },
+    ],
     readiness,
     sources,
     issues: [
@@ -2024,9 +2058,17 @@ function matchesOperatorApprovalKey(received: unknown, expected: string) {
 const APPROVAL_OPERATOR_ID = "AI_REVIEW_OPERATOR";
 
 function issueOperatorApprovalSession(res: Parameters<RequestHandler>[1], secret: string): void {
-  const payload = Buffer.from(JSON.stringify({ operatorId: APPROVAL_OPERATOR_ID, expiresAt: Date.now() + 15 * 60 * 1000 })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ operatorId: APPROVAL_OPERATOR_ID, capability: "AI_REVIEW", expiresAt: Date.now() + 15 * 60 * 1000 })).toString("base64url");
   const signature = createHmac("sha256", secret).update(payload).digest("base64url");
   res.cookie("ai_operator_approval", `${payload}.${signature}`, {
+    httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production", maxAge: 15 * 60 * 1000, path: "/api",
+  });
+}
+
+function issueOperationsApprovalSession(res: Parameters<RequestHandler>[1], secret: string): void {
+  const payload = Buffer.from(JSON.stringify({ capability: "OPERATIONS", expiresAt: Date.now() + 15 * 60 * 1000 })).toString("base64url");
+  const signature = createHmac("sha256", secret).update(payload).digest("base64url");
+  res.cookie("operations_operator_approval", `${payload}.${signature}`, {
     httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production", maxAge: 15 * 60 * 1000, path: "/api",
   });
 }
@@ -2045,8 +2087,8 @@ function hasOperatorApprovalCapability(req: Parameters<RequestHandler>[0], res: 
     return null;
   }
   try {
-    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { operatorId?: unknown; expiresAt?: unknown };
-    if (session.operatorId !== APPROVAL_OPERATOR_ID || typeof session.expiresAt !== "number" || session.expiresAt < Date.now()) throw new Error("expired");
+    const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { operatorId?: unknown; capability?: unknown; expiresAt?: unknown };
+    if (session.operatorId !== APPROVAL_OPERATOR_ID || session.capability !== "AI_REVIEW" || typeof session.expiresAt !== "number" || session.expiresAt < Date.now()) throw new Error("expired");
     return APPROVAL_OPERATOR_ID;
   } catch {
     res.status(403).json({ error: "The operator approval session is expired or invalid." });
@@ -2066,6 +2108,42 @@ router.post("/analyst/ai/operator-session", (req, res) => {
   }
   issueOperatorApprovalSession(res, secret);
   res.json({ operatorId: APPROVAL_OPERATOR_ID, expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+});
+
+router.get("/analyst/ai/operator-session", (req, res) => {
+  const secret = process.env.AI_ANALYST_OPERATOR_APPROVAL_KEY;
+  const rawCookie = req.headers.cookie?.split(";").map((item) => item.trim()).find((item) => item.startsWith("ai_operator_approval="))?.slice("ai_operator_approval=".length);
+  const [payload, signature] = rawCookie?.split(".") ?? [];
+  const expectedSignature = payload && secret ? createHmac("sha256", secret).update(payload).digest("base64url") : "";
+  try {
+    const session = JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf8")) as { operatorId?: unknown; capability?: unknown; expiresAt?: unknown };
+    const authorized = Boolean(payload && signature && matchesOperatorApprovalKey(signature, expectedSignature) && session.operatorId === APPROVAL_OPERATOR_ID && session.capability === "AI_REVIEW" && typeof session.expiresAt === "number" && session.expiresAt > Date.now());
+    res.json({ authorized, expiresAt: authorized ? new Date(session.expiresAt as number).toISOString() : null, detail: authorized ? "AI review approval is active." : "Unlock before taking an AI review action." });
+  } catch {
+    res.json({ authorized: false, expiresAt: null, detail: "Unlock before taking an AI review action." });
+  }
+});
+
+router.post("/analyst/operations/operator-session", (req, res) => {
+  const secret = process.env.AI_ANALYST_OPERATOR_APPROVAL_KEY;
+  if (!secret) return res.status(503).json({ error: "Operator approval is unavailable until the server approval key is configured." });
+  if (!matchesOperatorApprovalKey(req.body?.approvalKey, secret)) return res.status(403).json({ error: "Invalid operator approval key." });
+  issueOperationsApprovalSession(res, secret);
+  return res.json({ operatorId: "OPERATIONS_OPERATOR", expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString() });
+});
+
+router.get("/analyst/operations/operator-session", (req, res) => {
+  const secret = process.env.AI_ANALYST_OPERATOR_APPROVAL_KEY;
+  const rawCookie = req.headers.cookie?.split(";").map((item) => item.trim()).find((item) => item.startsWith("operations_operator_approval="))?.slice("operations_operator_approval=".length);
+  const [payload, signature] = rawCookie?.split(".") ?? [];
+  const expectedSignature = payload && secret ? createHmac("sha256", secret).update(payload).digest("base64url") : "";
+  try {
+    const session = JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf8")) as { capability?: unknown; expiresAt?: unknown };
+    const authorized = Boolean(payload && signature && matchesOperatorApprovalKey(signature, expectedSignature) && session.capability === "OPERATIONS" && typeof session.expiresAt === "number" && session.expiresAt > Date.now());
+    res.json({ authorized, expiresAt: authorized ? new Date(session.expiresAt as number).toISOString() : null, detail: authorized ? "Operator approval is active." : "Unlock before starting, refreshing, interrupting, or scanning a slate." });
+  } catch {
+    res.json({ authorized: false, expiresAt: null, detail: "Unlock before starting, refreshing, interrupting, or scanning a slate." });
+  }
 });
 
 router.post("/analyst/ai/chat", async (req, res, next) => {

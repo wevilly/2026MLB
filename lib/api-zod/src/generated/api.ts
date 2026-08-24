@@ -98,7 +98,7 @@ export const GetAnalystTodayResponse = zod.object({
  * @summary Get FantasyPros projection snapshot summary
  */
 export const GetAnalystProjectionsQueryParams = zod.object({
-  "date": zod.date().optional()
+  "date": zod.date().optional().describe('Requested MLB slate date in Eastern Time. Defaults to the current Eastern date.')
 })
 
 export const GetAnalystProjectionsResponse = zod.object({
@@ -128,7 +128,7 @@ export const GetAnalystProjectionsResponse = zod.object({
  * @summary Get source freshness and data-quality state
  */
 export const GetAnalystDataHealthQueryParams = zod.object({
-  "date": zod.date().optional()
+  "date": zod.date().optional().describe('Requested MLB slate date in Eastern Time. Defaults to the current Eastern date.')
 })
 
 export const getAnalystDataHealthResponseSourcesItemAgeMinutesMin = 0;
@@ -136,8 +136,17 @@ export const getAnalystDataHealthResponseSourcesItemAgeMinutesMin = 0;
 
 
 export const GetAnalystDataHealthResponse = zod.object({
+  "selectedDate": zod.string(),
+  "timezone": zod.string(),
+  "slateState": zod.enum(['NO_INGEST_RUN', 'FAILED_SOURCE', 'EMPTY_OFFICIAL_SLATE', 'MISSING_DOWNSTREAM_STAGE', 'POPULATED']),
   "overall": zod.string(),
   "phase2aReady": zod.boolean(),
+  "readinessDiagnostics": zod.array(zod.object({
+  "code": zod.string(),
+  "label": zod.string(),
+  "status": zod.enum(['READY', 'BLOCKED']),
+  "detail": zod.string()
+})),
   "sources": zod.array(zod.object({
   "name": zod.string(),
   "status": zod.string(),

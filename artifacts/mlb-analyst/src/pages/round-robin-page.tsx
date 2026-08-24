@@ -341,7 +341,7 @@ export default function RoundRobinPage() {
             <SectionHeading eyebrow="Board rules" title={activeBoard.label} detail={activeBoard.description} />
             <div className="round-robin-rulebar">
               <span>Available: {activeBoard.activeMarkets.map((market) => MARKET_LABELS[market]).join(' · ')}</span>
-              {activeBoard.unavailableMarket && <Badge tone="warn">{activeBoard.unavailableMarket} · NOT EVALUATED</Badge>}
+              {activeBoard.unavailableMarket && <Badge tone="warn">{activeBoard.unavailableMarket} · UNSUPPORTED / NOT EVALUATED</Badge>}
               {activeBoard.exposureOptIn && <span>Same-player XBH + Walk needs opt-in</span>}
             </div>
           </Panel>
@@ -349,7 +349,7 @@ export default function RoundRobinPage() {
           {activeBoard.unavailableMarket && (
             <div className="round-robin-notice" data-testid="msg-not-evaluated">
               <Info size={16} />
-              <div><strong>{activeBoard.unavailableMarket} — NOT EVALUATED</strong><p>This companion market has no current usable research contract, so it cannot be selected or fabricated on this board.</p></div>
+              <div><strong>{activeBoard.unavailableMarket} — UNSUPPORTED</strong><p>This companion market has no current usable research contract, so it cannot be selected or fabricated on this board.</p></div>
             </div>
           )}
 

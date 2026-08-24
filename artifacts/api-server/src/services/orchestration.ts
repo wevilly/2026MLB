@@ -31,7 +31,30 @@ const STEP_NAMES = [
 
 const activeRuns = new Set<string>();
 let schedulerStarted = false;
-let lastScheduledDate: string | null = null;
+
+const QUALIFYING_RUN_STATUSES = ["RUNNING", "COMPLETE", "PARTIAL"] as const;
+
+function currentEasternDate(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
+function currentEasternTime(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value;
+  return `${value("hour")}:${value("minute")}`;
+}
 
 function dateOnly(value: unknown) {
   const text = String(value ?? "");
@@ -111,6 +134,8 @@ function responseDetail(value: unknown) {
 
 async function runStep(runId: string, steps: RunStep[], name: string, action: () => Promise<unknown>, warning = false) {
   const step = steps.find((candidate) => candidate.name === name)!;
+  // A restart resumes from the persisted ledger. Completed work is never rerun.
+  if (step.status === "SUCCESS" || step.status === "WARNING" || step.status === "FAILED") return true;
   if (await cancellationRequested(runId)) {
     step.status = "CANCELLED";
     step.finishedAt = new Date().toISOString();
@@ -149,8 +174,28 @@ async function finaliseRun(runId: string, slateDate: string, steps: RunStep[], s
 }
 
 async function executeRun(runId: string, slateDate: string) {
+  const executionClient = await pool.connect();
+  const executionLock = `orchestration-execution:${runId}`;
+  const claimed = await executionClient.query<{ locked: boolean }>(
+    `SELECT pg_try_advisory_lock(hashtext($1)) AS locked`,
+    [executionLock],
+  );
+  if (!claimed.rows[0]?.locked) {
+    executionClient.release();
+    return;
+  }
   activeRuns.add(runId);
-  const steps = initialSteps();
+  const persisted = await queryOrchestrationRun(runId);
+  if (persisted.overallStatus !== "RUNNING") {
+    await executionClient.query(`SELECT pg_advisory_unlock(hashtext($1))`, [executionLock]).catch(() => undefined);
+    executionClient.release();
+    activeRuns.delete(runId);
+    return;
+  }
+  const steps = persisted.steps.map((step) => step.status === "RUNNING"
+    ? { ...step, status: "PENDING" as const, startedAt: null, detail: "Recovered after an interrupted worker." }
+    : { ...step });
+  await persistSteps(runId, steps);
   try {
     if (!await runRequiredStep(runId, slateDate, steps, "mlb_ingest", () => ingestMlbOfficial(slateDate))) return;
     const postIngestStart = await earliestStart(slateDate);
@@ -169,21 +214,23 @@ async function executeRun(runId: string, slateDate: string) {
       return;
     }
     const healthStep = steps.find((step) => step.name === "health_check")!;
-    healthStep.status = "RUNNING";
-    healthStep.startedAt = new Date().toISOString();
-    await persistSteps(runId, steps);
-    try {
-       const health = await researchHealth(slateDate);
-      const issues = Number(health.identityQuarantines ?? 0) + Number(health.metricDefinitionConflicts ?? 0)
-        + Number(health.staleWindows ?? 0) + Number(health.identityOrEligibilityGaps ?? 0);
-      healthStep.status = issues ? "WARNING" : "SUCCESS";
-      healthStep.detail = issues ? `${issues} research or identity health warning(s)` : "freshness and identity coverage passed";
-    } catch (error) {
-      healthStep.status = "FAILED";
-      healthStep.detail = error instanceof Error ? error.message : String(error);
+    if (healthStep.status === "PENDING") {
+      healthStep.status = "RUNNING";
+      healthStep.startedAt = new Date().toISOString();
+      await persistSteps(runId, steps);
+      try {
+        const health = await researchHealth(slateDate);
+        const issues = Number(health.identityQuarantines ?? 0) + Number(health.metricDefinitionConflicts ?? 0)
+          + Number(health.staleWindows ?? 0) + Number(health.identityOrEligibilityGaps ?? 0);
+        healthStep.status = issues ? "WARNING" : "SUCCESS";
+        healthStep.detail = issues ? `${issues} research or identity health warning(s)` : "freshness and identity coverage passed";
+      } catch (error) {
+        healthStep.status = "FAILED";
+        healthStep.detail = error instanceof Error ? error.message : String(error);
+      }
+      healthStep.finishedAt = new Date().toISOString();
+      await persistSteps(runId, steps);
     }
-    healthStep.finishedAt = new Date().toISOString();
-    await persistSteps(runId, steps);
     if (healthStep.status !== "SUCCESS") { markPendingSkipped(steps, "Freeze blocked by health gate"); await finaliseRun(runId, slateDate, steps, "PARTIAL"); return; }
     const run = await queryOrchestrationRun(runId);
     const cutoff = typeof run.schedule.calculatedFreezeUtc === "string" ? Date.parse(run.schedule.calculatedFreezeUtc) : NaN;
@@ -206,6 +253,8 @@ async function executeRun(runId: string, slateDate: string) {
   } finally {
     invalidateCache("");
     activeRuns.delete(runId);
+    await executionClient.query(`SELECT pg_advisory_unlock(hashtext($1))`, [executionLock]).catch(() => undefined);
+    executionClient.release();
   }
 }
 
@@ -221,7 +270,14 @@ async function executeDueFreeze(runId: string) {
       return;
     }
     const freeze = run.steps.find((step) => step.name === "feature_snapshot_freeze");
-    if (!freeze || freeze.status !== "PENDING" || run.steps.some((step) => ["FAILED", "WARNING", "CANCELLED"].includes(step.status))) return;
+    const prerequisites = run.steps.filter((step) => step.name !== "feature_snapshot_freeze");
+    if (!freeze || prerequisites.some((step) => step.status !== "SUCCESS")) return;
+    if (freeze.status === "SUCCESS") {
+      await pool.query(`UPDATE orchestration_runs SET overall_status = 'COMPLETE', frozen_at = COALESCE(frozen_at, now()), finished_at = now(), error_message = NULL WHERE run_id = $1`, [runId]);
+      await recordAuditEvent({ action: "orchestration.complete", resourceType: "orchestration_run", resourceId: runId, metadata: { slateDate: run.runDate, recoveredAfterFreeze: true } });
+      return;
+    }
+    if (freeze.status !== "PENDING") return;
     await runStep(runId, run.steps, "feature_snapshot_freeze", async () => {
       const capture = await captureSlateSnapshots(run.runDate);
       if (capture.error || capture.snapshotErrors > 0) {
@@ -254,36 +310,58 @@ async function executeDueFreeze(runId: string) {
 
 export async function launchOrchestrationRun(rawDate: unknown, triggeredBy: OrchestrationTrigger = "OPERATOR") {
   const runDate = dateOnly(rawDate);
+  const start = await earliestStart(runDate);
   const insert = (client: { query: <T>(text: string, values?: unknown[]) => Promise<{ rows: T[] }> }) => client.query<{ run_id: string }>(
     `INSERT INTO orchestration_runs (run_date, triggered_by, overall_status, steps, schedule)
      VALUES ($1, $2::orchestration_trigger, 'RUNNING', $3::jsonb, $4::jsonb)
      RETURNING run_id`,
     [runDate, triggeredBy, JSON.stringify(initialSteps()), JSON.stringify(scheduleFor(runDate, start))],
   );
-  const start = await earliestStart(runDate);
+  const client = await pool.connect();
   let result: { rows: { run_id: string }[] };
-  if (triggeredBy === "SCHEDULED") {
-    const client = await pool.connect();
-    try {
-      const lock = await client.query<{ locked: boolean }>(`SELECT pg_try_advisory_lock(hashtext($1)) AS locked`, [`orchestration-scheduled:${runDate}`]);
-      if (!lock.rows[0]?.locked) throw new Error(`Scheduled orchestration launch is already being claimed for ${runDate}`);
-      const existing = await client.query<{ run_id: string }>(
-        `SELECT run_id FROM orchestration_runs WHERE run_date = $1 AND triggered_by = 'SCHEDULED' ORDER BY created_at DESC LIMIT 1`,
-        [runDate],
-      );
-      if (existing.rows[0]) return queryOrchestrationRun(existing.rows[0].run_id);
-      result = await insert(client);
-      await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [`orchestration-scheduled:${runDate}`]);
-    } finally {
-      client.release();
+  const lockKey = `orchestration-launch:${runDate}`;
+  try {
+    const lock = await client.query<{ locked: boolean }>(`SELECT pg_try_advisory_lock(hashtext($1)) AS locked`, [lockKey]);
+    if (!lock.rows[0]?.locked) {
+      throw new Error(`Daily orchestration launch is already being claimed for ${runDate}`);
     }
-  } else {
-    result = await insert(pool);
+    const existing = await client.query<{ run_id: string }>(
+      triggeredBy === "SCHEDULED"
+        ? `SELECT run_id FROM orchestration_runs
+           WHERE run_date = $1
+             AND (triggered_by = 'SCHEDULED' OR overall_status = ANY($2::orchestration_status[]))
+           ORDER BY created_at DESC LIMIT 1`
+        : `SELECT run_id FROM orchestration_runs
+           WHERE run_date = $1 AND overall_status = ANY($2::orchestration_status[])
+           ORDER BY created_at DESC LIMIT 1`,
+      [runDate, QUALIFYING_RUN_STATUSES],
+    );
+    if (existing.rows[0]) {
+      const run = await queryOrchestrationRun(existing.rows[0].run_id);
+      if (run.overallStatus === "RUNNING") void executeRun(run.runId, run.runDate);
+      return run;
+    }
+    result = await insert(client);
+  } finally {
+    await client.query(`SELECT pg_advisory_unlock(hashtext($1))`, [lockKey]).catch(() => undefined);
+    client.release();
   }
   const runId = result.rows[0].run_id;
   void executeRun(runId, runDate);
   await recordAuditEvent({ actor: triggeredBy === "OPERATOR" ? "OPERATOR" : "SCHEDULER", action: "orchestration.launched", resourceType: "orchestration_run", resourceId: runId, metadata: { runDate } });
   return queryOrchestrationRun(runId);
+}
+
+/**
+ * Startup and interval recovery for the daily 08:00 ET run. The database-backed
+ * launch claim makes this safe when several autoscale replicas wake at once.
+ */
+export async function catchUpScheduledOrchestration(now = new Date()) {
+  const slateDate = currentEasternDate(now);
+  const localTime = currentEasternTime(now);
+  if (localTime < "08:00") return { slateDate, due: false, run: null };
+  const run = await launchOrchestrationRun(slateDate, "SCHEDULED");
+  return { slateDate, due: true, run };
 }
 
 export async function queryOrchestrationRun(runId: string) {
@@ -542,12 +620,9 @@ export function startOrchestrationScheduler() {
   schedulerStarted = true;
   const tick = async () => {
     const now = new Date();
-    const localDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(now);
-    const localTime = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false }).format(now);
-    if (localTime === "08:00" && lastScheduledDate !== localDate) {
-      lastScheduledDate = localDate;
-      await launchOrchestrationRun(localDate, "SCHEDULED");
-    }
+    const localDate = currentEasternDate(now);
+    const localTime = currentEasternTime(now);
+    await catchUpScheduledOrchestration(now);
     if (localTime >= "02:30") {
       const [year, month, day] = localDate.split("-").map(Number);
       const priorSlateDate = new Date(Date.UTC(year, month - 1, day - 1)).toISOString().slice(0, 10);

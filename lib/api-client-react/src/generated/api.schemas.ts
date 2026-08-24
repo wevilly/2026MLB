@@ -138,6 +138,32 @@ export interface HealthIssue {
   severity: string;
 }
 
+export type DataHealthSlateState = typeof DataHealthSlateState[keyof typeof DataHealthSlateState];
+
+
+export const DataHealthSlateState = {
+  NO_INGEST_RUN: 'NO_INGEST_RUN',
+  FAILED_SOURCE: 'FAILED_SOURCE',
+  EMPTY_OFFICIAL_SLATE: 'EMPTY_OFFICIAL_SLATE',
+  MISSING_DOWNSTREAM_STAGE: 'MISSING_DOWNSTREAM_STAGE',
+  POPULATED: 'POPULATED',
+} as const;
+
+export type ReadinessDiagnosticStatus = typeof ReadinessDiagnosticStatus[keyof typeof ReadinessDiagnosticStatus];
+
+
+export const ReadinessDiagnosticStatus = {
+  READY: 'READY',
+  BLOCKED: 'BLOCKED',
+} as const;
+
+export interface ReadinessDiagnostic {
+  code: string;
+  label: string;
+  status: ReadinessDiagnosticStatus;
+  detail: string;
+}
+
 export type ResearchHealthHandednessCoverageScope = typeof ResearchHealthHandednessCoverageScope[keyof typeof ResearchHealthHandednessCoverageScope];
 
 
@@ -184,8 +210,12 @@ export interface ResearchHealth {
 }
 
 export interface DataHealth {
+  selectedDate: string;
+  timezone: string;
+  slateState: DataHealthSlateState;
   overall: string;
   phase2aReady: boolean;
+  readinessDiagnostics: ReadinessDiagnostic[];
   sources: SourceBadge[];
   issues: HealthIssue[];
   identityCoverage: IdentityCoverage;
@@ -2518,10 +2548,16 @@ date?: string;
 };
 
 export type GetAnalystProjectionsParams = {
+/**
+ * Requested MLB slate date in Eastern Time. Defaults to the current Eastern date.
+ */
 date?: string;
 };
 
 export type GetAnalystDataHealthParams = {
+/**
+ * Requested MLB slate date in Eastern Time. Defaults to the current Eastern date.
+ */
 date?: string;
 };
 

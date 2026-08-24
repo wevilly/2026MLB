@@ -53,6 +53,7 @@ paths:
         - name: date
           in: query
           required: false
+          description: Requested MLB slate date in Eastern Time. Defaults to the current Eastern date.
           schema: { type: string, format: date }
       responses:
         "200":
@@ -70,6 +71,7 @@ paths:
         - name: date
           in: query
           required: false
+          description: Requested MLB slate date in Eastern Time. Defaults to the current Eastern date.
           schema: { type: string, format: date }
       responses:
         "200":
@@ -1689,15 +1691,27 @@ components:
     DataHealth:
       type: object
       properties:
+        selectedDate: { type: string }
+        timezone: { type: string }
+        slateState: { type: string, enum: [NO_INGEST_RUN, FAILED_SOURCE, EMPTY_OFFICIAL_SLATE, MISSING_DOWNSTREAM_STAGE, POPULATED] }
         overall: { type: string }
         phase2aReady: { type: boolean }
+        readinessDiagnostics: { type: array, items: { $ref: "#/components/schemas/ReadinessDiagnostic" } }
         sources: { type: array, items: { $ref: "#/components/schemas/SourceBadge" } }
         issues: { type: array, items: { $ref: "#/components/schemas/HealthIssue" } }
         identityCoverage: { $ref: "#/components/schemas/IdentityCoverage" }
         researchHealth: { $ref: "#/components/schemas/ResearchHealth" }
         lastRun: { type: string }
         readiness: { $ref: "#/components/schemas/OperationalReadiness" }
-      required: [overall, phase2aReady, sources, issues, identityCoverage, researchHealth, lastRun, readiness]
+      required: [selectedDate, timezone, slateState, overall, phase2aReady, readinessDiagnostics, sources, issues, identityCoverage, researchHealth, lastRun, readiness]
+    ReadinessDiagnostic:
+      type: object
+      properties:
+        code: { type: string }
+        label: { type: string }
+        status: { type: string, enum: [READY, BLOCKED] }
+        detail: { type: string }
+      required: [code, label, status, detail]
     ConnectionStatus:
       type: object
       properties:

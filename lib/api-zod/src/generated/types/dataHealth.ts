@@ -5,15 +5,21 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { DataHealthSlateState } from './dataHealthSlateState';
 import type { HealthIssue } from './healthIssue';
 import type { IdentityCoverage } from './identityCoverage';
 import type { OperationalReadiness } from './operationalReadiness';
+import type { ReadinessDiagnostic } from './readinessDiagnostic';
 import type { ResearchHealth } from './researchHealth';
 import type { SourceBadge } from './sourceBadge';
 
 export interface DataHealth {
+  selectedDate: string;
+  timezone: string;
+  slateState: DataHealthSlateState;
   overall: string;
   phase2aReady: boolean;
+  readinessDiagnostics: ReadinessDiagnostic[];
   sources: SourceBadge[];
   issues: HealthIssue[];
   identityCoverage: IdentityCoverage;

@@ -8,3 +8,4 @@
 - [Research refresh proxy timeouts](research-refresh-proxy-timeouts.md) — long full-universe research may outlive proxied requests and delay live health reads.
 - [Generated client refreshes](generated-client-refreshes.md) — OpenAPI regeneration temporarily removes generated modules; restart the Vite workflow after codegen to clear transient import errors.
 - [Bullpen availability date arithmetic](bullpen-availability-date-arithmetic.md) — calculate rest-day offsets in PostgreSQL and validate integer inputs before availability writes.
+- [Multi-artifact publishing](multi-artifact-publishing.md) — publishing the web artifact does not update a separately deployed API artifact; verify each production service independently.

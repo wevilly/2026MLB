@@ -360,7 +360,8 @@ function ProjectionTable({ rows }: { rows: ProjectionRow[] }) {
 }
 
 function DataHealthPage() {
-  const query = useGetAnalystDataHealth();
+  const [date, setDate] = useState(currentEasternDate());
+  const query = useGetAnalystDataHealth({ date });
   const data = query.data as DataHealth | undefined;
   const criticalCount = data?.issues?.filter((issue) => toneFor(issue.severity) === 'bad').length ?? 0;
   const coverage = data?.identityCoverage;
@@ -368,16 +369,17 @@ function DataHealthPage() {
     <div className="page-content rise-in">
       <div className="page-intro">
         <div><Kicker>Provenance / freshness / mappings</Kicker><h1>Data <span className="slash">//</span> health</h1><p>Know what arrived, when it arrived, and what still needs an analyst’s eyes.</p></div>
-        <button className="button button-dark" onClick={() => query.refetch()} data-testid="button-refresh-data-health"><RefreshCw size={15} /> Run health check</button>
+        <div className="flex gap-2 flex-wrap"><input className="search-input !w-auto" type="date" value={date} onChange={(event) => setDate(event.target.value)} /><button className="button button-dark" onClick={() => query.refetch()} data-testid="button-refresh-data-health"><RefreshCw size={15} /> Run health check</button></div>
       </div>
       {query.isLoading ? <LoadingPanel rows={6} /> : query.isError ? <QueryMessage kind="error" onRetry={() => query.refetch()} /> : !data ? <QueryMessage kind="empty" /> : (
         <>
           <ReadinessStrip health={data} />
           <div className="health-summary">
-            <Panel className="overall-panel"><div className="health-ring"><Gauge size={25} /><span>{data.overall}</span></div><div><Kicker>Overall contract state</Kicker><h2>{data.overall}</h2><p>Last run {data.lastRun}</p></div><div className="health-rule" /></Panel>
+            <Panel className="overall-panel"><div className="health-ring"><Gauge size={25} /><span>{data.overall}</span></div><div><Kicker>{data.selectedDate} / {data.timezone}</Kicker><h2>{data.overall}</h2><p>{data.slateState.replaceAll('_', ' ')} · Last run {data.lastRun}</p></div><div className="health-rule" /></Panel>
             <Metric label="Sources observed" value={data.sources?.length ?? 0} note="In current health run" tone="accent" />
             <Metric label="Issues requiring review" value={data.issues?.length ?? 0} note={criticalCount ? `${criticalCount} critical` : 'No critical issues'} tone={criticalCount ? 'bad' : data.issues?.length ? 'warn' : 'good'} />
           </div>
+          <Panel><SectionHeading eyebrow="Selected-date readiness" title="Operational stage diagnostics" detail="Each stage is evaluated against the selected Eastern slate date." /><div className="issue-list">{data.readinessDiagnostics.map((diagnostic) => <IssueRow key={diagnostic.code} issue={{ label: diagnostic.label, detail: diagnostic.detail, severity: diagnostic.status === 'READY' ? 'INFO' : 'CRITICAL' }} />)}</div></Panel>
           <Panel>
             <SectionHeading eyebrow="Current player eligibility" title="Slate identity coverage" detail="Coverage is measured against official starters, posted lineups, projected lineups, and the current eligible projection universe." />
             <div className="metric-grid">
@@ -421,6 +423,7 @@ type OrchestrationRun = {
   frozenAt: string | null;
   errorMessage: string | null;
 };
+type OperatorApproval = { authorized: boolean; expiresAt: string | null; detail: string };
 
 async function operationsRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, { ...init, headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) } });
@@ -434,7 +437,16 @@ function OrchestrationPage() {
   const [runs, setRuns] = useState<OrchestrationRun[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const healthQuery = useGetAnalystDataHealth();
+  const healthQuery = useGetAnalystDataHealth({ date });
+  const [approvalKey, setApprovalKey] = useState('');
+  const [approval, setApproval] = useState<OperatorApproval>({ authorized: false, expiresAt: null, detail: 'Checking operator approval…' });
+  const [clock, setClock] = useState(Date.now());
+  const approvalRemaining = approval.expiresAt ? Math.max(0, Date.parse(approval.expiresAt) - clock) : 0;
+  const approvalActive = approval.authorized && approvalRemaining > 0;
+  const loadApproval = async () => {
+    try { setApproval(await operationsRequest<OperatorApproval>('/analyst/operations/operator-session')); }
+    catch { setApproval({ authorized: false, expiresAt: null, detail: 'Operator approval status could not be checked.' }); }
+  };
   const load = async () => {
     setLoading(true);
     try {
@@ -445,6 +457,19 @@ function OrchestrationPage() {
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, [date]);
+  useEffect(() => { void loadApproval(); }, []);
+  useEffect(() => { const timer = window.setInterval(() => setClock(Date.now()), 1_000); return () => window.clearInterval(timer); }, []);
+  const unlock = async () => {
+    if (!approvalKey.trim()) return;
+    setLoading(true);
+    try {
+      const next = await operationsRequest<{ expiresAt: string }>('/analyst/operations/operator-session', { method: 'POST', body: JSON.stringify({ approvalKey }) });
+      setApprovalKey('');
+      setApproval({ authorized: true, expiresAt: next.expiresAt, detail: 'Operator approval is active.' });
+      setMessage('Operator approval is active. Routine slate operations are now available until the displayed expiry time.');
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Unable to unlock operator actions.'); }
+    finally { setLoading(false); }
+  };
   const startRun = async () => {
     setLoading(true);
     try {
@@ -470,14 +495,15 @@ function OrchestrationPage() {
   return <div className="page-content rise-in" data-testid="page-orchestration">
     <div className="page-intro">
       <div><Kicker>Daily refresh control</Kicker><h1>Slate <span className="slash">//</span> orchestration</h1><p>One auditable sequence for ingest, research, market build, health checks, and the pregame freeze.</p></div>
-      <div className="flex gap-2 flex-wrap"><input className="search-input !w-auto" type="date" value={date} onChange={(event) => setDate(event.target.value)} /><button className="button button-dark" disabled={loading} onClick={startRun} data-testid="button-start-orchestration"><Play size={15} /> Run slate</button></div>
+      <div className="flex gap-2 flex-wrap"><input className="search-input !w-auto" type="date" value={date} onChange={(event) => setDate(event.target.value)} /><button className="button button-dark" disabled={loading || !approvalActive} onClick={startRun} data-testid="button-start-orchestration"><Play size={15} /> Run slate</button></div>
     </div>
     <ReadinessStrip health={healthQuery.data} />
-    <Panel className="mb-6"><div className="flex flex-wrap justify-between gap-3 items-center"><div><Kicker>Schedule policy</Kicker><strong>08:00 ET refresh · freeze 90 minutes before the earliest first pitch</strong><p className="text-xs text-muted-foreground mt-1">Manual runs are recorded separately; feature snapshots remain append-only once frozen.</p></div><div className="flex gap-2 flex-wrap"><button className="button button-quiet" onClick={() => void lateScratchScan()} disabled={loading}>Scan late scratches</button><button className="button button-quiet" onClick={() => void load()}><RefreshCw size={15} /> Refresh</button><a className="button button-quiet" href={`/api/analyst/export/slate-json?date=${date}`} target="_blank" rel="noreferrer"><Download size={15} /> slate.json</a><a className="button button-quiet" href={`/api/analyst/export/workbook?date=${date}`}><Download size={15} /> Workbook</a></div></div></Panel>
+    <Panel className="mb-6"><div className="flex flex-wrap justify-between gap-3 items-center"><div><Kicker>Operations approval</Kicker><strong>{approvalActive ? `Active · ${Math.ceil(approvalRemaining / 60000)} minute(s) remaining` : 'Routine actions locked'}</strong><p className="text-xs text-muted-foreground mt-1">{approval.detail}</p></div><div className="flex gap-2 flex-wrap"><input className="search-input !w-auto" type="password" value={approvalKey} onChange={(event) => setApprovalKey(event.target.value)} placeholder="Operator approval key" aria-label="Operator approval key" data-testid="input-operations-approval-key" /><button className="button button-dark" disabled={loading || !approvalKey.trim()} onClick={() => void unlock()}>{approvalActive ? 'Renew unlock' : 'Unlock operations'}</button></div></div></Panel>
+    <Panel className="mb-6"><div className="flex flex-wrap justify-between gap-3 items-center"><div><Kicker>Schedule policy</Kicker><strong>08:00 ET refresh · freeze 90 minutes before the earliest first pitch</strong><p className="text-xs text-muted-foreground mt-1">Manual runs are recorded separately; feature snapshots remain append-only once frozen.</p></div><div className="flex gap-2 flex-wrap"><button className="button button-quiet" onClick={() => void lateScratchScan()} disabled={loading || !approvalActive}>Scan late scratches</button><button className="button button-quiet" onClick={() => void load()}><RefreshCw size={15} /> Refresh</button><a className="button button-quiet" href={`/api/analyst/export/slate-json?date=${date}`} target="_blank" rel="noreferrer"><Download size={15} /> slate.json</a><a className="button button-quiet" href={`/api/analyst/export/workbook?date=${date}`}><Download size={15} /> Workbook</a></div></div></Panel>
     {message && <div className="query-message query-error mb-4"><AlertTriangle size={16} /><div><strong>Operator note</strong><p>{message}</p></div></div>}
     {runs.length === 0 && !loading ? <QueryMessage kind="empty" /> : <div className="space-y-4">
       {runs.map((run) => <Panel key={run.runId} className="p-5" data-testid={`orchestration-run-${run.runId}`}>
-        <div className="flex justify-between gap-3 flex-wrap items-start"><div><Kicker>{run.triggeredBy} · {run.runDate}</Kicker><h2 className="text-lg">Run {run.runId.slice(0, 8)} <Badge tone={toneFor(run.overallStatus)}>{run.overallStatus}</Badge></h2><p className="text-xs text-muted-foreground mt-1">Frozen: {run.frozenAt ?? 'not yet'} {run.errorMessage ? `· ${run.errorMessage}` : ''}</p></div>{run.overallStatus === 'RUNNING' && <button className="button button-quiet" onClick={() => void interrupt(run.runId)}><Square size={14} /> Interrupt</button>}</div>
+        <div className="flex justify-between gap-3 flex-wrap items-start"><div><Kicker>{run.triggeredBy} · {run.runDate}</Kicker><h2 className="text-lg">Run {run.runId.slice(0, 8)} <Badge tone={toneFor(run.overallStatus)}>{run.overallStatus}</Badge></h2><p className="text-xs text-muted-foreground mt-1">Frozen: {run.frozenAt ?? 'not yet'} {run.errorMessage ? `· ${run.errorMessage}` : ''}</p></div>{run.overallStatus === 'RUNNING' && <button className="button button-quiet" disabled={!approvalActive} onClick={() => void interrupt(run.runId)}><Square size={14} /> Interrupt</button>}</div>
         <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3 mt-4">{run.steps.map((step) => <div className="border border-border p-3 text-xs" key={step.name}><div className="flex justify-between gap-2"><strong>{step.name.replaceAll('_', ' ')}</strong><Badge tone={toneFor(step.status)}>{step.status}</Badge></div><p className="text-muted-foreground mt-2">{step.detail ?? 'Awaiting execution'}</p></div>)}</div>
       </Panel>)}
     </div>}

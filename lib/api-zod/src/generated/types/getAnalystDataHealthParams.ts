@@ -7,5 +7,8 @@
  */
 
 export type GetAnalystDataHealthParams = {
+/**
+ * Requested MLB slate date in Eastern Time. Defaults to the current Eastern date.
+ */
 date?: Date;
 };
