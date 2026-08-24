@@ -25,7 +25,14 @@ function candidate(overrides: Partial<RoundRobinCandidate>): RoundRobinCandidate
     primaryMechanism: "Current aggregate evidence",
     opportunityEvidence: {},
     starterMatchupEvidence: {},
-    bullpenPathEvidence: {},
+    bullpenPathEvidence: {
+      status: "CURRENT",
+      rolePath: [
+        { slot: "7TH", playerId: 701, role: "SETUP" },
+        { slot: "8TH", playerId: 801, role: "PRIMARY_SETUP" },
+        { slot: "9TH", playerId: 901, role: "CLOSER" },
+      ],
+    },
     parkEvidence: {},
     counterEvidence: {},
     ...overrides,
@@ -93,4 +100,39 @@ test("unsafe rows remain evaluated but cannot enter a selected construction", ()
   assert.equal(result.away.evaluatedIneligibleHitters, 1);
   assert.equal(result.away.bestConstruction, null);
   assert.equal(result.selectedSide, null);
+});
+
+for (const [status, reason, expected] of [
+  ["STALE", "Projected 9th arm has stale source freshness.", /Stale bullpen path: Projected 9th arm has stale source freshness/],
+  ["MISSING", "No leverage map exists for this bullpen.", /Incomplete bullpen path: No leverage map exists for this bullpen/],
+  ["ROLE_INCOMPLETE", "Projected 8th arm is unavailable.", /Incomplete bullpen path: Projected 8th arm is unavailable/],
+] as const) {
+  test(`Round Robin blocks a ${status.toLowerCase()} bullpen path with its precise reason`, () => {
+    const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+      candidate({ candidateId: `${status}-tb`, playerId: 1, market: "TB", bullpenPathEvidence: { status, reason } }),
+      candidate({ candidateId: `${status}-walk`, playerId: 2, market: "WALK", bullpenPathEvidence: { status, reason } }),
+    ]);
+    assert.equal(result.selectedSide, null);
+    assert.match(result.away.unavailableReason ?? "", expected);
+    assert.equal(result.away.evaluatedIneligibleHitters, 2);
+  });
+}
+
+test("Round Robin blocks legacy generic bullpen payloads", () => {
+  const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+    candidate({ candidateId: "legacy-tb", playerId: 1, market: "TB", bullpenPathEvidence: {} }),
+    candidate({ candidateId: "legacy-walk", playerId: 2, market: "WALK", bullpenPathEvidence: {} }),
+  ]);
+  assert.equal(result.selectedSide, null);
+  assert.match(result.away.unavailableReason ?? "", /generic bullpen evidence cannot be used/);
+});
+
+test("Round Robin blocks a malformed CURRENT bullpen payload", () => {
+  const malformedCurrent = { status: "CURRENT", rolePath: [{ slot: "9TH", playerId: 901, role: "CLOSER" }] };
+  const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
+    candidate({ candidateId: "malformed-tb", playerId: 1, market: "TB", bullpenPathEvidence: malformedCurrent }),
+    candidate({ candidateId: "malformed-walk", playerId: 2, market: "WALK", bullpenPathEvidence: malformedCurrent }),
+  ]);
+  assert.equal(result.selectedSide, null);
+  assert.match(result.away.unavailableReason ?? "", /complete, distinct projected 7th\/8th\/9th arm path/);
 });

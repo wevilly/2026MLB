@@ -37,6 +37,7 @@
 
 import { pool } from "@workspace/db";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
+import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
 
 // ── Source / market constants ─────────────────────────────────────────────────
 
@@ -102,10 +103,10 @@ interface StarterInfo {
   starterState: string;
 }
 
-interface BullpenWalkSummary {
-  availableArms: number;
+interface BullpenWalkSummary extends BullpenRolePath {
   availableHighLeverage: number;
-  avgBBPct: N; // average BB% across latest snapshot per available arm
+  avgBBPct: N; // average BB% across latest snapshot per projected path arm
+  metricArmCount: number;
 }
 
 interface WALKCandidate {
@@ -310,24 +311,19 @@ async function getParkFeatures(venueId: number): Promise<FeatureMap> {
 }
 
 async function getBullpenWalkSummary(teamId: number, slateDate: string): Promise<BullpenWalkSummary> {
-  const arms = await pool.query<{ player_id: number; final_state: string; role: string | null }>(
-    `SELECT bao.player_id, bao.final_state, rp.role
-     FROM bullpen_availability_observations bao
-     LEFT JOIN reliever_profiles rp ON rp.player_id = bao.player_id
-     WHERE bao.team_id = $1 AND bao.slate_date = $2
-       AND bao.final_state IN ('AVAILABLE', 'LIKELY_AVAILABLE')`,
-    [teamId, slateDate],
-  );
-  const highLeverageRoles = new Set(["CLOSER", "PRIMARY_SETUP", "SETUP"]);
-  const armIds = arms.rows.map((r) => r.player_id);
-  const highLeverage = arms.rows.filter((r) => r.role && highLeverageRoles.has(r.role)).length;
+  const path = await getBullpenRolePath(teamId, slateDate);
+  if (path.status !== "CURRENT") {
+    return { ...path, availableHighLeverage: path.rolePath.length, avgBBPct: null, metricArmCount: 0 };
+  }
+  const armIds = path.armIds;
 
   let avgBBPct: N = null;
+  let metricArmCount = 0;
   if (armIds.length > 0) {
-    // Select the LATEST overall (batter_side IS NULL) bb_percent snapshot per reliever,
-    // then average across reliever arms. This prevents blending stale historical values.
-    const bbResult = await pool.query<{ avg_bb_pct: string | null }>(
-      `SELECT AVG(latest_val)::text AS avg_bb_pct
+    // Aggregate only the current projected 7th/8th/9th role path. This also
+    // prevents blending stale historical values.
+    const bbResult = await pool.query<{ avg_bb_pct: string | null; metric_arm_count: string }>(
+      `SELECT AVG(latest_val)::text AS avg_bb_pct, COUNT(latest_val)::text AS metric_arm_count
        FROM (
          SELECT DISTINCT ON (s.player_id)
            f.value::numeric AS latest_val
@@ -341,9 +337,12 @@ async function getBullpenWalkSummary(teamId: number, slateDate: string): Promise
        ) latest`,
       [armIds],
     );
-    avgBBPct = bbResult.rows[0]?.avg_bb_pct != null ? Number(bbResult.rows[0].avg_bb_pct) : null;
+    metricArmCount = Number(bbResult.rows[0]?.metric_arm_count ?? 0);
+    avgBBPct = metricArmCount === armIds.length && bbResult.rows[0]?.avg_bb_pct != null
+      ? Number(bbResult.rows[0].avg_bb_pct)
+      : null;
   }
-  return { availableArms: armIds.length, availableHighLeverage: highLeverage, avgBBPct };
+  return { ...path, availableHighLeverage: path.rolePath.length, avgBBPct, metricArmCount };
 }
 
 // ── Classification logic ──────────────────────────────────────────────────────
@@ -585,11 +584,18 @@ function buildStarterMatchupEvidence(c: WALKCandidate): object {
 
 function buildBullpenWalkEvidence(c: WALKCandidate): object {
   return {
+    status: c.bullpen.status,
+    reason: c.bullpen.reason,
+    computedAt: c.bullpen.computedAt,
+    rolePath: c.bullpen.rolePath,
+    rolePathArmIds: c.bullpen.armIds,
     availableArms: c.bullpen.availableArms,
-    availableHighLeverageArms: c.bullpen.availableHighLeverage,
-    avgBBPct: c.bullpen.avgBBPct,
+    rolePathArmCount: c.bullpen.availableHighLeverage,
+    metricArmCount: c.bullpen.metricArmCount,
+    metricCoverageComplete: c.bullpen.metricArmCount === c.bullpen.armIds.length,
+    rolePathAvgBBPct: c.bullpen.avgBBPct,
     walkProneFlag: c.bullpen.avgBBPct !== null && c.bullpen.avgBBPct >= BULLPEN_WALK_BB_THRESHOLD,
-    note: c.bullpen.availableArms === 0 ? "No bullpen availability data for this date" : null,
+    note: c.bullpen.reason,
   };
 }
 
@@ -727,11 +733,13 @@ async function writeEvidenceBlocks(candidateId: string, c: WALKCandidate): Promi
     },
     {
       blockType: "BULLPEN_PATH", metricKey: "bullpen_avg_bb_pct", metricLabel: "Bullpen avg BB%",
-      value: c.bullpen.avgBBPct, unit: "%", sampleSize: c.bullpen.availableArms,
+      value: c.bullpen.avgBBPct, unit: "%", sampleSize: c.bullpen.availableHighLeverage,
       direction: c.bullpen.avgBBPct === null ? "UNKNOWN"
         : c.bullpen.avgBBPct >= BULLPEN_WALK_BB_THRESHOLD ? "FAVORABLE" : "CONTEXT_ONLY",
       strength: c.bullpen.availableHighLeverage > 0 ? "MODERATE" : "WEAK",
-      narrative: `${c.bullpen.availableArms} available/likely-available opposing arms. Avg BB% of these arms (walk-path context).`,
+      narrative: c.bullpen.status === "CURRENT"
+        ? `Projected 7th/8th/9th role path (${c.bullpen.rolePath.map((arm) => arm.role).join(" → ")}). Avg BB% of those arms.`
+        : `Bullpen path unavailable: ${c.bullpen.reason}`,
       rawEvidence: buildBullpenWalkEvidence(c),
     },
     {
@@ -901,7 +909,11 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
       if (starter.playerId === null)  missingData.push("Opposing starter identity unknown");
       else if (pitcherFeatures.size === 0) missingData.push("No season pitcher research data");
       if (player.venueId === null || parkFeatures.size === 0) missingData.push("Park factors unavailable");
-      if (bullpen.availableArms === 0) missingData.push("Bullpen availability not yet computed for this date");
+      if (bullpen.status !== "CURRENT") {
+        missingData.push(`Bullpen path ${bullpen.status.toLowerCase()}: ${bullpen.reason}`);
+      } else if (bullpen.metricArmCount !== bullpen.armIds.length) {
+        missingData.push(`Bullpen role-path BB% research incomplete (${bullpen.metricArmCount}/${bullpen.armIds.length} arms)`);
+      }
 
       const { primary: mechanism, secondary: secondaryMechanism } = classifyMechanism(
         hitterFeatures, bullpen, player.bats, starter.throws,

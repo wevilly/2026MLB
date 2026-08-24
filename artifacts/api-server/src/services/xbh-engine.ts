@@ -36,6 +36,7 @@
 
 import { pool } from "@workspace/db";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
+import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
 
 // ── Source ID ─────────────────────────────────────────────────────────────────
 
@@ -104,10 +105,10 @@ interface StarterInfo {
   starterState: string;
 }
 
-interface BullpenSummary {
-  availableArms: number;
+interface BullpenSummary extends BullpenRolePath {
   availableHighLeverage: number;
   avgXSLGAllowed: N;
+  metricArmCount: number;
 }
 
 interface XBHCandidate {
@@ -320,25 +321,19 @@ async function getParkFeatures(venueId: number): Promise<FeatureMap> {
 }
 
 async function getBullpenSummary(teamId: number, slateDate: string): Promise<BullpenSummary> {
-  const arms = await pool.query<{ player_id: number; final_state: string; role: string | null }>(
-    `SELECT bao.player_id, bao.final_state, rp.role
-     FROM bullpen_availability_observations bao
-     LEFT JOIN reliever_profiles rp ON rp.player_id = bao.player_id
-     WHERE bao.team_id = $1 AND bao.slate_date = $2
-       AND bao.final_state IN ('AVAILABLE', 'LIKELY_AVAILABLE')`,
-    [teamId, slateDate],
-  );
-  const highLeverageRoles = new Set(["CLOSER", "PRIMARY_SETUP", "SETUP"]);
-  const armIds = arms.rows.map((r) => r.player_id);
-  const highLeverage = arms.rows.filter((r) => r.role && highLeverageRoles.has(r.role)).length;
+  const path = await getBullpenRolePath(teamId, slateDate);
+  if (path.status !== "CURRENT") {
+    return { ...path, availableHighLeverage: path.rolePath.length, avgXSLGAllowed: null, metricArmCount: 0 };
+  }
+  const armIds = path.armIds;
 
   let avgXSLGAllowed: N = null;
+  let metricArmCount = 0;
   if (armIds.length > 0) {
-    // Select the LATEST overall (batter_side IS NULL) xslg_allowed snapshot per reliever,
-    // then average across relievers. Using all historical snapshots would blend stale
-    // values from prior research ingests into the average.
-    const xslg = await pool.query<{ avg_xslg: string | null }>(
-      `SELECT AVG(latest_val)::text AS avg_xslg
+    // Aggregate only the current projected 7th/8th/9th role path, not every
+    // available arm in the room.
+    const xslg = await pool.query<{ avg_xslg: string | null; metric_arm_count: string }>(
+      `SELECT AVG(latest_val)::text AS avg_xslg, COUNT(latest_val)::text AS metric_arm_count
        FROM (
          SELECT DISTINCT ON (s.player_id)
            f.value::numeric AS latest_val
@@ -352,9 +347,12 @@ async function getBullpenSummary(teamId: number, slateDate: string): Promise<Bul
        ) latest`,
       [armIds],
     );
-    avgXSLGAllowed = xslg.rows[0]?.avg_xslg != null ? Number(xslg.rows[0].avg_xslg) : null;
+    metricArmCount = Number(xslg.rows[0]?.metric_arm_count ?? 0);
+    avgXSLGAllowed = metricArmCount === armIds.length && xslg.rows[0]?.avg_xslg != null
+      ? Number(xslg.rows[0].avg_xslg)
+      : null;
   }
-  return { availableArms: armIds.length, availableHighLeverage: highLeverage, avgXSLGAllowed };
+  return { ...path, availableHighLeverage: path.rolePath.length, avgXSLGAllowed, metricArmCount };
 }
 
 // ── Classification logic ──────────────────────────────────────────────────────
@@ -564,10 +562,17 @@ function buildStarterMatchupEvidence(c: XBHCandidate): object {
 
 function buildBullpenPathEvidence(c: XBHCandidate): object {
   return {
+    status: c.bullpen.status,
+    reason: c.bullpen.reason,
+    computedAt: c.bullpen.computedAt,
+    rolePath: c.bullpen.rolePath,
+    rolePathArmIds: c.bullpen.armIds,
     availableArms: c.bullpen.availableArms,
-    availableHighLeverageArms: c.bullpen.availableHighLeverage,
-    avgXSLGAllowed: c.bullpen.avgXSLGAllowed,
-    note: c.bullpen.availableArms === 0 ? "No bullpen availability data for this date" : null,
+    rolePathArmCount: c.bullpen.availableHighLeverage,
+    metricArmCount: c.bullpen.metricArmCount,
+    metricCoverageComplete: c.bullpen.metricArmCount === c.bullpen.armIds.length,
+    rolePathAvgXSLGAllowed: c.bullpen.avgXSLGAllowed,
+    note: c.bullpen.reason,
   };
 }
 
@@ -699,10 +704,12 @@ async function writeEvidenceBlocks(candidateId: string, c: XBHCandidate): Promis
     },
     {
       blockType: "BULLPEN_PATH", metricKey: "bullpen_path_summary", metricLabel: "Bullpen path summary",
-      value: c.bullpen.avgXSLGAllowed, unit: "rate", sampleSize: c.bullpen.availableArms,
+      value: c.bullpen.avgXSLGAllowed, unit: "rate", sampleSize: c.bullpen.availableHighLeverage,
       direction: c.bullpen.avgXSLGAllowed === null ? "UNKNOWN" : "CONTEXT_ONLY",
       strength: c.bullpen.availableHighLeverage > 0 ? "MODERATE" : "WEAK",
-      narrative: `${c.bullpen.availableArms} available/likely-available opposing arms. Avg xSLG allowed by these arms (context only for XBH).`,
+      narrative: c.bullpen.status === "CURRENT"
+        ? `Projected 7th/8th/9th role path (${c.bullpen.rolePath.map((arm) => arm.role).join(" → ")}). Avg xSLG allowed by those arms (context only for XBH).`
+        : `Bullpen path unavailable: ${c.bullpen.reason}`,
       rawEvidence: buildBullpenPathEvidence(c),
     },
     {
@@ -880,7 +887,11 @@ export async function runXBHEngine(slateDate: string): Promise<XBHEngineResult> 
       if (starter.playerId === null)  missingData.push("Opposing starter identity unknown");
       else if (pitcherFeatures.size === 0) missingData.push("No season pitcher research data");
       if (player.venueId === null || parkFeatures.size === 0) missingData.push("Park factors unavailable");
-      if (bullpen.availableArms === 0) missingData.push("Bullpen availability not yet computed for this date");
+      if (bullpen.status !== "CURRENT") {
+        missingData.push(`Bullpen path ${bullpen.status.toLowerCase()}: ${bullpen.reason}`);
+      } else if (bullpen.metricArmCount !== bullpen.armIds.length) {
+        missingData.push(`Bullpen role-path xSLG research incomplete (${bullpen.metricArmCount}/${bullpen.armIds.length} arms)`);
+      }
 
       const { primary: mechanism, secondary: secondaryMechanism } = classifyMechanism(
         hitterFeatures, player.battingOrder, player.bats, starter.throws,

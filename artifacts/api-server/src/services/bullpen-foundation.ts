@@ -21,6 +21,7 @@ import { pool } from "@workspace/db";
 
 const BULLPEN_SOURCE = "BULLPEN";
 const MLB_BASE = "https://statsapi.mlb.com/api/v1";
+export const BULLPEN_FRESHNESS_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 type JsonObject = Record<string, unknown>;
 
@@ -61,6 +62,12 @@ function dateOffset(baseDate: string, days: number): string {
   const d = new Date(`${baseDate}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+function isCurrentBullpenTimestamp(value: string | null, now = Date.now()): boolean {
+  if (!value) return false;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) && timestamp <= now && now - timestamp <= BULLPEN_FRESHNESS_WINDOW_MS;
 }
 
 async function ensureBullpenSource(): Promise<void> {
@@ -638,9 +645,11 @@ async function buildTeamLeverageMap(teamId: number, slateDate: string): Promise<
     throws: string | null;
     walk_rate_percent: number | null;
     final_state: string | null;
+     source_freshness: string | null;
+     computed_at: string | null;
   }>(
     `SELECT rp.player_id, rp.role, rp.throws, rp.walk_rate_percent,
-            obs.final_state
+             obs.final_state, obs.source_freshness, obs.computed_at::text
      FROM reliever_profiles rp
      LEFT JOIN bullpen_availability_observations obs
        ON obs.player_id = rp.player_id AND obs.slate_date = $1
@@ -649,7 +658,9 @@ async function buildTeamLeverageMap(teamId: number, slateDate: string): Promise<
   );
 
   const available = arms.rows.filter((a) =>
-    a.final_state === "AVAILABLE" || a.final_state === "LIKELY_AVAILABLE" || a.final_state === null,
+    (a.final_state === "AVAILABLE" || a.final_state === "LIKELY_AVAILABLE")
+      && isCurrentBullpenTimestamp(a.source_freshness)
+      && isCurrentBullpenTimestamp(a.computed_at),
   );
 
   // Role priority ordering for high-leverage slots
@@ -662,9 +673,19 @@ async function buildTeamLeverageMap(teamId: number, slateDate: string): Promise<
     (a, b) => (rolePriority[a.role] ?? 9) - (rolePriority[b.role] ?? 9),
   );
 
-  const closer = sorted.find((a) => a.role === "CLOSER")?.player_id ?? null;
-  const setup8 = sorted.find((a) => a.role === "PRIMARY_SETUP" || (a.role === "SETUP" && !closer))?.player_id ?? null;
-  const setup7 = sorted.filter((a) => a.role === "SETUP").find((a) => a.player_id !== setup8)?.player_id ?? null;
+  // A leverage map is a path, not a team-wide average. Prefer traditional
+  // 9th/8th/7th roles, but keep a transparent fallback within the available,
+  // fresh room so a role change does not silently reuse the same arm twice.
+  const claimed = new Set<number>();
+  const takeRole = (...roles: string[]) => {
+    const arm = sorted.find((candidate) => !claimed.has(candidate.player_id) && roles.includes(candidate.role));
+    if (!arm) return null;
+    claimed.add(arm.player_id);
+    return arm.player_id;
+  };
+  const closer = takeRole("CLOSER", "PRIMARY_SETUP", "SETUP");
+  const setup8 = takeRole("PRIMARY_SETUP", "SETUP", "MIDDLE");
+  const setup7 = takeRole("SETUP", "MIDDLE", "SWING");
   const leftySpecialist = available.find((a) => a.role === "LEFTY_SPECIALIST" && a.throws === "L")?.player_id ?? null;
   const longMan = available.find((a) => a.role === "LONG_MAN")?.player_id ?? null;
 
@@ -674,8 +695,8 @@ async function buildTeamLeverageMap(teamId: number, slateDate: string): Promise<
   const highestWalk = withWalkRate[0]?.player_id ?? null;
   const lowestWalk = withWalkRate[withWalkRate.length - 1]?.player_id ?? null;
 
-  const hasRoleData = arms.rows.some((a) => a.role !== "UNKNOWN");
-  const roleUncertainty = !hasRoleData || sorted.length < 3;
+  const hasRoleData = available.some((a) => a.role !== "UNKNOWN");
+  const roleUncertainty = !hasRoleData || closer === null || setup8 === null || setup7 === null;
 
   await pool.query(
     `INSERT INTO bullpen_leverage_maps
@@ -698,9 +719,126 @@ async function buildTeamLeverageMap(teamId: number, slateDate: string): Promise<
       teamId, slateDate, closer, setup8, setup7,
       leftySpecialist, longMan, highestWalk, lowestWalk,
       roleUncertainty,
-      hasRoleData ? null : "Roles are UNKNOWN — no manager role data ingested for this team",
+       roleUncertainty
+         ? "Projected 7th/8th/9th leverage path is incomplete or role data is UNKNOWN"
+         : null,
     ],
   );
+}
+
+/**
+ * Returns the exact projected 7th/8th/9th path that a market engine may use.
+ * Team-wide availability is intentionally insufficient: an arm metric can only
+ * be aggregated when the map, all path observations, and their sources are
+ * current. Missing and stale paths remain distinct for downstream audit gates.
+ */
+export async function getBullpenRolePath(teamId: number, slateDate: string): Promise<BullpenRolePath> {
+  const now = Date.now();
+  const [armsResult, mapResult] = await Promise.all([
+    pool.query<{
+      player_id: number;
+      role: string;
+      final_state: string;
+      source_freshness: string | null;
+      computed_at: string | null;
+    }>(
+      `SELECT bao.player_id, rp.role, bao.final_state, bao.source_freshness,
+              bao.computed_at::text
+       FROM bullpen_availability_observations bao
+       LEFT JOIN reliever_profiles rp
+         ON rp.player_id = bao.player_id
+        AND rp.team_id = bao.team_id
+        AND rp.season = EXTRACT(YEAR FROM bao.slate_date)::int
+       WHERE bao.team_id = $1 AND bao.slate_date = $2`,
+      [teamId, slateDate],
+    ),
+    pool.query<{
+      projected_9th: number | null;
+      projected_8th: number | null;
+      projected_7th: number | null;
+      role_uncertainty: boolean;
+      notes: string | null;
+      computed_at: string | null;
+    }>(
+      `SELECT projected_9th, projected_8th, projected_7th, role_uncertainty,
+              notes, computed_at::text
+       FROM bullpen_leverage_maps
+       WHERE team_id = $1 AND slate_date = $2`,
+      [teamId, slateDate],
+    ),
+  ]);
+
+  const observedArms = armsResult.rows;
+  const availableArms = observedArms.filter((arm) =>
+    (arm.final_state === "AVAILABLE" || arm.final_state === "LIKELY_AVAILABLE")
+      && isCurrentBullpenTimestamp(arm.source_freshness, now)
+      && isCurrentBullpenTimestamp(arm.computed_at, now),
+  ).length;
+
+  const unavailable = (
+    status: BullpenRolePathStatus,
+    reason: string,
+    computedAt: string | null = null,
+  ): BullpenRolePath => ({
+    status,
+    reason,
+    availableArms,
+    armIds: [],
+    rolePath: [],
+    computedAt,
+  });
+
+  if (observedArms.length === 0) {
+    return unavailable("MISSING", "No bullpen availability observations exist for this slate.");
+  }
+
+  const map = mapResult.rows[0];
+  if (!map) {
+    return unavailable("MISSING", "No bullpen leverage map exists for this slate.");
+  }
+  if (!isCurrentBullpenTimestamp(map.computed_at, now)) {
+    return unavailable("STALE", "Bullpen leverage map is stale or its freshness timestamp is unknown.", map.computed_at);
+  }
+  if (map.role_uncertainty) {
+    return unavailable("ROLE_INCOMPLETE", map.notes ?? "Bullpen leverage roles are incomplete.", map.computed_at);
+  }
+
+  const slots: Array<{ slot: BullpenRolePathArm["slot"]; playerId: number | null }> = [
+    { slot: "7TH", playerId: map.projected_7th },
+    { slot: "8TH", playerId: map.projected_8th },
+    { slot: "9TH", playerId: map.projected_9th },
+  ];
+  if (slots.some((slot) => slot.playerId === null)) {
+    return unavailable("ROLE_INCOMPLETE", "Projected 7th/8th/9th leverage path is incomplete.", map.computed_at);
+  }
+
+  const byPlayerId = new Map(observedArms.map((arm) => [arm.player_id, arm]));
+  const rolePath: BullpenRolePathArm[] = [];
+  for (const slot of slots) {
+    const arm = byPlayerId.get(slot.playerId!);
+    if (!arm) {
+      return unavailable("ROLE_INCOMPLETE", `Projected ${slot.slot.toLowerCase()} arm has no availability observation.`, map.computed_at);
+    }
+    if (!isCurrentBullpenTimestamp(arm.source_freshness, now) || !isCurrentBullpenTimestamp(arm.computed_at, now)) {
+      return unavailable("STALE", `Projected ${slot.slot.toLowerCase()} arm has stale or unknown bullpen source freshness.`, map.computed_at);
+    }
+    if (!["AVAILABLE", "LIKELY_AVAILABLE"].includes(arm.final_state)) {
+      return unavailable("ROLE_INCOMPLETE", `Projected ${slot.slot.toLowerCase()} arm is not available for the bullpen path.`, map.computed_at);
+    }
+    if (!arm.role || arm.role === "UNKNOWN") {
+      return unavailable("ROLE_INCOMPLETE", `Projected ${slot.slot.toLowerCase()} arm has no resolved bullpen role.`, map.computed_at);
+    }
+    rolePath.push({ slot: slot.slot, playerId: arm.player_id, role: arm.role });
+  }
+
+  return {
+    status: "CURRENT",
+    reason: null,
+    availableArms,
+    armIds: rolePath.map((arm) => arm.playerId),
+    rolePath,
+    computedAt: map.computed_at,
+  };
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -786,7 +924,7 @@ export async function refreshBullpen(slateDate: string): Promise<{
  */
 export async function getBullpenRoom(slateDate: string, teamFilter?: string): Promise<BullpenRoomData> {
   const season = Number(slateDate.slice(0, 4));
-  const freshnessThresholdMs = 24 * 60 * 60 * 1000; // 24 hours
+  const freshnessThresholdMs = BULLPEN_FRESHNESS_WINDOW_MS;
 
   // Get all teams with reliever data this season (or filtered team)
   const teamsQuery = await pool.query<{
@@ -1039,6 +1177,26 @@ export async function getBullpenRoom(slateDate: string, teamFilter?: string): Pr
 
 export type BullpenArmAvailability = "AVAILABLE" | "LIKELY_AVAILABLE" | "DOUBTFUL" | "OUT" | "UNKNOWN" | "STALE";
 export type BullpenConfidence = "HEURISTIC" | "MANAGER_OVERRIDE" | "UNKNOWN";
+export type BullpenRolePathStatus = "CURRENT" | "STALE" | "MISSING" | "ROLE_INCOMPLETE";
+
+export interface BullpenRolePathArm {
+  slot: "7TH" | "8TH" | "9TH";
+  playerId: number;
+  role: string;
+}
+
+/**
+ * A market-safe bullpen path. Only CURRENT paths may contribute pitcher
+ * metrics to a market engine; all other states are persisted as audit evidence.
+ */
+export interface BullpenRolePath {
+  status: BullpenRolePathStatus;
+  reason: string | null;
+  availableArms: number;
+  armIds: number[];
+  rolePath: BullpenRolePathArm[];
+  computedAt: string | null;
+}
 
 /** One entry in the append-only role_change_log for a reliever. */
 export interface RoleHistoryEntry {

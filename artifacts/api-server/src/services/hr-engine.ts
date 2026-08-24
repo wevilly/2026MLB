@@ -40,6 +40,7 @@
 
 import { pool } from "@workspace/db";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
+import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
 
 // ── Source / market constants ─────────────────────────────────────────────────
 
@@ -123,12 +124,13 @@ interface StarterInfo {
   starterState: string;
 }
 
-interface BullpenHRSummary {
-  availableArms: number;
+interface BullpenHRSummary extends BullpenRolePath {
   availableHighLeverage: number;
-  avgBarrelPct: N;     // average barrel% across available arms
-  avgHardHitPct: N;    // average hard-hit% across available arms
+  avgBarrelPct: N;     // average barrel% across projected path arms
+  avgHardHitPct: N;    // average hard-hit% across projected path arms
   hrProneArmCount: number; // arms with barrel% ≥ MISMATCH_PITCHER_BARREL_PCT
+  barrelMetricArmCount: number;
+  hardHitMetricArmCount: number;
 }
 
 interface HRCandidate {
@@ -330,28 +332,33 @@ async function getParkFeatures(venueId: number): Promise<FeatureMap> {
 }
 
 async function getBullpenHRSummary(teamId: number, slateDate: string): Promise<BullpenHRSummary> {
-  const arms = await pool.query<{ player_id: number; final_state: string; role: string | null }>(
-    `SELECT bao.player_id, bao.final_state, rp.role
-     FROM bullpen_availability_observations bao
-     LEFT JOIN reliever_profiles rp ON rp.player_id = bao.player_id
-     WHERE bao.team_id = $1 AND bao.slate_date = $2
-       AND bao.final_state IN ('AVAILABLE', 'LIKELY_AVAILABLE')`,
-    [teamId, slateDate],
-  );
-  const highLeverageRoles = new Set(["CLOSER", "PRIMARY_SETUP", "SETUP"]);
-  const armIds = arms.rows.map((r) => r.player_id);
-  const highLeverage = arms.rows.filter((r) => r.role && highLeverageRoles.has(r.role)).length;
+  const path = await getBullpenRolePath(teamId, slateDate);
+  if (path.status !== "CURRENT") {
+    return {
+      ...path,
+      availableHighLeverage: path.rolePath.length,
+      avgBarrelPct: null,
+      avgHardHitPct: null,
+      hrProneArmCount: 0,
+      barrelMetricArmCount: 0,
+      hardHitMetricArmCount: 0,
+    };
+  }
+  const armIds = path.armIds;
 
   let avgBarrelPct: N = null;
   let avgHardHitPct: N = null;
   let hrProneArmCount = 0;
+  let barrelMetricArmCount = 0;
+  let hardHitMetricArmCount = 0;
 
   if (armIds.length > 0) {
-    // Barrel% of available arms (HR-proneness proxy)
-    const barrelResult = await pool.query<{ avg_barrel_pct: string | null; hr_prone_count: string }>(
+    // Barrel% of projected role-path arms (HR-proneness proxy)
+    const barrelResult = await pool.query<{ avg_barrel_pct: string | null; hr_prone_count: string; metric_arm_count: string }>(
       `SELECT
          AVG(latest_barrel)::text AS avg_barrel_pct,
-         COUNT(*) FILTER (WHERE latest_barrel >= $2)::text AS hr_prone_count
+         COUNT(*) FILTER (WHERE latest_barrel >= $2)::text AS hr_prone_count,
+         COUNT(latest_barrel)::text AS metric_arm_count
        FROM (
          SELECT DISTINCT ON (s.player_id)
            f.value::numeric AS latest_barrel
@@ -365,14 +372,17 @@ async function getBullpenHRSummary(teamId: number, slateDate: string): Promise<B
        ) latest`,
       [armIds, MISMATCH_PITCHER_BARREL_PCT],
     );
-    avgBarrelPct = barrelResult.rows[0]?.avg_barrel_pct != null
+    barrelMetricArmCount = Number(barrelResult.rows[0]?.metric_arm_count ?? 0);
+    avgBarrelPct = barrelMetricArmCount === armIds.length && barrelResult.rows[0]?.avg_barrel_pct != null
       ? Number(barrelResult.rows[0].avg_barrel_pct)
       : null;
-    hrProneArmCount = Number(barrelResult.rows[0]?.hr_prone_count ?? 0);
+    hrProneArmCount = barrelMetricArmCount === armIds.length
+      ? Number(barrelResult.rows[0]?.hr_prone_count ?? 0)
+      : 0;
 
-    // Hard-hit% of available arms
-    const hhResult = await pool.query<{ avg_hh_pct: string | null }>(
-      `SELECT AVG(latest_val)::text AS avg_hh_pct
+    // Hard-hit% of projected role-path arms
+    const hhResult = await pool.query<{ avg_hh_pct: string | null; metric_arm_count: string }>(
+      `SELECT AVG(latest_val)::text AS avg_hh_pct, COUNT(latest_val)::text AS metric_arm_count
        FROM (
          SELECT DISTINCT ON (s.player_id)
            f.value::numeric AS latest_val
@@ -386,12 +396,21 @@ async function getBullpenHRSummary(teamId: number, slateDate: string): Promise<B
        ) latest`,
       [armIds],
     );
-    avgHardHitPct = hhResult.rows[0]?.avg_hh_pct != null
+    hardHitMetricArmCount = Number(hhResult.rows[0]?.metric_arm_count ?? 0);
+    avgHardHitPct = hardHitMetricArmCount === armIds.length && hhResult.rows[0]?.avg_hh_pct != null
       ? Number(hhResult.rows[0].avg_hh_pct)
       : null;
   }
 
-  return { availableArms: armIds.length, availableHighLeverage: highLeverage, avgBarrelPct, avgHardHitPct, hrProneArmCount };
+  return {
+    ...path,
+    availableHighLeverage: path.rolePath.length,
+    avgBarrelPct,
+    avgHardHitPct,
+    hrProneArmCount,
+    barrelMetricArmCount,
+    hardHitMetricArmCount,
+  };
 }
 
 // ── Power signal check ────────────────────────────────────────────────────────
@@ -728,13 +747,22 @@ function buildStarterMatchupEvidence(c: HRCandidate): object {
 
 function buildBullpenPathEvidence(c: HRCandidate): object {
   return {
+    status: c.bullpen.status,
+    reason: c.bullpen.reason,
+    computedAt: c.bullpen.computedAt,
+    rolePath: c.bullpen.rolePath,
+    rolePathArmIds: c.bullpen.armIds,
     availableArms: c.bullpen.availableArms,
-    availableHighLeverageArms: c.bullpen.availableHighLeverage,
-    avgBarrelPct: c.bullpen.avgBarrelPct,
-    avgHardHitPct: c.bullpen.avgHardHitPct,
+    rolePathArmCount: c.bullpen.availableHighLeverage,
+    barrelMetricArmCount: c.bullpen.barrelMetricArmCount,
+    hardHitMetricArmCount: c.bullpen.hardHitMetricArmCount,
+    metricCoverageComplete: c.bullpen.barrelMetricArmCount === c.bullpen.armIds.length
+      && c.bullpen.hardHitMetricArmCount === c.bullpen.armIds.length,
+    rolePathAvgBarrelPct: c.bullpen.avgBarrelPct,
+    rolePathAvgHardHitPct: c.bullpen.avgHardHitPct,
     hrProneArmCount: c.bullpen.hrProneArmCount,
     hrProneBullpenFlag: c.bullpen.hrProneArmCount > 0,
-    note: c.bullpen.availableArms === 0 ? "No bullpen availability data for this date" : null,
+    note: c.bullpen.reason,
   };
 }
 
@@ -909,11 +937,13 @@ async function writeEvidenceBlocks(candidateId: string, c: HRCandidate): Promise
     },
     {
       blockType: "BULLPEN_PATH", metricKey: "bullpen_avg_barrel_pct", metricLabel: "Bullpen avg barrel%",
-      value: c.bullpen.avgBarrelPct, unit: "%", sampleSize: c.bullpen.availableArms,
+      value: c.bullpen.avgBarrelPct, unit: "%", sampleSize: c.bullpen.availableHighLeverage,
       direction: c.bullpen.avgBarrelPct === null ? "UNKNOWN"
         : c.bullpen.avgBarrelPct >= 8.0 ? "FAVORABLE" : "CONTEXT_ONLY",
       strength: c.bullpen.hrProneArmCount > 1 ? "MODERATE" : c.bullpen.hrProneArmCount > 0 ? "WEAK" : "CONTEXT_ONLY",
-      narrative: `${c.bullpen.availableArms} available/likely-available opposing arms. ${c.bullpen.hrProneArmCount} HR-prone arm(s) (barrel% ≥ ${MISMATCH_PITCHER_BARREL_PCT}%).`,
+      narrative: c.bullpen.status === "CURRENT"
+        ? `Projected 7th/8th/9th role path (${c.bullpen.rolePath.map((arm) => arm.role).join(" → ")}). ${c.bullpen.hrProneArmCount} HR-prone arm(s) (barrel% ≥ ${MISMATCH_PITCHER_BARREL_PCT}%).`
+        : `Bullpen path unavailable: ${c.bullpen.reason}`,
       rawEvidence: buildBullpenPathEvidence(c),
     },
   ];
@@ -1076,7 +1106,16 @@ export async function runHREngine(slateDate: string): Promise<HREngineResult> {
       if (starter.playerId === null)  missingData.push("Opposing starter identity unknown");
       else if (pitcherFeatures.size === 0) missingData.push("No season pitcher research data");
       if (player.venueId === null || parkFeatures.size === 0) missingData.push("Park factors unavailable");
-      if (bullpen.availableArms === 0) missingData.push("Bullpen availability not yet computed for this date");
+      if (bullpen.status !== "CURRENT") {
+        missingData.push(`Bullpen path ${bullpen.status.toLowerCase()}: ${bullpen.reason}`);
+      } else if (
+        bullpen.barrelMetricArmCount !== bullpen.armIds.length
+        || bullpen.hardHitMetricArmCount !== bullpen.armIds.length
+      ) {
+        missingData.push(
+          `Bullpen role-path HR research incomplete (barrel ${bullpen.barrelMetricArmCount}/${bullpen.armIds.length}, hard-hit ${bullpen.hardHitMetricArmCount}/${bullpen.armIds.length} arms)`,
+        );
+      }
 
       const { primary: mechanism, secondary: secondaryMechanism } = classifyMechanism(
         hitterFeatures, pitcherFeatures, parkFeatures, player.bats, starter.throws,

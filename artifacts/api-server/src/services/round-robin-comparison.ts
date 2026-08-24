@@ -73,6 +73,53 @@ function compareCandidate(a: RoundRobinCandidate, b: RoundRobinCandidate) {
   return a.playerName.localeCompare(b.playerName);
 }
 
+type BullpenPathIssue = {
+  status: "STALE" | "MISSING" | "ROLE_INCOMPLETE";
+  reason: string;
+};
+
+function bullpenPathIssue(candidate: RoundRobinCandidate): BullpenPathIssue | null {
+  const status = candidate.bullpenPathEvidence.status;
+  const reason = candidate.bullpenPathEvidence.reason;
+  const readableReason = typeof reason === "string" && reason.trim()
+    ? reason.trim()
+    : "No usable projected 7th/8th/9th bullpen path was recorded.";
+
+  if (status === "CURRENT") {
+    const rolePath = candidate.bullpenPathEvidence.rolePath;
+    const requiredSlots = new Set(["7TH", "8TH", "9TH"]);
+    const completeDistinctPath = Array.isArray(rolePath)
+      && rolePath.length === 3
+      && rolePath.every((arm) =>
+        arm !== null
+          && typeof arm === "object"
+          && "slot" in arm
+          && "playerId" in arm
+          && typeof arm.slot === "string"
+          && requiredSlots.has(arm.slot)
+          && typeof arm.playerId === "number"
+          && Number.isInteger(arm.playerId),
+      )
+      && new Set(rolePath.map((arm) => arm.slot)).size === 3
+      && new Set(rolePath.map((arm) => arm.playerId)).size === 3;
+    if (completeDistinctPath) return null;
+    return {
+      status: "ROLE_INCOMPLETE",
+      reason: "CURRENT bullpen evidence is missing a complete, distinct projected 7th/8th/9th arm path.",
+    };
+  }
+  if (status === "STALE") return { status, reason: readableReason };
+  if (status === "MISSING" || status === "ROLE_INCOMPLETE") {
+    return { status, reason: readableReason };
+  }
+  // Candidate rows created before the role-path contract stored only a generic
+  // bullpen average. They must not silently remain usable after this safety gate.
+  return {
+    status: "MISSING",
+    reason: "Bullpen path status is missing; generic bullpen evidence cannot be used for Round Robin selection.",
+  };
+}
+
 function pair(
   side: RoundRobinSide,
   constructionType: RoundRobinConstruction["constructionType"],
@@ -94,7 +141,7 @@ function pair(
     legs,
     stateTotal,
     rankTotal,
-    evidenceSummary: `${posted ? "posted lineups" : "projected lineups"} · ${confirmedStarter ? "confirmed starters" : "starter context"} · ${arsenalAvailable}/2 arsenal comparisons · ${bvpAvailable}/2 named-pair contexts`,
+    evidenceSummary: `${posted ? "posted lineups" : "projected lineups"} · ${confirmedStarter ? "confirmed starters" : "starter context"} · 2/2 current bullpen role paths · ${arsenalAvailable}/2 arsenal comparisons · ${bvpAvailable}/2 named-pair contexts`,
   };
 }
 
@@ -154,21 +201,41 @@ function pairCandidates(board: RoundRobinBoardId, side: RoundRobinSide, eligible
 
 function sideResult(board: RoundRobinBoardId, side: RoundRobinSide, team: string, candidates: RoundRobinCandidate[]): RoundRobinSideComparison {
   const own = candidates.filter((candidate) => candidate.side === side);
-  const eligible = candidates.filter((candidate) => candidate.selectable && candidate.starterState !== "UNKNOWN" && candidate.starterState !== "TBD");
+  const ownBullpenIssues = own
+    .map((candidate) => ({ candidate, issue: bullpenPathIssue(candidate) }))
+    .filter((item): item is { candidate: RoundRobinCandidate; issue: BullpenPathIssue } => item.issue !== null);
+  const eligible = candidates.filter((candidate) =>
+    candidate.selectable
+      && candidate.starterState !== "UNKNOWN"
+      && candidate.starterState !== "TBD"
+      && bullpenPathIssue(candidate) === null,
+  );
   const constructions = pairCandidates(board, side, eligible);
   const bestConstruction = best(constructions);
+  const bullpenReason = ownBullpenIssues.length > 0
+    ? [...new Set(ownBullpenIssues.map((item) =>
+      `${item.issue.status === "STALE" ? "Stale" : "Incomplete"} bullpen path: ${item.issue.reason}`,
+    ))].join(" ")
+    : null;
   const unavailableReason = board === "RR3"
     ? "2+ H+R+RBI is unsupported, so no legal RR3 pair can be constructed."
     : !bestConstruction
       ? own.length === 0
         ? "No projected or posted hitters were found for this team."
-        : "No complete legal pair remains after identity, freshness, starter, and evidence safety gates."
+        : bullpenReason
+          ? `No complete legal pair remains because ${bullpenReason}`
+          : "No complete legal pair remains after identity, freshness, starter, and evidence safety gates."
       : null;
   return {
     side,
     team,
     evaluatedEligibleHitters: eligible.filter((candidate) => candidate.side === side).length,
-    evaluatedIneligibleHitters: own.filter((candidate) => !candidate.selectable || candidate.starterState === "UNKNOWN" || candidate.starterState === "TBD").length,
+    evaluatedIneligibleHitters: own.filter((candidate) =>
+      !candidate.selectable
+        || candidate.starterState === "UNKNOWN"
+        || candidate.starterState === "TBD"
+        || bullpenPathIssue(candidate) !== null,
+    ).length,
     consideredConstructionTypes: [...new Set(constructions.map((construction) => construction.constructionType))],
     bestConstruction,
     unavailableReason,
