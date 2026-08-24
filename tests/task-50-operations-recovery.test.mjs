@@ -48,33 +48,23 @@ test("selected-date readiness and operator controls remain wired through contrac
   // routes" (Replit Agent, 2026-08-24), which this assertion never ran to
   // notice because the file was in no test script.
   //
-  // The SLATE ITSELF DID NOT MOVE TO FANTASYPROS. The count behind it is still
-  // `SELECT count(*) FROM games WHERE game_date = $1`, which is the ingested
-  // MLB schedule, before and after that commit. What changed is narrower:
+  // phase2aReady asserted research coverage (phaseTwoReady: handedness and
+  // park) and now asserts that games and baseline candidates exist. Those are
+  // different claims. phaseTwoReady still gates optionalEnrichmentReady, so
+  // research coverage is still checked; phase2aReady no longer claims it.
   //
-  //   - officialEmptySlate was removed. It had let an MLB-published empty
-  //     slate report READY. Without it a genuine off-day now reports as a
-  //     missing slate. See the readiness note below.
-  //   - the source badge consulted when the slate is empty swapped from
-  //     "MLB Official" to "FantasyPros", and the diagnostic wording with it,
-  //     so a failure of MLB ingestion is now described as a FantasyPros
-  //     problem while the count it describes comes from the MLB schedule.
-  //   - phase2aReady changed meaning: it asserted research coverage
-  //     (phaseTwoReady: handedness and park), and now asserts that games and
-  //     baseline candidates exist. phaseTwoReady still gates
-  //     optionalEnrichmentReady, so research coverage is still checked, but
-  //     phase2aReady no longer claims it.
-  //
-  // Task 2.7 gave LINEUP ingestion a second source and a real POSTED state,
-  // and the precedence in replit.md (a submitted MLB card outranks a
-  // FantasyPros report, which outranks a projection) is about lineups. That
-  // layer is untouched here. The two changes above sit above it, at slate
-  // readiness reporting, and neither makes the slate single-source.
+  // The same commit removed officialEmptySlate, and the slate the count reads
+  // is populated by FantasyPros on the scheduled path: the daily pipeline's
+  // only required steps are fantasypros_ingest and fantasypros_baseline, and
+  // ingestMlbOfficial is not among them. Both are tracked as audit S18 and
+  // S19 rather than changed here, because restoring either is a decision about
+  // what the readiness contract should assert, not a test fix.
   assert.match(routes, /phase2aReady: baselineReady/);
 
-  // The slate count is the MLB schedule, not a FantasyPros feed. If this ever
-  // fails, the slate really has become single-source and Task 2.7's premise
-  // needs revisiting one layer up.
+  // The slate count is source-agnostic: it counts games rows whoever wrote
+  // them. Pinned so that if the query ever starts filtering by source, or
+  // stops counting games at all, this fails rather than drifting. Which
+  // sources may write those rows is audit S18.
   assert.match(routes, /AS games FROM games WHERE game_date = \$1/);
   assert.match(routes, /readinessDiagnostics/);
   assert.match(routes, /router\.get\("\/analyst\/ai\/operator-session"/);

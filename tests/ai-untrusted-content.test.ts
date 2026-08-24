@@ -173,6 +173,26 @@ describe("S3 - prohibited betting content cannot enter through a bettor pick", (
     assert.equal(prohibitedBettingTermInProse("the juiced ball era"), null);
   });
 
+  test("ACCEPTED RESIDUAL: a bare market side passes, and is meant to", async () => {
+    const { prohibitedBettingTermInProse } = await guard as {
+      prohibitedBettingTermInProse: (value: string) => string | null;
+    };
+    // Documented at the guard. A side with no number and no venue attached
+    // carries none of the prohibited list, and the side is already structured
+    // data here in pickDirection and market. Pinned so that if this ever
+    // changes it is a deliberate change and not a silent one.
+    for (const text of ["I'm taking the over", "I like the under", "the over is live"]) {
+      assert.equal(
+        prohibitedBettingTermInProse(text), null,
+        `"${text}" is the accepted residual and must keep passing until the decision changes`,
+      );
+    }
+    // The same sentences with a price, a venue or the paired side still fail.
+    assert.notEqual(prohibitedBettingTermInProse("over 1.5 at a good price"), null);
+    assert.notEqual(prohibitedBettingTermInProse("taking the over under"), null);
+    assert.notEqual(prohibitedBettingTermInProse("the over at the book"), null);
+  });
+
   test("structured fields keep the full vocabulary, including the comparators", async () => {
     const { prohibitedBettingTerm } = await guard as {
       prohibitedBettingTerm: (value: string) => string | null;

@@ -46,9 +46,19 @@ pnpm install --frozen-lockfile
 #
 # Recorded here rather than left to a remembered manual step, because this is
 # the run that destroys it. Best effort: a merge must not fail over a census.
+# Only the FIRST capture carries information. M6 runs below, and every run after
+# it records empty 0 by construction, so a file of zeros means the census ran
+# late, not that nothing was damaged. Appended to reports/handedness-census.jsonl,
+# which is committed: a merge log is ephemeral and this measurement is one-shot.
 echo "post-merge: recording the handedness census before it is normalised away."
-node lib/db/scripts/handedness-census.mjs || \
-  echo "post-merge: census unavailable, continuing. The empty/null split may be lost." >&2
+if node lib/db/scripts/handedness-census.mjs; then
+  echo "post-merge: census appended to reports/handedness-census.jsonl. COMMIT IT."
+else
+  echo "post-merge: CENSUS FAILED, continuing so the merge is not blocked." >&2
+  echo "            The empty-versus-null split is unrecoverable once the push" >&2
+  echo "            below runs M6. If this was the first run on this database," >&2
+  echo "            that measurement is now lost." >&2
+fi
 
 push_log="$(mktemp)"
 trap 'rm -f "$push_log"' EXIT

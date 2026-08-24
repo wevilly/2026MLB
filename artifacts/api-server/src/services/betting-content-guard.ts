@@ -146,6 +146,33 @@ export function prohibitedBettingTerm(value: string): string | null {
  * are all still rejected in prose. What survives is only the bare word used in
  * its ordinary English sense.
  *
+ * ACCEPTED RESIDUAL, stated so it reads as a decision rather than an oversight.
+ *
+ * A bare market side passes. "I'm taking the over" returns null: `over` is
+ * exempt in prose and nothing else in the sentence trips. So does "I like the
+ * under". This is known and accepted.
+ *
+ * Why it is accepted. The hard rule prohibits a specific list: odds, prices,
+ * expected value, implied probability, CLV, stake and vig. A market side with
+ * no number attached is none of those. It carries no price and no probability,
+ * and the side is already structured data on this surface anyway, in
+ * `pickDirection` and `market`, so a rationale restating it adds nothing that
+ * was not recorded deliberately. The alternative is to stop exempting the two
+ * words, which rejects "over the last 15 games" and "under the lights" and so
+ * refuses most legitimate research prose to catch a phrase that carries no
+ * pricing.
+ *
+ * What is NOT accepted, and still fails: the same sentence with a number or a
+ * venue attached. "over 1.5 at -115" trips on the price token, "taking the over
+ * under" trips on the phrase, and "the over at the book" trips on "at the
+ * book".
+ *
+ * What would change this. If a bare side ever needs rejecting, do it at the
+ * bettor-intelligence layer rather than here, where `pickDirection` and
+ * `market` are in scope and a rationale that only restates the side can be
+ * refused for being empty of mechanism, which is the actual objection to it.
+ * Widening the shared vocabulary would break the feature store instead.
+ *
  * The hard rule is specific about what may never appear: no odds, prices,
  * expected value, implied probability, CLV, stake or vig. None of that is
  * ambiguous, and none of it is exempted here.
