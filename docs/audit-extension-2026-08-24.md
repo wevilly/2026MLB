@@ -522,6 +522,23 @@ it is exactly the class of untruth the readiness contract is for. Note that the
 frontend has been presenting the null model layer honestly throughout; this is
 a defect underneath the interface, not in it.
 
+### 12.3 Raw upstream payloads have no retention policy — HIGH
+
+The `raw_payloads` table is approximately 1.4 GB, or roughly eighty percent of
+the database. It contains raw upstream responses, has no documented retention
+window, and has no pruning job. This became an operational failure during the
+required pre-schema backup: the full logical dump exhausted the available
+quota before it could complete.
+
+Required change: define a retention window for raw upstream responses and add a
+scheduled, observable pruning job. The policy should preserve the provenance
+needed for audit and replay while removing payloads older than the approved
+window, and it should expose the retained-row and reclaimed-space counts.
+
+Severity HIGH: this does not currently change ranking correctness, but it
+creates a material backup and recovery risk and can block routine schema
+operations as the database grows.
+
 ---
 
 ## Summary of scheduled work
@@ -547,3 +564,4 @@ a defect underneath the interface, not in it.
 | S17 | Audit event filters; derived BvP coverage status; logged rollback failures | LOW | new |
 | S18 | Slate is single-source FantasyPros; no second source or conflict detection one layer above lineups | HIGH | task 2.7 |
 | S19 | No empty-slate state: a published off-day reads as a failed ingest | MEDIUM | new |
+| S20 | Raw upstream payloads have no retention window or pruning job | HIGH | new |
