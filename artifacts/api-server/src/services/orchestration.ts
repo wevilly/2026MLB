@@ -27,8 +27,7 @@ export type RunStep = {
 };
 
 const STEP_NAMES = [
-  "official_schedule_refresh",
-  "fantasypros_ingest", "fantasypros_baseline", "research_refresh", "bullpen_refresh",
+  "fantasypros_ingest", "official_schedule_refresh", "fantasypros_baseline", "research_refresh", "bullpen_refresh",
   "weather_refresh", "slate_matchup_refresh", "tb_engine", "xbh_engine", "walk_engine", "hr_engine", "hrrbi_engine", "market_board",
   "health_check", "feature_snapshot_freeze",
 ] as const;
@@ -269,12 +268,13 @@ async function executeRun(runId: string, slateDate: string) {
     : { ...step });
   await persistSteps(runId, steps);
   try {
-    // The official schedule is the canonical game spine: venue geometry, start
-    // times and doubleheader codes must be fresh before the projected slate,
-    // weather, and provider reconciliation read them. Schedule-only: no
-    // lineups or settlement facts are ingested pregame.
-    if (!await runRequiredStep(runId, slateDate, steps, "official_schedule_refresh", () => refreshMlbSchedule(slateDate))) return;
     if (!await runRequiredStep(runId, slateDate, steps, "fantasypros_ingest", () => ingestFantasyPros(slateDate))) return;
+    // The official schedule refresh enriches the projected slate's game rows
+    // in place (venue geometry, start times, doubleheader codes), so it must
+    // run after the FantasyPros ingest establishes those rows and before
+    // weather, research and the engines read them. Schedule-only: no lineups
+    // or settlement facts are ingested pregame.
+    if (!await runRequiredStep(runId, slateDate, steps, "official_schedule_refresh", () => refreshMlbSchedule(slateDate))) return;
     if (!await runRequiredStep(runId, slateDate, steps, "fantasypros_baseline", () => runFantasyProsBaseline(slateDate))) return;
     const postIngestStart = await earliestStart(slateDate);
     await pool.query(`UPDATE orchestration_runs SET schedule = schedule || $2::jsonb WHERE run_id = $1`, [runId, JSON.stringify(scheduleFor(slateDate, postIngestStart))]);
