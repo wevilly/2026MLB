@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
+import { ingestFantasyProsWeatherObservations } from "./weather-foundation";
 
 const MLB_SOURCE = "MLB_OFFICIAL";
 const FANTASY_PROS_SOURCE = "FANTASYPROS";
@@ -69,8 +70,9 @@ async function ensureSources() {
     `INSERT INTO source_registry (source_id, name, source_type, base_url, expected_freshness_minutes, notes)
      VALUES
        ($1, 'MLB Official', 'OFFICIAL', 'https://statsapi.mlb.com', 30, 'Official schedule, game state, starters and posted lineups.'),
-       ($2, 'FantasyPros', 'PROJECTION', 'https://api.fantasypros.com', 30, 'Forward projections, lineups and news. Never authoritative for official game state.')
-     ON CONFLICT (source_id) DO UPDATE SET name = EXCLUDED.name, source_type = EXCLUDED.source_type, base_url = EXCLUDED.base_url`,
+       ($2, 'FantasyPros', 'PROJECTION', 'https://api.fantasypros.com', 30, 'Forward projections, projected lineups, slate weather and news. Never authoritative for official game state.')
+     ON CONFLICT (source_id) DO UPDATE SET name = EXCLUDED.name, source_type = EXCLUDED.source_type,
+       base_url = EXCLUDED.base_url, notes = EXCLUDED.notes`,
     [MLB_SOURCE, FANTASY_PROS_SOURCE],
   );
 }
@@ -1126,6 +1128,7 @@ export async function ingestFantasyPros(requestedDate: string) {
       );
     }
     const gamesPersisted = await persistFantasyProsGames(ingestRunId, effectiveDate, lineups.payload);
+    const fantasyProsWeather = await ingestFantasyProsWeatherObservations(effectiveDate, lineups.payload);
     const starterRows = await persistFantasyProsStarters(ingestRunId, effectiveDate, lineups.payload);
     const [lineupResult, confirmedLineupResult] = await Promise.all([
       persistFantasyProsLineups(ingestRunId, effectiveDate, lineups.payload, "PROJECTED"),
@@ -1143,6 +1146,7 @@ export async function ingestFantasyPros(requestedDate: string) {
         projectedLineupPayloads: asArray(lineups.payload.games).length,
         confirmedLineupPayloads: asArray(currentLineups.payload.games).length,
         fantasyProsGamesPersisted: gamesPersisted,
+        fantasyProsWeather,
         fantasyProsStartersPersisted: starterRows,
         projectedLineupSnapshots: lineupResult.snapshots,
         confirmedLineupSnapshots: confirmedLineupResult.snapshots,

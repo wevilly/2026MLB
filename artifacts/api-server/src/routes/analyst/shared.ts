@@ -490,7 +490,7 @@ export async function identityCoverage(date: string) {
 }
 
 export async function analystDataHealth(date: string) {
-  const [sources, issueResult, lastRun, coverage, research, slate, workflow, bullpen, marketCandidates, weatherRefresh] = await Promise.all([
+  const [sources, issueResult, lastRun, coverage, research, slate, workflow, bullpen, fantasyProsReferences, weatherRefresh] = await Promise.all([
     sourceBadges(date),
     pool.query<{ issue_type: string; detail: string; severity: string }>(
       `SELECT ii.issue_type, ii.detail, ii.severity
@@ -516,8 +516,8 @@ export async function analystDataHealth(date: string) {
        ORDER BY started_at DESC LIMIT 1`,
       [date],
     ),
-    pool.query<{ candidates: number }>(
-      "SELECT count(*)::int AS candidates FROM market_research_candidates WHERE slate_date = $1",
+    pool.query<{ references: number }>(
+      "SELECT count(*)::int AS references FROM fantasypros_reference_ranks WHERE slate_date = $1",
       [date],
     ),
     pool.query<{
@@ -542,7 +542,7 @@ export async function analystDataHealth(date: string) {
   ]);
   const currentDate = currentEasternDate();
   const fantasyProsSource = sources.find((source) => source.name === "FantasyPros");
-  const baselineReady = Boolean(slate.rows[0]?.games) && Boolean(marketCandidates.rows[0]?.candidates);
+  const baselineReady = Boolean(slate.rows[0]?.games) && Boolean(fantasyProsReferences.rows[0]?.references);
   const phaseTwoReady = research.handednessCoverageScope === "FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE"
     && research.handednessIngestStatus === "SUCCESS"
     && research.missingHandednessSplits === 0
@@ -558,7 +558,7 @@ export async function analystDataHealth(date: string) {
     : baselineReady ? "POPULATED" : "MISSING_DOWNSTREAM_STAGE";
   const blockingReasons = [
     ...(slate.rows[0]?.games ? [] : [`No FantasyPros matchup records are available for ${date}.`]),
-    ...(marketCandidates.rows[0]?.candidates ? [] : [`No FantasyPros baseline candidates were produced for ${date}.`]),
+    ...(fantasyProsReferences.rows[0]?.references ? [] : [`No FantasyPros reference ranks were recorded for ${date}.`]),
     ...(coverage.unresolvedActivePlayers || coverage.blockingProjectedLineupIssues
       ? [`${coverage.unresolvedActivePlayers + coverage.blockingProjectedLineupIssues} unresolved or blocking identity record(s) remain.`]
       : []),
@@ -593,7 +593,7 @@ export async function analystDataHealth(date: string) {
   };
   const readinessIssues = [
     ...(slate.rows[0]?.games ? [] : [{ label: "FANTASYPROS SLATE MISSING", detail: `No FantasyPros matchup records are available for ${date}.`, severity: "CRITICAL" }]),
-    ...(marketCandidates.rows[0]?.candidates ? [] : [{ label: "BASELINE STAGE MISSING", detail: `No FantasyPros baseline candidates were produced for ${date}.`, severity: "CRITICAL" }]),
+    ...(fantasyProsReferences.rows[0]?.references ? [] : [{ label: "FANTASYPROS REFERENCES MISSING", detail: `No FantasyPros reference ranks were recorded for ${date}.`, severity: "CRITICAL" }]),
     ...(coverage.unresolvedActivePlayers || coverage.blockingProjectedLineupIssues
       ? [{ label: "CURRENT IDENTITY UNRESOLVED", detail: `${coverage.unresolvedActivePlayers + coverage.blockingProjectedLineupIssues} active identity record(s) are unresolved or blocking.`, severity: "CRITICAL" }]
       : []),
@@ -609,7 +609,7 @@ export async function analystDataHealth(date: string) {
     phase2aReady: baselineReady,
     readinessDiagnostics: [
       { code: "FANTASYPROS_SLATE", label: "FantasyPros projected slate", status: slate.rows[0]?.games ? "READY" : "BLOCKED", detail: slate.rows[0]?.games ? `${slate.rows[0].games} FantasyPros game(s) are available for ${date}.` : `No FantasyPros matchup records are available for ${date}.` },
-      { code: "BASELINE", label: "FantasyPros baseline ranks", status: baselineReady ? "READY" : "BLOCKED", detail: baselineReady ? `${marketCandidates.rows[0]?.candidates ?? 0} independent market baseline candidate(s) are available.` : `No baseline candidates were produced for ${date}.` },
+      { code: "FANTASYPROS_REFERENCES", label: "FantasyPros reference ranks", status: baselineReady ? "READY" : "BLOCKED", detail: baselineReady ? `${fantasyProsReferences.rows[0]?.references ?? 0} reference rank record(s) are available for comparison only.` : `No FantasyPros reference ranks were recorded for ${date}.` },
       { code: "OPTIONAL_RESEARCH", label: "Optional research enrichment", status: optionalEnrichmentReady ? "READY" : "BLOCKED", detail: optionalEnrichmentReady ? "Current role paths and research coverage are available." : "Enrichment remains non-blocking and is still incomplete." },
     ],
     readiness,

@@ -19,6 +19,7 @@ import { pool } from "@workspace/db";
 import { logger } from "../lib/logger";
 
 export const WEATHER_SOURCE = "OPEN_METEO";
+export const FANTASYPROS_WEATHER_SOURCE = "FANTASYPROS";
 const WEATHER_SOURCE_TYPE = "WEATHER";
 const WEATHER_BASE = "https://api.open-meteo.com/v1/forecast";
 const MLB_VENUE_BASE = "https://statsapi.mlb.com/api/v1/venues";
@@ -356,6 +357,67 @@ type WeatherRefreshAudit = {
 };
 
 /**
+ * Persists the weather already carried on FantasyPros' projected-lineup slate.
+ * This is intentionally separate from the Open-Meteo retry path: FantasyPros
+ * establishes the pregame slate context, while Open-Meteo remains a disclosed
+ * supplemental source when an operator requests a refresh.
+ */
+export async function ingestFantasyProsWeatherObservations(
+  slateDate: string,
+  payload: JsonObject,
+): Promise<{ observationsWritten: number; gamesWithWeather: number }> {
+  const games = await slateGames(slateDate);
+  const byGamePk = new Map(games.map((game) => [game.gamePk, game]));
+  let observationsWritten = 0;
+  let gamesWithWeather = 0;
+
+  for (const rawGame of asArray(payload.games)) {
+    const gamePayload = asObject(rawGame);
+    const gamePk = asNumber(gamePayload.game_id);
+    if (gamePk === null || !Number.isSafeInteger(gamePk)) continue;
+    const game = byGamePk.get(gamePk);
+    if (!game) continue;
+
+    const weatherText = typeof gamePayload.weather === "string" ? gamePayload.weather.trim() : "";
+    const temperatureF = asNumber(gamePayload.temp);
+    const windSpeedMph = asNumber(gamePayload.wind);
+    const windDirectionDegrees = asNumber(gamePayload.wind_direction);
+    const precipitationProbability = asNumber(gamePayload.chance_rain);
+    if (!weatherText && temperatureF === null && windSpeedMph === null && precipitationProbability === null) continue;
+
+    gamesWithWeather += 1;
+    const roofType = (game.roofType ?? "UNKNOWN").toUpperCase();
+    const written = await writeObservation(
+      game,
+      slateDate,
+      {
+        time: null,
+        temperatureF: roofType === "DOME" ? null : temperatureF,
+        windSpeedMph: roofType === "DOME" ? null : windSpeedMph,
+        windDirectionDegrees: roofType === "DOME" ? null : windDirectionDegrees,
+        humidityPercent: null,
+        precipitationProbability: roofType === "DOME" ? null : precipitationProbability,
+      },
+      {
+        sourceId: FANTASYPROS_WEATHER_SOURCE,
+        roofState: roofType === "DOME" ? "CLOSED" : roofType === "RETRACTABLE" ? "OPEN" : "NONE",
+        weatherNeutral: roofType === "DOME",
+        sourceFreshness: null,
+        raw: {
+          source: "FantasyPros projected lineup weather",
+          weather: weatherText || null,
+          weatherIcon: typeof gamePayload.weather_icon === "string" ? gamePayload.weather_icon : null,
+          chanceRain: precipitationProbability,
+          degOffset: gamePayload.deg_offset ?? null,
+        },
+      },
+    );
+    if (written) observationsWritten += 1;
+  }
+  return { observationsWritten, gamesWithWeather };
+}
+
+/**
  * Performs one slate's forecast retrieval after its ingest run has been
  * created by the public wrapper below.
  *
@@ -392,7 +454,7 @@ async function performWeatherRefresh(
       const written = await writeObservation(game, slateDate, {
         temperatureF: null, windSpeedMph: null, windDirectionDegrees: null,
         humidityPercent: null, precipitationProbability: null, time: null,
-      }, { roofState: "CLOSED", weatherNeutral: true, sourceFreshness: null, raw: { roofType } });
+      }, { sourceId: WEATHER_SOURCE, roofState: "CLOSED", weatherNeutral: true, sourceFreshness: null, raw: { roofType } });
       if (written) observationsWritten += 1;
       domedGames += 1;
       continue;
@@ -422,6 +484,7 @@ async function performWeatherRefresh(
         continue;
       }
       const written = await writeObservation(game, slateDate, reading, {
+        sourceId: WEATHER_SOURCE,
         roofState: roofType === "RETRACTABLE" ? "OPEN" : "NONE",
         weatherNeutral: false,
         // The upstream forecast's own generation time, never now().
@@ -632,7 +695,7 @@ async function writeObservation(
     humidityPercent: N;
     precipitationProbability: N;
   },
-  options: { roofState: string; weatherNeutral: boolean; sourceFreshness: string | null; raw: JsonObject },
+  options: { sourceId: string; roofState: string; weatherNeutral: boolean; sourceFreshness: string | null; raw: JsonObject },
 ): Promise<boolean> {
   const wind = options.weatherNeutral
     ? { outComponentMph: null as N, component: "UNKNOWN" as WindComponent, relativeDegrees: null as N }
@@ -661,7 +724,7 @@ async function writeObservation(
       wind.outComponentMph, wind.component,
       reading.precipitationProbability, reading.humidityPercent,
       options.roofState, options.weatherNeutral,
-      WEATHER_SOURCE, options.sourceFreshness, checksum,
+      options.sourceId, options.sourceFreshness, checksum,
       JSON.stringify({ ...options.raw, windRelativeDegrees: wind.relativeDegrees }),
     ],
   );
@@ -685,7 +748,8 @@ export async function getGameWeather(gamePk: number): Promise<GameWeather | null
             forecast_for_utc::text
        FROM game_weather_observations
       WHERE game_pk = $1
-      ORDER BY retrieved_at DESC
+      ORDER BY CASE source_id WHEN '${FANTASYPROS_WEATHER_SOURCE}' THEN 0 ELSE 1 END,
+               retrieved_at DESC
       LIMIT 1`,
     [gamePk],
   );

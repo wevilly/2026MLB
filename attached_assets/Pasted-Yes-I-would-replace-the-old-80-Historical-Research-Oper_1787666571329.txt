@@ -1,0 +1,1922 @@
+Yes. I would replace the old **#80 Historical Research Operating Plan** with something closer to the following.
+
+The original plan had the right ambition around season history, handedness, day/night, pitch-type context, market separation, lineage, and postmortems, but it still treated some external sources too much like live APIs and did not emphasize strongly enough that **the platform itself must build and retain a baseball understanding of every player**. 
+
+# #80 Revised - MLB Player Intelligence & Historical Research System
+
+## What & Why
+
+Build a permanent **MLB Player Intelligence System** for the existing MLB Analyst Platform.
+
+The objective is not merely to store statistics and not merely to research today's slate.
+
+The objective is for the platform to develop a continuously updated, source-traceable understanding of every relevant MLB hitter, starting pitcher, and bullpen arm so that today's matchup analysis begins with historical knowledge already stored in the platform.
+
+The system should eventually be able to answer questions such as:
+
+* How does this hitter perform against right-handed pitching?
+* How does he perform against left-handed pitching?
+* Is that split supported by enough plate appearances?
+* How does he perform in night games?
+* Does his apparent day/night split remain after accounting for park and opponent quality?
+* How does he hit sliders?
+* How does he hit 95+ mph four-seam fastballs?
+* How does he perform against sweepers with large horizontal movement?
+* Has his contact profile changed over the last 14, 30, or 60 days?
+* Is his recent HR spike supported by barrels and exit velocity?
+* How does this pitcher perform against left-handed batters?
+* What has changed in this pitcher's arsenal during the season?
+* How does he perform the first, second, and third time through the batting order?
+* Which relievers are actually likely to face this portion of the lineup tonight?
+* What previous pitchers most resemble today's opposing pitcher?
+* Does the hitter's historical performance against that pitcher archetype support today's market?
+* Is Batter-vs-Pitcher history actually representative of today's version of the pitcher?
+* What evidence supports a 2+ TB, XBH, Walk, or HR conclusion?
+* What evidence argues against it?
+* Has this exact type of research thesis worked historically?
+
+The system must distinguish:
+
+**raw facts**
+from
+**derived statistics**
+from
+**analyst interpretation**.
+
+The website should not depend on FantasyPros projections to tell it whom to pick.
+
+FantasyPros should primarily tell the platform **who is expected to play today**.
+
+The MLB Analyst Platform should decide **who it likes and why**.
+
+---
+
+# Core operating philosophy
+
+The system should follow this principle:
+
+> **FantasyPros identifies today's player universe. Historical baseball data teaches the platform who those players are. Independent matchup research determines the picks.**
+
+FantasyPros projections may remain stored as outside reference information.
+
+They must not be treated as the website's own baseball opinion.
+
+The system should eventually be able to compare:
+
+**FantasyPros view**
+
+versus
+
+**MLB Analyst independent research view**
+
+and learn from disagreements.
+
+---
+
+# What success looks like
+
+A successful implementation means every relevant MLB player has a persistent profile that becomes more complete over time.
+
+When today's projected lineup arrives, the site should not begin learning that hitter from scratch.
+
+It should already know his:
+
+* season history
+* career context where available
+* handedness splits
+* day/night history
+* home/road history
+* pitch-type performance
+* velocity-band performance
+* batted-ball profile
+* plate-discipline profile
+* recent trends
+* historical BvP
+* historical matchup archetypes
+* lineup-role history
+* park interaction
+* injury/role changes
+* settled market history where applicable
+
+Today's research then asks:
+
+> **How does everything we already know about this hitter interact with everything we already know about today's pitcher, bullpen, park, weather, and batting-order position?**
+
+---
+
+# 1. Canonical player intelligence
+
+Every player should have **one canonical MLB Analyst identity**.
+
+The system must not create separate conceptual players for:
+
+* FantasyPros
+* BallparkPal
+* Baseball Savant
+* pybaseball
+* historical datasets
+* user-supplied research
+* settlement records
+
+Instead:
+
+### Canonical Player
+
+One internal player identity.
+
+Attached to it:
+
+* FantasyPros ID
+* MLBAM/Statcast identifier where available
+* BallparkPal identifier where documented
+* Chadwick/Retrosheet identifier where available
+* other source identifiers
+* historical aliases
+* team history
+* position history
+
+Every observation retains its original source.
+
+The platform must never use name-only joining when a reliable identifier is available.
+
+Ambiguous identities must be quarantined for review.
+
+---
+
+# 2. Three layers of player knowledge
+
+Every player profile should explicitly distinguish three levels.
+
+## Layer 1 - SOURCE FACT
+
+An observation from a source.
+
+Example:
+
+* 421 PA
+* 18.4% K rate
+* .472 xSLG
+* 43.1% hard-hit rate
+
+Required metadata:
+
+* source
+* observation date
+* season
+* sample size
+* denominator
+* retrieval timestamp
+* effective date
+
+Classification:
+
+**VERIFIED**
+
+when directly checked and normalized from the named source.
+
+---
+
+## Layer 2 - DERIVED FACT
+
+A calculation performed by MLB Analyst from stored observations.
+
+Example:
+
+> K% is 3.1 percentage points below his career baseline.
+
+Or:
+
+> His 30-day barrel rate is higher than his season rate.
+
+Or:
+
+> Slider usage has risen from 21% season-long to 34% over his last five starts.
+
+Every derived value must be reproducible.
+
+Classification:
+
+**SOURCED**
+
+or an equivalent explicit derived-data state.
+
+---
+
+## Layer 3 - ANALYST INTERPRETATION
+
+What the measurements mean.
+
+Example:
+
+> The hitter is producing more contact without losing quality of contact, which strengthens his two-hit route to 2+ TB.
+
+Or:
+
+> His recent HR increase appears unsupported because HR/FB has risen while barrels and 90th percentile EV remain flat.
+
+Classification:
+
+**INFERENCE**
+
+Never present interpretation as measurement.
+
+---
+
+# 3. Historical raw-data warehouse
+
+The platform should not repeatedly ask external websites to calculate every split.
+
+Instead, acquire historical baseball observations and keep them.
+
+The long-term architecture should be:
+
+**Raw historical baseball events**
+→ **normalized events**
+→ **derived player profiles**
+→ **today's matchup research**
+
+The platform should calculate most splits itself.
+
+---
+
+# 4. Baseball Savant / Statcast acquisition
+
+The documentation should no longer describe this as having a normal **Statcast API**.
+
+Use the term:
+
+> **Baseball Savant / Statcast historical data ingestion**
+
+The source may be acquired through available Baseball Savant exports/search functionality or a maintained community wrapper such as pybaseball where appropriate.
+
+This is an ingestion layer, not a synchronous daily dependency.
+
+## Historical data desired
+
+Where available:
+
+* game date
+* batter
+* pitcher
+* batter side
+* pitcher hand
+* pitch type
+* pitch velocity
+* spin/movement fields
+* release point
+* extension
+* plate location
+* count
+* pitch result
+* plate-appearance result
+* exit velocity
+* launch angle
+* estimated metrics
+* hit type
+* expected outcome fields
+* game identifiers
+
+Raw observations must be stored before derived calculations.
+
+---
+
+# 5. Do not make historical ingestion block today's slate
+
+This is a hard architecture rule.
+
+Wrong:
+
+**Open Round Robin page**
+→ query Savant for hundreds of players
+→ query FanGraphs
+→ calculate everything
+→ wait 30-60 minutes
+→ maybe produce picks
+
+Correct:
+
+### Background historical layer
+
+Maintain the player database continuously.
+
+### Pregame layer
+
+FantasyPros delivers today's projected lineup.
+
+The system looks up those players in the historical database immediately.
+
+Any missing enrichment may continue in the background.
+
+The daily slate should never require rebuilding the league's history.
+
+---
+
+# 6. Historical ingestion strategy
+
+## Initial historical seed
+
+Preferred initial scope:
+
+* 2024
+* 2025
+* 2026 season-to-date
+
+Career summaries may be added where reliable data exists.
+
+The system should not claim complete career history unless actually ingested.
+
+---
+
+## Incremental daily updates
+
+After the initial historical seed:
+
+Do not redownload everything.
+
+Each day:
+
+> ingest only the newly completed historical observations
+
+Then update affected player profiles.
+
+Example:
+
+Database current through August 24.
+
+On August 26:
+
+only August 25 games need to be added.
+
+Then recalculate affected:
+
+* season profiles
+* rolling windows
+* handedness profiles
+* pitch-type profiles
+* bullpen profiles
+* BvP profiles
+* trend features
+
+---
+
+# 7. Hitter master profile
+
+Each hitter should maintain the following.
+
+## Basic production
+
+* PA
+* AB
+* H
+* 1B
+* 2B
+* 3B
+* HR
+* TB
+* BB
+* K
+* HBP
+* R
+* RBI
+* SB where relevant
+* AVG
+* OBP
+* SLG
+* ISO
+* wOBA where available
+* xBA
+* xSLG
+* xwOBA where available
+
+Every rate must preserve its denominator.
+
+---
+
+# 8. Hitter contact-quality profile
+
+Maintain:
+
+* average exit velocity
+* max EV
+* 90th percentile EV
+* hard-hit%
+* barrel%
+* barrel/PA
+* launch angle
+* sweet-spot%
+* GB%
+* LD%
+* FB%
+* pull%
+* center%
+* opposite%
+* pull-air%
+* ground-ball direction
+* fly-ball direction where available
+
+This profile is particularly important for:
+
+**TB**
+
+**XBH**
+
+**HR**
+
+---
+
+# 9. Hitter plate-discipline profile
+
+Maintain:
+
+* Swing%
+* Chase%
+* Zone Swing%
+* Contact%
+* Zone Contact%
+* Whiff%
+* first-pitch swing
+* pitches/PA
+* BB%
+* unintentional BB% where available
+* K%
+* two-strike performance where useful
+* count creation
+
+This profile becomes especially important for:
+
+**Walk**
+
+and partially TB through contact opportunity.
+
+---
+
+# 10. Hitter handedness profile
+
+Every hitter requires distinct research against:
+
+## RHP
+
+and
+
+## LHP
+
+Store independently:
+
+* PA
+* H
+* 2B
+* 3B
+* HR
+* TB
+* BB
+* K
+* AVG
+* OBP
+* SLG
+* ISO
+* xSLG where available
+* barrels
+* hard-hit
+* EV
+* contact
+* chase
+* pitch-type performance
+
+The system should never silently substitute overall performance for an available handedness split.
+
+---
+
+# 11. Pitcher handedness profile
+
+Every pitcher requires:
+
+## Against LHB
+
+and
+
+## Against RHB
+
+Store:
+
+* BF
+* K
+* BB
+* H
+* 2B
+* 3B
+* HR
+* TB allowed
+* xSLG allowed
+* xwOBA allowed
+* hard-hit
+* barrels
+* contact allowed
+* whiff
+* GB
+* LD
+* FB
+* pitch usage
+* pitch location
+* pitch-type outcomes
+
+Today's effective matchup must combine:
+
+**hitter vs pitcher hand**
+
+with
+
+**pitcher vs hitter side**.
+
+---
+
+# 12. Switch hitters
+
+Switch hitters cannot be assigned one generic split.
+
+For each matchup:
+
+Determine the hitter's expected batting side based on the pitcher's throwing hand.
+
+Then use the appropriate historical split.
+
+If the expected side cannot be determined:
+
+**NOT FOUND / BLOCKED**
+
+rather than silently using overall statistics.
+
+---
+
+# 13. Day/night history
+
+Every hitter and pitcher should maintain:
+
+**DAY**
+
+and
+
+**NIGHT**
+
+profiles.
+
+Possible fields:
+
+* PA/BF
+* AVG
+* OBP
+* SLG
+* ISO
+* BB%
+* K%
+* xSLG
+* barrel%
+* hard-hit%
+* EV
+
+But day/night results require contextual interpretation.
+
+The website must distinguish:
+
+> descriptive split
+
+from:
+
+> proven causal skill.
+
+Example:
+
+> The player has better raw night production, but the difference is based on a limited sample and his underlying contact quality is similar.
+
+Day/night should never be promoted into a major betting thesis based only on batting average.
+
+---
+
+# 14. Historical game-context table
+
+Day/night and environmental research should come from a shared **Game Context** record rather than being repeated for every player.
+
+Each historical game may store:
+
+* venue
+* local scheduled start
+* actual start if available
+* time zone
+* DAY/NIGHT classification
+* temperature
+* humidity
+* wind speed
+* wind direction
+* wind direction relative to home plate
+* precipitation
+* roof state
+* park environment
+* doubleheader state
+* game number
+
+Every participating player can then be linked to that context.
+
+---
+
+# 15. Home/away
+
+Store separate:
+
+**HOME**
+
+**AWAY**
+
+profiles.
+
+But never assume the difference is purely psychological or inherent to the player.
+
+Interpret relative to:
+
+* home park
+* opponent mix
+* handedness
+* weather
+* sample size
+* park components
+
+Example:
+
+> His home SLG is substantially higher, but much of the increase comes through HR production in a park that strongly benefits his pull direction.
+
+---
+
+# 16. Rolling windows
+
+Maintain rolling:
+
+* 7 day
+* 14 day
+* 30 day
+* 60 day
+
+alongside:
+
+* season
+* prior season
+* career where available
+
+These windows should answer:
+
+> Is something changing?
+
+Not:
+
+> Is the player hot?
+
+The website must look for supporting mechanical changes.
+
+Examples:
+
+* more contact
+* lower chase
+* increased EV
+* barrel increase
+* changed launch distribution
+* altered pitch mix
+* velocity change
+* lineup promotion
+* playing-time change
+
+A streak without a supporting mechanism remains weak context.
+
+---
+
+# 17. Pitch-type hitter profiles
+
+For every hitter and meaningful pitch family:
+
+* four-seam
+* sinker
+* cutter
+* slider
+* sweeper
+* curveball
+* changeup
+* splitter
+* other documented categories
+
+Store:
+
+* pitches seen
+* PA ending on pitch where meaningful
+* swing%
+* whiff%
+* contact%
+* EV
+* hard-hit
+* barrels
+* xBA
+* xSLG
+* run value where supported
+* location performance
+
+This becomes one of the strongest alternatives to simplistic BvP.
+
+---
+
+# 18. Velocity buckets
+
+Pitch-type analysis should also recognize velocity.
+
+Possible research buckets may include, after validation:
+
+* <90
+* 90-92
+* 92-94
+* 94-96
+* 96-98
+* 98+
+
+Exact production buckets should be documented and consistent.
+
+The objective is not to over-fragment samples.
+
+The system should avoid producing tiny meaningless slices.
+
+---
+
+# 19. Movement and pitch-shape archetypes
+
+Where the source data supports it, classify pitches using:
+
+* horizontal movement
+* vertical movement
+* velocity
+* release height
+* arm angle
+* extension
+
+Example:
+
+Not merely:
+
+> hitter vs four-seam.
+
+But:
+
+> hitter vs high-ride 95-97 mph four-seamers.
+
+This allows the platform to understand **pitcher archetypes**, not only named pitchers.
+
+---
+
+# 20. Pitcher arsenal profile
+
+Every starter and reliever should maintain:
+
+* pitch types
+* usage%
+* usage by hitter side
+* velocity
+* velocity trend
+* movement
+* release point
+* extension
+* whiff%
+* contact allowed
+* xSLG allowed
+* hard-hit
+* barrels
+* location tendencies
+
+Track over:
+
+**season**
+
+**60 days**
+
+**30 days**
+
+**last five appearances/starts where appropriate**
+
+This lets the site detect arsenal changes.
+
+---
+
+# 21. Times through the order
+
+For starters where sufficient data exists:
+
+* first time through
+* second time
+* third time
+
+Track:
+
+* BF
+* K%
+* BB%
+* contact
+* xSLG
+* barrels
+* hard-hit
+
+This matters because full-game hitter props may involve multiple meetings with the starter.
+
+---
+
+# 22. Starter workload profile
+
+Every starter should also maintain:
+
+* IP/start
+* pitches/start
+* BF/start
+* recent workloads
+* recent pitch counts
+* days rest
+* hook pattern
+* third-time-through frequency
+
+Today's hitter research needs to estimate:
+
+> How much of this game is actually against the starter?
+
+---
+
+# 23. Bullpen player intelligence
+
+Every meaningful reliever needs his own permanent profile.
+
+Store:
+
+* handedness
+* role
+* leverage usage
+* appearances
+* pitch counts
+* pitch mix
+* velocity
+* K%
+* BB%
+* xSLG
+* barrels
+* hard-hit
+* contact
+* LHB/RHB splits
+
+The bullpen is not one pitcher.
+
+---
+
+# 24. Bullpen availability layer
+
+Historical player knowledge persists.
+
+Today's availability is a separate state.
+
+Track:
+
+* pitched yesterday
+* pitches yesterday
+* pitched two straight days
+* three-day usage
+* role
+* injury/status
+* likely availability
+
+Then estimate the likely reliever path.
+
+Never allow a team bullpen ERA to replace this.
+
+---
+
+# 25. BvP history
+
+Build our own BvP history from stored batter/pitcher events.
+
+Store:
+
+* PA
+* AB
+* H
+* 1B
+* 2B
+* 3B
+* HR
+* TB
+* BB
+* K
+* xSLG where available
+* EV
+* hard-hit
+* barrels
+* dates
+* pitch types seen
+* velocity at time of matchup
+
+Use the existing interpretation ladder:
+
+|    PA | Treatment           |
+| ----: | ------------------- |
+|   0-9 | Anecdotal           |
+| 10-24 | Weak context        |
+| 25-49 | Secondary evidence  |
+|   50+ | Supporting evidence |
+
+Never allow BvP alone to override:
+
+* current hitter skill
+* current pitcher skill
+* handedness
+* current arsenal
+* velocity
+* movement
+* sample quality
+
+---
+
+# 26. BvP representativeness
+
+A major improvement:
+
+Historical BvP should be evaluated for whether the pitcher is still structurally similar to the pitcher seen in those old PA.
+
+Compare:
+
+* velocity then vs now
+* pitch usage then vs now
+* movement
+* release
+* new pitches
+* abandoned pitches
+
+Example conclusion:
+
+> 31 historical PA exist, but most occurred before the pitcher adopted his current cutter-heavy arsenal. Treat the historical BvP as weak secondary evidence.
+
+---
+
+# 27. Similar-pitcher research
+
+The system should eventually find pitchers similar to today's opponent.
+
+Similarity may consider:
+
+* handedness
+* pitch usage
+* velocity
+* movement
+* release point
+* extension
+* strikeout style
+* ground-ball/fly-ball tendency
+
+Then ask:
+
+> How has this hitter performed against this pitcher archetype?
+
+This produces a much larger and more meaningful sample than BvP alone.
+
+---
+
+# 28. Similar-hitter research for pitchers
+
+The reverse should also be possible.
+
+For today's pitcher:
+
+> How has he performed against hitters resembling today's batter?
+
+Possible hitter archetype dimensions:
+
+* handedness
+* contact rate
+* chase
+* power
+* pull tendency
+* launch profile
+* velocity sensitivity
+* pitch-type strengths
+
+This becomes a second matchup lens.
+
+---
+
+# 29. BallparkPal role
+
+BallparkPal should be treated as a structured external source only for capabilities actually documented and successfully connected.
+
+Potential information must be verified against its API documentation before use.
+
+The system must never assume undocumented BallparkPal fields.
+
+BallparkPal observations should attach to:
+
+* canonical player
+* game
+* venue
+* matchup
+
+as appropriate.
+
+BallparkPal is a **research source**, not the final decision-maker.
+
+Never expose its credential.
+
+---
+
+# 30. FantasyPros role
+
+FantasyPros primarily owns today's pregame universe.
+
+Use it for:
+
+* games it lists
+* projected batting orders
+* batting spots
+* player metadata
+* expected starter information where supplied
+* injury/news context
+* projections as external reference
+
+Most importantly:
+
+> **FantasyPros determines who is expected to play.**
+
+It does **not** determine MLB Analyst's picks.
+
+---
+
+# 31. FantasyPros projections
+
+Do not delete them.
+
+Store them.
+
+But label:
+
+**EXTERNAL PROJECTION**
+
+not:
+
+**MLB ANALYST PICK SIGNAL**
+
+Eventually compare:
+
+### FantasyPros
+
+Player rank #2
+
+### MLB Analyst
+
+Research rank #7
+
+### State
+
+DISAGREEMENT
+
+Then settle the outcome.
+
+Over time measure:
+
+> Which system was more useful in which matchup classes?
+
+---
+
+# 32. FanGraphs role
+
+The documentation should not say **FanGraphs API**.
+
+Instead:
+
+> **FanGraphs-derived enrichment where data acquisition is available and appropriate.**
+
+This source may be used for:
+
+* season-level statistics
+* discipline metrics
+* cross-checking
+
+But failure to obtain FanGraphs data cannot block:
+
+* today's slate
+* player profiles
+* Round Robin construction
+
+It is optional enrichment.
+
+---
+
+# 33. Market-specific player understanding
+
+There must never be one universal hitter score.
+
+Each market has a different mechanism.
+
+---
+
+# 34. 2+ Total Bases research
+
+Research question:
+
+> Can this hitter accumulate at least two total bases through either contact volume or damage?
+
+Primary evidence:
+
+* expected PA / lineup slot
+* hitter contact%
+* hitter K%
+* pitcher K%
+* pitcher contact allowed
+* SLG/xSLG
+* doubles
+* triples
+* HR
+* barrel/PA
+* EV
+* handedness
+* pitch arsenal
+* bullpen path
+* park
+* weather
+
+Two paths:
+
+**Contact/volume**
+
+or
+
+**power/damage**.
+
+A low-K contact-inducing pitcher can be a good TB matchup even if he is not a bad overall pitcher.
+
+---
+
+# 35. XBH research
+
+Research question:
+
+> Can this hitter produce at least one double, triple, or home run?
+
+Primary evidence:
+
+* 2B rate
+* 3B rate
+* HR rate
+* XBH/PA
+* barrels
+* EV
+* line drives
+* sprint speed
+* pull-air
+* opposing pitcher XBH profile
+* pitch-type matchup
+* park components
+* weather
+
+Two singles do not help.
+
+Therefore XBH cannot simply inherit TB rankings.
+
+---
+
+# 36. Walk research
+
+Research question:
+
+> Does the hitter's patience interact favorably with the pitcher's inability to create strikes?
+
+Hitter:
+
+* BB%
+* chase%
+* zone swing
+* pitches/PA
+* first-pitch behavior
+
+Pitcher:
+
+* BB%
+* zone%
+* first-pitch strike%
+* chase generated
+* command trend
+
+Bullpen:
+
+same principles.
+
+Umpire may be included when reliably available.
+
+Both halves matter.
+
+---
+
+# 37. HR research
+
+Research question:
+
+> Does the hitter have a credible home-run mechanism against this specific pitching and environmental profile?
+
+Evidence:
+
+* barrel/PA
+* 90th EV
+* pull-air
+* fly-ball rate
+* launch profile
+* pitch-type damage
+* pitcher barrel allowed
+* pitcher HR/FB context
+* handedness
+* park HR component
+* wind direction
+
+HR/FB without supporting contact quality is not enough.
+
+---
+
+# 38. H+R+RBI context
+
+This remains primarily relevant to RR3.
+
+Research:
+
+* contact
+* expected PA
+* lineup slot
+* OBP
+* hitters ahead
+* hitters behind
+* team context
+* pitcher contact
+* bullpen
+
+Target must always be recorded as:
+
+**2+ H+R+RBI**
+
+not generic H+R+RBI.
+
+---
+
+# 39. Daily research workflow
+
+Every daily slate should follow this sequence.
+
+### Step 1 - FantasyPros projected slate
+
+Identify:
+
+* games
+* projected hitters
+* projected order
+* expected starters where available
+
+### Step 2 - Load existing player intelligence
+
+No full historical rebuild.
+
+Pull stored profiles for today's players.
+
+### Step 3 - Refresh necessary current information
+
+Update only information needed to ensure today's research is current.
+
+### Step 4 - Game environment
+
+Research:
+
+* starter
+* park
+* weather
+* bullpen availability
+* lineup opportunity
+
+### Step 5 - Market-specific matchup research
+
+Evaluate every relevant player independently for:
+
+* TB
+* XBH
+* Walk
+* HR
+* H+R+RBI context
+
+### Step 6 - Candidate self-audit
+
+For every top candidate:
+
+* case for
+* case against
+* missing evidence
+* BvP quality
+* arsenal agreement
+* weather
+* bullpen
+* alternative candidate
+
+### Step 7 - Round Robin construction
+
+Only after individual market rankings exist.
+
+---
+
+# 40. Round Robin definitions
+
+## RR1
+
+**2+ TB + 2+ TB**
+
+Same team.
+
+Different players.
+
+## RR2
+
+**2+ TB + Walk**
+
+Same team.
+
+Different players.
+
+## RR3
+
+**XBH + 2+ H+R+RBI**
+
+Same team.
+
+Different players.
+
+## RR4
+
+**XBH + Walk**
+
+Same team.
+
+Different players.
+
+## RR5
+
+Best research construction among RR1-RR4.
+
+Until calibrated historically, RR5 is:
+
+> **BEST RESEARCH CONSTRUCTION**
+
+not a probability claim.
+
+---
+
+# 41. Pair-level lineup geometry
+
+Pairs should be analyzed as interactions.
+
+Example RR2:
+
+Walker bats #1.
+
+TB hitter bats #3.
+
+Record:
+
+**walker ahead by 2 spots**
+
+This may support the construction.
+
+RR3:
+
+H+R+RBI hitter ahead of XBH hitter:
+
+reach base
+→ XBH
+→ potential run scored.
+
+Or XBH hitter ahead:
+
+XBH
+→ companion hit
+→ possible Hit + RBI.
+
+Geometry is supporting evidence, not a rigid gate.
+
+---
+
+# 42. Research counter-case
+
+Every selected player and pair must have a documented counter-case.
+
+Example:
+
+### Why selected
+
+* favorable handedness
+* strong contact path
+* low-K starter
+* favorable arsenal
+* strong batting slot
+
+### Why it could fail
+
+* starter expected to work deep
+* bullpen has high-K arms
+* wind suppresses pull field
+* recent contact gains based on small sample
+
+No selection should consist only of supporting evidence.
+
+---
+
+# 43. Missing-data states
+
+Never invent data.
+
+Use explicit states:
+
+**VERIFIED**
+
+**SOURCED**
+
+**INFERENCE**
+
+**NOT FOUND**
+
+Operationally:
+
+**READY**
+
+**PARTIAL**
+
+**BLOCKED**
+
+**PASS**
+
+Examples:
+
+> Pitch movement data NOT FOUND.
+
+> Bullpen availability PARTIAL.
+
+> Weather stale.
+
+> BvP 8 PA - anecdotal only.
+
+---
+
+# 44. Data lineage
+
+Every observation must preserve:
+
+* source
+* source player ID
+* internal player ID
+* retrieval time
+* observation/effective date
+* raw payload reference
+* transformation version
+* denominator
+* sample
+* freshness
+
+Derived statistics must identify their source inputs.
+
+---
+
+# 45. Point-in-time correctness
+
+This is critical for historical learning.
+
+When evaluating what the system knew before a game, only use data available before that game's freeze time.
+
+Do not let future outcomes leak backward.
+
+Historical research must support:
+
+> What did we know at 4:00 PM before this game?
+
+not:
+
+> What do we know after the result?
+
+---
+
+# 46. Immutable daily research snapshot
+
+Before games:
+
+Freeze:
+
+* projected lineup used
+* player profiles used
+* starter assumptions
+* bullpen state
+* weather state
+* market rankings
+* selected pairs
+* rejected alternatives
+* counter-cases
+* source timestamps
+
+Never silently rewrite this after the game.
+
+---
+
+# 47. Settlement
+
+After games:
+
+Store actual:
+
+* PA
+* H
+* 2B
+* 3B
+* HR
+* TB
+* BB
+* R
+* RBI
+* relevant pitch events
+
+Settle:
+
+* 2+ TB
+* XBH
+* Walk
+* HR
+* 2+ H+R+RBI when used
+
+---
+
+# 48. Postmortem learning
+
+Do not classify every losing pick as bad research.
+
+Each outcome should be reviewed for:
+
+### Data failure
+
+Input was wrong/stale.
+
+### Opportunity failure
+
+Player lost PA or role.
+
+### Matchup failure
+
+Research mechanism did not occur.
+
+### Model/research failure
+
+Evidence weighting was wrong.
+
+### Variance
+
+Thesis occurred but result did not.
+
+Also preserve:
+
+**GOOD PROCESS / LOSS**
+
+and
+
+**BAD PROCESS / WIN**
+
+when appropriate.
+
+---
+
+# 49. Learn which research signals actually work
+
+Over time measure:
+
+* handedness usefulness
+* day/night usefulness
+* arsenal-matchup value
+* BvP value
+* velocity-matchup value
+* bullpen-path value
+* park/weather value
+* rolling-form value
+* lineup geometry value
+
+Example future conclusion:
+
+> Day/night splits add no predictive value once park and handedness are controlled.
+
+Then reduce their importance.
+
+Or:
+
+> Walk picks where both hitter chase and pitcher zone% agree outperform BB projection alone.
+
+Then increase that mechanism's importance.
+
+The system must be willing to learn that a favorite statistic is useless.
+
+---
+
+# 50. Player report template
+
+Every player's profile page should ultimately answer:
+
+### Identity
+
+Who is this player?
+
+### Current role
+
+Where does he play/bat/pitch?
+
+### Season
+
+What has he done?
+
+### Career baseline
+
+What is normal for him?
+
+### Recent trend
+
+What changed?
+
+### Handedness
+
+How does he perform in today's effective matchup?
+
+### Day/night
+
+What does history show, and how trustworthy is it?
+
+### Home/road
+
+What does context explain?
+
+### Pitch-type profile
+
+What pitches help/hurt him?
+
+### Velocity/movement
+
+What pitcher shapes help/hurt him?
+
+### BvP
+
+What history exists and is it representative?
+
+### Similar opponents
+
+What archetypes resemble today's opponent?
+
+### Market fit
+
+TB / XBH / Walk / HR.
+
+### Counter-evidence
+
+What argues against the read?
+
+### Missing information
+
+What can't we verify?
+
+### Analyst conclusion
+
+What does it mean today?
+
+---
+
+# 51. Performance and architecture target
+
+The player-intelligence system should eliminate repeated daily research.
+
+Target:
+
+### Overnight/background
+
+Full enrichment updates.
+
+### Morning slate load
+
+FantasyPros identifies today's players in a few minutes.
+
+### Matchup evaluation
+
+Mostly database queries over already-stored player intelligence.
+
+### External refresh
+
+Only current context and missing/new evidence.
+
+### Round Robin construction
+
+Seconds once market research is ready.
+
+---
+
+# 52. Hard prohibitions
+
+The system must not:
+
+* use sportsbook odds
+* use EV
+* use CLV
+* use price as selection input
+* invent probabilities
+* create a universal hitter score
+* treat FantasyPros projections as its own picks
+* treat BvP as a hard gate
+* treat ERA as vulnerability
+* use wind without direction
+* treat team bullpen ERA as bullpen research
+* manufacture stats
+* convert missing values to fake zeroes
+* use name-only joins where IDs exist
+* use future information in historical pregame analysis
+* silently change frozen predictions after settlement
+* force picks because a board expects a row
+* describe Savant ingestion as an official Statcast API
+* describe FanGraphs access as an official FanGraphs API when none exists
+
+---
+
+# Implementation roadmap
+
+## Phase A - Source inventory
+
+Verify exactly what we can obtain from:
+
+* FantasyPros
+* BallparkPal
+* Baseball Savant / Statcast Search
+* pybaseball
+* historical datasets already present
+* weather sources
+* park sources
+* settlement source
+
+For every source document:
+
+**OWNED FIELDS**
+
+**METHOD OF ACCESS**
+
+**FRESHNESS**
+
+**FAILURE MODE**
+
+**AUTHORITATIVE FOR WHAT**
+
+No assumptions.
+
+---
+
+## Phase B - Canonical identity
+
+Build/verify one player identity across all sources.
+
+Do not proceed to large historical ingestion until identity quality is acceptable.
+
+---
+
+## Phase C - Raw historical warehouse
+
+Seed available 2024, 2025, and 2026 data.
+
+Keep raw observations immutable.
+
+---
+
+## Phase D - Hitter profiles
+
+Generate:
+
+* overall
+* handedness
+* home/away
+* day/night
+* rolling
+* pitch-type
+* velocity
+* contact
+* discipline
+* BvP
+
+---
+
+## Phase E - Pitcher profiles
+
+Generate:
+
+* overall
+* batter-side splits
+* arsenal
+* velocity
+* movement
+* contact allowed
+* command
+* times-through-order
+* workload
+
+---
+
+## Phase F - Bullpen intelligence
+
+Profile individual relievers first.
+
+Then build current availability and expected path.
+
+---
+
+## Phase G - Game context
+
+Historical and current:
+
+* park
+* weather
+* local time
+* day/night
+* roof
+* wind direction
+
+---
+
+## Phase H - Matchup intelligence
+
+Join:
+
+**hitter profile**
+
+with
+
+**pitcher profile**
+
+with
+
+**bullpen**
+
+with
+
+**park/weather**
+
+with
+
+**lineup slot**
+
+---
+
+## Phase I - Market engines
+
+Build independent:
+
+* TB
+* XBH
+* Walk
+* HR
+* H+R+RBI supporting engine
+
+No universal score.
+
+---
+
+## Phase J - Round Robin engine
+
+Construct RR1-RR5 only after independent candidate research.
+
+---
+
+## Phase K - Historical settlement and learning
+
+Backfill outcomes.
+
+Measure which research signals actually improve decisions.
+
+---
+
+# Definition of Done
+
+This phase is not done because a large dataset exists.
+
+It is done when:
+
+1. Every relevant player has one canonical identity.
+2. Historical observations are source-traceable.
+3. The platform can produce season and rolling profiles.
+4. Hitter RHP/LHP splits work.
+5. Pitcher LHB/RHB splits work.
+6. Day/night profiles work with sample caveats.
+7. Home/road profiles work.
+8. Pitch-type profiles work.
+9. Pitcher arsenal histories work.
+10. BvP profiles are generated internally.
+11. BvP includes sample/representativeness treatment.
+12. Bullpen arms have individual profiles.
+13. Today's FantasyPros projected lineup can immediately retrieve existing player intelligence.
+14. Daily research does not rebuild historical data.
+15. Every market uses its own evidence mechanism.
+16. Every pick can explain why it was selected.
+17. Every pick can explain why it could fail.
+18. Every source claim can be traced.
+19. Every settled result remains attached to what the system knew pregame.
+20. Future postmortems can measure which research ideas actually help.
+
+## The one-sentence requirement
+
+> **Build a persistent MLB intelligence database that already understands every hitter, starter, and relevant reliever before today's slate arrives; use FantasyPros to identify today's projected participants, BallparkPal and other verified sources for documented context, historical Baseball Savant/Statcast observations for deep baseball evidence, and MLB Analyst's own derived splits, arsenal research, weather/park context, bullpen analysis, and postmortem history to make independent market-specific picks.**
+
+That is the plan I would use in place of the current #80. 
