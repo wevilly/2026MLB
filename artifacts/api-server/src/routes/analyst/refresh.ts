@@ -16,6 +16,7 @@
  *   POST   /analyst/refresh/market-research/walk
  *   POST   /analyst/refresh/market-research/hr
  *   POST   /analyst/refresh/bullpen
+ *   POST   /analyst/refresh/weather
  */
 import { Router, type IRouter, type RequestHandler } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -35,6 +36,7 @@ import {
   RefreshAnalystBatterPitcherResponse,
   GetAnalystRoundRobinComparisonResponse,
   RefreshBullpenResponse,
+  RefreshWeatherResponse,
   RefreshMarketResearchTBResponse,
   RefreshMarketResearchXBHResponse,
   RefreshMarketResearchWALKResponse,
@@ -147,8 +149,9 @@ import {
   queryOrchestrationRuns,
 } from "../../services/orchestration";
 import { buildSlateExport, buildWorkbookExport } from "../../services/exports";
-import { queryAuditEvents } from "../../services/audit";
-import { CACHE_POLICY, invalidateCache, readThroughCache } from "../../services/cache";
+import { queryAuditEvents, recordAuditEvent } from "../../services/audit";
+import { CACHE_POLICY, invalidateCache, invalidateWeatherSlateCaches, readThroughCache } from "../../services/cache";
+import { refreshWeather, WeatherRefreshValidationError } from "../../services/weather-foundation";
 import {
   BETTOR_MARKETS,
   BettorIntelligenceConflictError,
@@ -305,6 +308,54 @@ router.post("/analyst/refresh/bullpen", async (req, res, next) => {
       error: result.error ?? null,
     }));
   } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/refresh/weather", async (req, res, next) => {
+  try {
+    const date = requestedDate(req.query.date);
+    await recordAuditEvent({
+      actor: "OPERATOR",
+      requestId: String(req.id),
+      action: "weather.refresh.requested",
+      resourceType: "slate",
+      resourceId: date,
+      metadata: { slateDate: date },
+    });
+    const result = await refreshWeather(date, { actor: "OPERATOR", requestId: String(req.id) });
+    invalidateWeatherSlateCaches(date);
+    // Source-registration failures happen before an ingest-run ID can exist.
+    // Preserve those rare failed attempts in the audit ledger as well.
+    if (!result.ingestRunId) {
+      await recordAuditEvent({
+        actor: "OPERATOR",
+        requestId: String(req.id),
+        action: "weather.refresh",
+        resourceType: "slate",
+        resourceId: date,
+        metadata: {
+          status: result.status,
+          ingestRunId: null,
+          error: result.error ?? null,
+          failures: result.failures,
+        },
+      });
+    }
+    res.status(result.status === "FAILED" ? 500 : 201).json(RefreshWeatherResponse.parse(result));
+  } catch (error) {
+    if (error instanceof WeatherRefreshValidationError) {
+      await recordAuditEvent({
+        actor: "OPERATOR",
+        requestId: String(req.id),
+        action: "weather.refresh.rejected",
+        resourceType: "slate",
+        resourceId: typeof req.query.date === "string" ? req.query.date : null,
+        metadata: { error: error.message },
+      });
+      res.status(400).json({ error: error.message });
+      return;
+    }
     next(error);
   }
 });

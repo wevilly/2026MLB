@@ -223,18 +223,6 @@ export function weatherAdjustment(market: WeatherMarket, weather: GameWeather | 
 
 // ── Ingestion ─────────────────────────────────────────────────────────────────
 
-async function ensureWeatherSource(): Promise<void> {
-  await pool.query(
-    `INSERT INTO source_registry (source_id, name, source_type, base_url, expected_freshness_minutes, notes)
-     VALUES ($1, 'Open-Meteo Forecast', '${WEATHER_SOURCE_TYPE}', $2, 180,
-             'Per-game forecast. Forecast data changes; observations are append-only.')
-     ON CONFLICT (source_id) DO UPDATE SET
-       name = EXCLUDED.name, base_url = EXCLUDED.base_url,
-       expected_freshness_minutes = EXCLUDED.expected_freshness_minutes`,
-    [WEATHER_SOURCE, WEATHER_BASE],
-  );
-}
-
 /**
  * Hydrates venue coordinates, roof type and field orientation from the MLB
  * Stats API. A forecast cannot be requested without coordinates, and the wind
@@ -346,6 +334,7 @@ function forecastAtHour(hourly: JsonObject, target: string | null) {
 export type WeatherRefreshResult = {
   status: "SUCCESS" | "PARTIAL" | "FAILED";
   slateDate: string;
+  ingestRunId: string | null;
   gamesFound: number;
   observationsWritten: number;
   domedGames: number;
@@ -354,18 +343,32 @@ export type WeatherRefreshResult = {
   error?: string;
 };
 
+export class WeatherRefreshValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WeatherRefreshValidationError";
+  }
+}
+
+type WeatherRefreshAudit = {
+  actor: string;
+  requestId?: string | null;
+};
+
 /**
- * Ingests one slate's forecasts.
+ * Performs one slate's forecast retrieval after its ingest run has been
+ * created by the public wrapper below.
  *
  * Observations are append-only: every retrieval writes a new row unless the
  * forecast is byte-identical to one already stored for the game, so a
  * post-freeze weather change is a new observation rather than a mutation of the
  * pregame state.
  */
-export async function refreshWeather(slateDate: string): Promise<WeatherRefreshResult> {
-  await ensureWeatherSource();
+async function performWeatherRefresh(
+  slateDate: string,
+  games: SlateGame[],
+): Promise<Omit<WeatherRefreshResult, "ingestRunId">> {
   const failures: WeatherIngestFailure[] = [];
-  const games = await slateGames(slateDate);
   const missingGeography = games.filter(
     (game) => game.venueId !== null && (game.latitude === null || game.longitude === null || game.orientationDegrees === null),
   );
@@ -459,6 +462,163 @@ export async function refreshWeather(slateDate: string): Promise<WeatherRefreshR
     failures,
     ...(error ? { error } : {}),
   };
+}
+
+async function startWeatherRun(slateDate: string) {
+  const result = await pool.query<{ ingest_run_id: string }>(
+    `WITH weather_source AS (
+       INSERT INTO source_registry (source_id, name, source_type, base_url, expected_freshness_minutes, notes)
+       VALUES ($1, 'Open-Meteo Forecast', '${WEATHER_SOURCE_TYPE}', $2, 180,
+               'Per-game forecast. Forecast data changes; observations are append-only.')
+       ON CONFLICT (source_id) DO UPDATE SET
+         name = EXCLUDED.name, base_url = EXCLUDED.base_url,
+         expected_freshness_minutes = EXCLUDED.expected_freshness_minutes
+       RETURNING source_id
+     )
+     INSERT INTO ingest_runs (source_id, job_name, status, effective_date)
+     SELECT source_id, 'weather_refresh', 'RUNNING', $3 FROM weather_source
+     RETURNING ingest_run_id`,
+    [WEATHER_SOURCE, WEATHER_BASE, slateDate],
+  );
+  return result.rows[0].ingest_run_id;
+}
+
+async function finishWeatherRun(
+  ingestRunId: string,
+  result: Omit<WeatherRefreshResult, "ingestRunId">,
+  audit?: WeatherRefreshAudit,
+) {
+  const values = [
+    ingestRunId,
+    result.status,
+    result.gamesFound,
+    result.observationsWritten,
+    result.failures.length,
+    result.status === "SUCCESS" ? 200 : result.status === "PARTIAL" ? 206 : 500,
+    result.error ?? null,
+    JSON.stringify({
+      domedGames: result.domedGames,
+      gamesWithoutGeography: result.gamesWithoutGeography,
+      failures: result.failures,
+    }),
+  ];
+  const completion = `UPDATE ingest_runs
+        SET finished_at = now(),
+            status = $2,
+            row_count = $3,
+            normalized_row_count = $4,
+            rejected_row_count = $5,
+            http_status = $6,
+            duration_ms = EXTRACT(EPOCH FROM (now() - started_at))::int * 1000,
+            error_message = $7,
+            metadata = $8::jsonb
+      WHERE ingest_run_id = $1`;
+  if (!audit) {
+    await pool.query(completion, values);
+    return;
+  }
+  await pool.query(
+    `WITH completed AS (
+       ${completion}
+       RETURNING ingest_run_id
+     )
+     INSERT INTO audit_events (actor, request_id, action, resource_type, resource_id, metadata)
+     SELECT $9, $10, 'weather.refresh', 'slate', $11, $12::jsonb
+       FROM completed`,
+    [
+      ...values,
+      audit.actor,
+      audit.requestId ?? null,
+      result.slateDate,
+      JSON.stringify({
+        status: result.status,
+        ingestRunId,
+        gamesFound: result.gamesFound,
+        observationsWritten: result.observationsWritten,
+        domedGames: result.domedGames,
+        gamesWithoutGeography: result.gamesWithoutGeography,
+        failures: result.failures,
+        error: result.error ?? null,
+      }),
+    ],
+  );
+}
+
+function failedWeatherResult(slateDate: string, detail: string): Omit<WeatherRefreshResult, "ingestRunId"> {
+  return {
+    status: "FAILED",
+    slateDate,
+    gamesFound: 0,
+    observationsWritten: 0,
+    domedGames: 0,
+    gamesWithoutGeography: 0,
+    failures: [{ scope: "weather_refresh", detail, fatal: true }],
+    error: `Weather refresh failed: ${detail}`,
+  };
+}
+
+async function finalizeWeatherRun(
+  ingestRunId: string,
+  result: Omit<WeatherRefreshResult, "ingestRunId">,
+  audit?: WeatherRefreshAudit,
+) {
+  try {
+    await finishWeatherRun(ingestRunId, result, audit);
+    return result;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    logger.error({ ingestRunId, detail }, "weather result or audit persistence failed; retrying failed recovery outcome");
+    const recovered = failedWeatherResult(result.slateDate, `Outcome persistence failed: ${detail}`);
+    try {
+      // The retry preserves the transaction that writes both the final result
+      // and the append-only operator outcome audit event.
+      await finishWeatherRun(ingestRunId, recovered, audit);
+      return recovered;
+    } catch (recoveryError) {
+      logger.error(
+        { ingestRunId, detail: recoveryError instanceof Error ? recoveryError.message : String(recoveryError) },
+        "weather outcome and audit retry failed; forcing a durable failed run",
+      );
+      try {
+        await finishWeatherRun(ingestRunId, recovered);
+      } catch (durabilityError) {
+        logger.error(
+          { ingestRunId, detail: durabilityError instanceof Error ? durabilityError.message : String(durabilityError) },
+          "weather failed-run recovery could not be persisted",
+        );
+      }
+    }
+    return recovered;
+  }
+}
+
+/**
+ * Ingests one slate's forecasts and records every outcome as a durable,
+ * selected-date ingest run. Weather remains optional enrichment, but its retry
+ * outcome must be visible without running an unrelated pipeline.
+ */
+export async function refreshWeather(
+  slateDate: string,
+  audit?: WeatherRefreshAudit,
+): Promise<WeatherRefreshResult> {
+  const games = await slateGames(slateDate);
+  if (!games.length) {
+    throw new WeatherRefreshValidationError(
+      `No scheduled games are registered for ${slateDate}; select an Eastern MLB slate date with scheduled games.`,
+    );
+  }
+  let ingestRunId: string | null = null;
+  try {
+    ingestRunId = await startWeatherRun(slateDate);
+    const result = await performWeatherRefresh(slateDate, games);
+    return { ...(await finalizeWeatherRun(ingestRunId, result, audit)), ingestRunId };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    logger.error({ slateDate, detail }, "weather refresh failed unexpectedly");
+    const result = failedWeatherResult(slateDate, detail);
+    if (ingestRunId) return { ...(await finalizeWeatherRun(ingestRunId, result, audit)), ingestRunId };
+    return { ...result, ingestRunId };
+  }
 }
 
 async function writeObservation(

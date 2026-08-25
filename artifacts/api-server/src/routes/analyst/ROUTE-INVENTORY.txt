@@ -73,6 +73,7 @@ POST    /analyst/refresh/market-research/xbh
 POST    /analyst/refresh/mlb
 POST    /analyst/refresh/research
 POST    /analyst/refresh/research/splits-full
+POST    /analyst/refresh/weather
 POST    /analyst/settlement/refresh
 POST    /analyst/settlements/:gamePk
 POST    /analyst/settlements/automate

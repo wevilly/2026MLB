@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { getGetAnalystPitcherLabQueryKey, getGetAnalystPlayerLabQueryKey, useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore, useGetAnalystDailyMarketBoard, useGetAnalystDailyBoardGameSummary, useRefreshAnalystDailyMarketBoard, useGetAnalystBettorEvaluation, useChatWithAnalystAi, useGetAnalystAiDrafts, useCreateAnalystAiDraft, useApproveAnalystAiDraft, useRejectAnalystAiDraft, useGetAnalystAiSourcingRegister, useDecideAnalystAiSourcingClaim, useGetAnalystAiResearchNotes } from '@workspace/api-client-react';
-import type { AnalystSettings, BackfillFeatureStoreParams, BullpenArm, BullpenRoom, BullpenTeam, CaptureFeatureStoreSlateParams, DataHealth, FeatureStoreCaptureResult, FeatureStoreResult, HealthIssue, HREngineResult, MarketResearchCandidate, PregameFeatureSnapshot, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile, DailyMarketBoard, DailyBoardGameSummary, BettorEvaluation, BettorEvaluationPickMarket } from '@workspace/api-client-react';
+import type { AnalystSettings, BackfillFeatureStoreParams, BullpenArm, BullpenRoom, BullpenTeam, CaptureFeatureStoreSlateParams, DataHealth, FeatureStoreCaptureResult, FeatureStoreResult, HealthIssue, HREngineResult, MarketResearchCandidate, PregameFeatureSnapshot, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile, DailyMarketBoard, DailyBoardGameSummary, BettorEvaluation, BettorEvaluationPickMarket, WeatherRefreshResult } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight, Send, FilePlus, ThumbsDown, ThumbsUp, ExternalLink, ClipboardList, Download, Play, Square } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useSearch, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -405,6 +405,16 @@ function DataHealthPage() {
               <Metric label="Definition conflicts" value={data.researchHealth?.metricDefinitionConflicts ?? 0} note="Formula mismatch" tone={(data.researchHealth?.metricDefinitionConflicts ?? 0) > 0 ? 'bad' : 'good'} />
             </div>
           </Panel>
+          <Panel>
+            <SectionHeading eyebrow="Optional enrichment" title="Latest weather refresh" detail="Weather improves context when available, but it never blocks the slate or triggers model work." />
+            {data.weatherRefresh ? (
+              <div className="metric-grid">
+                <Metric label="Outcome" value={data.weatherRefresh.status} note={`Attempted ${new Date(data.weatherRefresh.startedAt).toLocaleString('en-US', { timeZone: 'America/New_York' })} ET`} tone={toneFor(data.weatherRefresh.status)} />
+                <Metric label="Games found" value={data.weatherRefresh.gamesFound} note={`${data.weatherRefresh.observationsWritten} observation(s) written`} tone={data.weatherRefresh.observationsWritten ? 'good' : toneFor(data.weatherRefresh.status)} />
+                <Metric label="Coverage failures" value={data.weatherRefresh.failures} note={data.weatherRefresh.error ?? 'No weather retrieval failures recorded'} tone={data.weatherRefresh.failures ? toneFor(data.weatherRefresh.status) : 'good'} />
+              </div>
+            ) : <div className="clear-state clear-large"><Cloud size={16} /> No weather refresh has been recorded for this slate date.</div>}
+          </Panel>
           <div className="health-layout">
             <Panel><SectionHeading eyebrow="Ingest inventory" title="Source freshness" detail="Rows are reported, not estimated." /><div className="health-source-list">{data.sources?.length ? data.sources.map((source) => <HealthSource source={source} key={source.name} />) : <QueryMessage kind="empty" />}</div></Panel>
             <Panel><SectionHeading eyebrow="Data quality queue" title="Issues & mappings" detail="Unresolved items stay visible until cleared." />{data.issues?.length ? <div className="issue-list">{data.issues.map((issue, index) => <IssueRow issue={issue} key={`${issue.label}-${index}`} />)}</div> : <div className="clear-state clear-large"><Check size={16} /> Data quality queue is clear</div>}</Panel>
@@ -511,6 +521,27 @@ function OrchestrationPage() {
     }
     finally { setLoading(false); }
   };
+  const retryWeather = async () => {
+    setLoading(true);
+    setMessageKind('info');
+    setMessage(`Retrying optional weather enrichment for ${date}…`);
+    try {
+      const result = await operationsRequest<WeatherRefreshResult>(`/analyst/refresh/weather?date=${date}`, { method: 'POST' });
+      const coverage = `${result.observationsWritten}/${result.gamesFound} observation(s) written`;
+      setMessageKind(result.status === 'FAILED' ? 'error' : 'info');
+      setMessage(
+        result.status === 'SUCCESS'
+          ? `Weather refresh succeeded for ${date}: ${coverage}. No model, engine, or unrelated ingest work was run.`
+          : `Weather refresh completed with partial coverage for ${date}: ${coverage}; ${result.failures.length} issue(s) recorded. No model, engine, or unrelated ingest work was run.`,
+      );
+    } catch (error) {
+      setMessageKind('error');
+      setMessage(error instanceof Error ? error.message : 'Weather refresh failed. The attempt has been recorded in Data Health.');
+    } finally {
+      await healthQuery.refetch();
+      setLoading(false);
+    }
+  };
   const refreshLedger = () => {
     setLoading(true);
     setMessageKind('info');
@@ -527,6 +558,7 @@ function OrchestrationPage() {
     <ReadinessStrip health={healthQuery.data} />
     <Panel className="mb-6"><div className="flex flex-wrap justify-between gap-3 items-center"><div><Kicker>Operations approval</Kicker><strong>{approvalActive ? `Active · ${Math.ceil(approvalRemaining / 60000)} minute(s) remaining` : 'Routine actions locked'}</strong><p className="text-xs text-muted-foreground mt-1">{approval.detail}</p></div><div className="flex gap-2 flex-wrap"><input className="search-input !w-auto" type="password" value={approvalKey} onChange={(event) => setApprovalKey(event.target.value)} placeholder="Operator approval key" aria-label="Operator approval key" data-testid="input-operations-approval-key" /><button className="button button-dark" disabled={loading || !approvalKey.trim()} onClick={() => void unlock()}>{approvalActive ? 'Renew unlock' : 'Unlock operations'}</button></div></div></Panel>
      <Panel className="mb-6"><div className="flex flex-wrap justify-between gap-3 items-center"><div><Kicker>Schedule policy</Kicker><strong>08:00 ET refresh · freeze 90 minutes before the earliest first pitch</strong><p className="text-xs text-muted-foreground mt-1">Manual runs are recorded separately; feature snapshots remain append-only once frozen.</p></div><div className="flex gap-2 flex-wrap"><button className="button button-quiet" onClick={() => void lateScratchScan()} disabled={loading || !approvalActive}>Scan late scratches</button><button className="button button-quiet" onClick={refreshLedger} disabled={loading}><RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> {loading ? 'Refreshing…' : 'Refresh'}</button><a className="button button-quiet" href={`/api/analyst/export/slate-json?date=${date}`} target="_blank" rel="noreferrer"><Download size={15} /> slate.json</a><a className="button button-quiet" href={`/api/analyst/export/workbook?date=${date}`}><Download size={15} /> Workbook</a></div></div></Panel>
+     <Panel className="mb-6"><div className="flex flex-wrap justify-between gap-3 items-center"><div><Kicker>Optional enrichment</Kicker><strong>Weather retry</strong><p className="text-xs text-muted-foreground mt-1">Retry Open-Meteo forecasts for this Eastern slate date only. It does not rerun engines, training, validation, promotion, or other ingestion.</p>{healthQuery.data?.weatherRefresh && <p className="text-xs text-muted-foreground mt-2">Latest outcome: <strong>{healthQuery.data.weatherRefresh.status}</strong> · {healthQuery.data.weatherRefresh.observationsWritten}/{healthQuery.data.weatherRefresh.gamesFound} observations · {healthQuery.data.weatherRefresh.failures} failure(s)</p>}</div><button className="button button-quiet" disabled={loading || !approvalActive} onClick={() => void retryWeather()} data-testid="button-retry-weather"><Cloud size={15} /> {loading ? 'Retrying…' : 'Retry weather'}</button></div></Panel>
      {message && <div className={`query-message mb-4 ${messageKind === 'error' ? 'query-error' : ''}`} role="status" data-testid="orchestration-message">{messageKind === 'error' ? <AlertTriangle size={16} /> : <Check size={16} />}<div><strong>{messageKind === 'error' ? 'Operator error' : 'Operator note'}</strong><p>{message}</p></div></div>}
     {runs.length === 0 && !loading ? <QueryMessage kind="empty" /> : <div className="space-y-4">
       {runs.map((run) => <Panel key={run.runId} className="p-5" data-testid={`orchestration-run-${run.runId}`}>

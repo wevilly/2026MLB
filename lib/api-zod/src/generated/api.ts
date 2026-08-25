@@ -133,6 +133,12 @@ export const GetAnalystDataHealthQueryParams = zod.object({
 
 export const getAnalystDataHealthResponseSourcesItemAgeMinutesMin = 0;
 
+export const getAnalystDataHealthResponseWeatherRefreshGamesFoundMin = 0;
+
+export const getAnalystDataHealthResponseWeatherRefreshObservationsWrittenMin = 0;
+
+export const getAnalystDataHealthResponseWeatherRefreshFailuresMin = 0;
+
 
 
 export const GetAnalystDataHealthResponse = zod.object({
@@ -221,7 +227,18 @@ export const GetAnalystDataHealthResponse = zod.object({
   "reason": zod.string(),
   "reasons": zod.array(zod.string()),
   "observedAt": zod.coerce.date()
-})
+}),
+  "weatherRefresh": zod.object({
+  "ingestRunId": zod.string().uuid(),
+  "status": zod.enum(['SUCCESS', 'PARTIAL', 'FAILED', 'RUNNING']),
+  "slateDate": zod.coerce.date(),
+  "startedAt": zod.coerce.date(),
+  "finishedAt": zod.coerce.date().nullable(),
+  "gamesFound": zod.number().int().min(getAnalystDataHealthResponseWeatherRefreshGamesFoundMin),
+  "observationsWritten": zod.number().int().min(getAnalystDataHealthResponseWeatherRefreshObservationsWrittenMin),
+  "failures": zod.number().int().min(getAnalystDataHealthResponseWeatherRefreshFailuresMin),
+  "error": zod.string().nullable()
+}).nullable()
 })
 
 
@@ -740,6 +757,40 @@ export const RefreshFantasyProsResponse = zod.object({
   "rowCount": zod.number(),
   "normalizedRowCount": zod.number(),
   "rejectedRowCount": zod.number()
+})
+
+
+/**
+ * @summary Retry optional Open-Meteo weather enrichment for one Eastern MLB slate date
+ */
+export const RefreshWeatherQueryParams = zod.object({
+  "date": zod.date().optional()
+})
+
+export const refreshWeatherResponseGamesFoundMin = 0;
+
+export const refreshWeatherResponseObservationsWrittenMin = 0;
+
+export const refreshWeatherResponseDomedGamesMin = 0;
+
+export const refreshWeatherResponseGamesWithoutGeographyMin = 0;
+
+
+
+export const RefreshWeatherResponse = zod.object({
+  "status": zod.enum(['SUCCESS', 'PARTIAL', 'FAILED']),
+  "slateDate": zod.coerce.date(),
+  "ingestRunId": zod.string().uuid().nullable(),
+  "gamesFound": zod.number().int().min(refreshWeatherResponseGamesFoundMin),
+  "observationsWritten": zod.number().int().min(refreshWeatherResponseObservationsWrittenMin),
+  "domedGames": zod.number().int().min(refreshWeatherResponseDomedGamesMin),
+  "gamesWithoutGeography": zod.number().int().min(refreshWeatherResponseGamesWithoutGeographyMin),
+  "failures": zod.array(zod.object({
+  "scope": zod.string(),
+  "detail": zod.string(),
+  "fatal": zod.boolean()
+})),
+  "error": zod.string().optional()
 })
 
 

@@ -399,6 +399,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/IngestResult"
+  /analyst/refresh/weather:
+    post:
+      operationId: refreshWeather
+      tags: [analyst]
+      summary: Retry optional Open-Meteo weather enrichment for one Eastern MLB slate date
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        "201":
+          description: Weather refresh completed or partially completed without running orchestration or model work
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeatherRefreshResult"
+        "400":
+          description: Invalid slate date
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Weather refresh failed; the persisted result includes failure detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeatherRefreshResult"
   /analyst/refresh/research:
     post:
       operationId: refreshAnalystResearch
@@ -1797,7 +1825,20 @@ components:
         researchHealth: { $ref: "#/components/schemas/ResearchHealth" }
         lastRun: { type: string }
         readiness: { $ref: "#/components/schemas/OperationalReadiness" }
-      required: [selectedDate, timezone, slateState, overall, phase2aReady, readinessDiagnostics, sources, issues, identityCoverage, researchHealth, lastRun, readiness]
+        weatherRefresh:
+          type: ["object", "null"]
+          properties:
+            ingestRunId: { type: string, format: uuid }
+            status: { type: string, enum: [SUCCESS, PARTIAL, FAILED, RUNNING] }
+            slateDate: { type: string, format: date }
+            startedAt: { type: string, format: date-time }
+            finishedAt: { type: ["string", "null"], format: date-time }
+            gamesFound: { type: integer, minimum: 0 }
+            observationsWritten: { type: integer, minimum: 0 }
+            failures: { type: integer, minimum: 0 }
+            error: { type: ["string", "null"] }
+          required: [ingestRunId, status, slateDate, startedAt, finishedAt, gamesFound, observationsWritten, failures, error]
+      required: [selectedDate, timezone, slateState, overall, phase2aReady, readinessDiagnostics, sources, issues, identityCoverage, researchHealth, lastRun, readiness, weatherRefresh]
     ReadinessDiagnostic:
       type: object
       properties:
@@ -1830,6 +1871,30 @@ components:
         normalizedRowCount: { type: number }
         rejectedRowCount: { type: number }
       required: [source, ingestRunId, rowCount, normalizedRowCount, rejectedRowCount]
+    WeatherIngestFailure:
+      type: object
+      additionalProperties: false
+      properties:
+        scope: { type: string }
+        detail: { type: string }
+        fatal: { type: boolean }
+      required: [scope, detail, fatal]
+    WeatherRefreshResult:
+      type: object
+      additionalProperties: false
+      properties:
+        status: { type: string, enum: [SUCCESS, PARTIAL, FAILED] }
+        slateDate: { type: string, format: date }
+        ingestRunId: { type: ["string", "null"], format: uuid }
+        gamesFound: { type: integer, minimum: 0 }
+        observationsWritten: { type: integer, minimum: 0 }
+        domedGames: { type: integer, minimum: 0 }
+        gamesWithoutGeography: { type: integer, minimum: 0 }
+        failures:
+          type: array
+          items: { $ref: "#/components/schemas/WeatherIngestFailure" }
+        error: { type: string }
+      required: [status, slateDate, ingestRunId, gamesFound, observationsWritten, domedGames, gamesWithoutGeography, failures]
     ResearchIngestSource:
       type: object
       properties:

@@ -62,6 +62,21 @@ export function invalidateCache(prefix: string) {
   }
 }
 
+/**
+ * Weather only changes slate-scoped weather-aware reads. Keep this list
+ * explicit so a repaired optional provider cannot evict unrelated players,
+ * dates, or model/control-plane caches.
+ */
+export function invalidateWeatherSlateCaches(slateDate: string) {
+  for (const prefix of [
+    `weather:${slateDate}:`,
+    `game-lab:${slateDate}:`,
+    `market-board:${slateDate}:`,
+  ]) {
+    invalidateCache(prefix);
+  }
+}
+
 export function cacheStatus() {
   removeExpiredEntries();
   return { entries: entries.size, pendingLoads: pendingLoads.size, maxEntries: MAX_ENTRIES };

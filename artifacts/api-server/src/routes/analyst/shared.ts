@@ -341,7 +341,7 @@ export async function sourceBadges(effectiveDate: string) {
   }>(
     `SELECT DISTINCT ON (source_id) source_id, status, effective_date, finished_at, row_count, normalized_row_count, rejected_row_count, http_status, duration_ms, error_message
      FROM ingest_runs
-     WHERE source_id IN ('MLB_OFFICIAL', 'FANTASYPROS', 'STATCAST', 'FANGRAPHS', 'PARK_FACTORS')
+     WHERE source_id IN ('MLB_OFFICIAL', 'FANTASYPROS', 'STATCAST', 'FANGRAPHS', 'PARK_FACTORS', 'OPEN_METEO')
        AND effective_date <= $1
      ORDER BY source_id, effective_date DESC, started_at DESC`,
     [effectiveDate],
@@ -400,10 +400,7 @@ export async function sourceBadges(effectiveDate: string) {
     makeRunBadge("Statcast Search splits", splitRun.rows[0]),
     makeBadge("FANGRAPHS", "FanGraphs", true),
     makeBadge("PARK_FACTORS", "Statcast Park Factors", true),
-    {
-      name: "Weather", status: "NOT CONFIGURED", freshness: "No provider", lastSuccess: null, rowCount: 0,
-      detail: "Optional source; no weather credential is configured.", effectiveDate: null, ageMinutes: null, isCurrentDate: false,
-    },
+    makeBadge("OPEN_METEO", "Weather", true),
   ];
 }
 
@@ -493,7 +490,7 @@ export async function identityCoverage(date: string) {
 }
 
 export async function analystDataHealth(date: string) {
-  const [sources, issueResult, lastRun, coverage, research, slate, workflow, bullpen, marketCandidates] = await Promise.all([
+  const [sources, issueResult, lastRun, coverage, research, slate, workflow, bullpen, marketCandidates, weatherRefresh] = await Promise.all([
     sourceBadges(date),
     pool.query<{ issue_type: string; detail: string; severity: string }>(
       `SELECT ii.issue_type, ii.detail, ii.severity
@@ -521,6 +518,25 @@ export async function analystDataHealth(date: string) {
     ),
     pool.query<{ candidates: number }>(
       "SELECT count(*)::int AS candidates FROM market_research_candidates WHERE slate_date = $1",
+      [date],
+    ),
+    pool.query<{
+      ingest_run_id: string;
+      status: "SUCCESS" | "PARTIAL" | "FAILED" | "RUNNING";
+      effective_date: Date;
+      started_at: string;
+      finished_at: string | null;
+      row_count: number | null;
+      normalized_row_count: number | null;
+      rejected_row_count: number | null;
+      error_message: string | null;
+      metadata: Record<string, unknown>;
+    }>(
+      `SELECT ingest_run_id, status, effective_date, started_at::text, finished_at::text,
+              row_count, normalized_row_count, rejected_row_count, error_message, metadata
+         FROM ingest_runs
+        WHERE source_id = 'OPEN_METEO' AND job_name = 'weather_refresh' AND effective_date = $1
+        ORDER BY started_at DESC LIMIT 1`,
       [date],
     ),
   ]);
@@ -605,6 +621,19 @@ export async function analystDataHealth(date: string) {
     identityCoverage: coverage,
     researchHealth: research,
     lastRun: isoString(lastRun.rows[0]?.finished_at) ?? "No completed ingestion runs recorded",
+    weatherRefresh: weatherRefresh.rows[0]
+      ? {
+        ingestRunId: weatherRefresh.rows[0].ingest_run_id,
+        status: weatherRefresh.rows[0].status,
+        slateDate: dateOnly(weatherRefresh.rows[0].effective_date),
+        startedAt: weatherRefresh.rows[0].started_at,
+        finishedAt: weatherRefresh.rows[0].finished_at,
+        gamesFound: weatherRefresh.rows[0].row_count ?? 0,
+        observationsWritten: weatherRefresh.rows[0].normalized_row_count ?? 0,
+        failures: weatherRefresh.rows[0].rejected_row_count ?? 0,
+        error: weatherRefresh.rows[0].error_message,
+      }
+      : null,
   };
 }
 

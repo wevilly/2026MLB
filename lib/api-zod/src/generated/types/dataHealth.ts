@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { DataHealthSlateState } from './dataHealthSlateState';
+import type { DataHealthWeatherRefresh } from './dataHealthWeatherRefresh';
 import type { HealthIssue } from './healthIssue';
 import type { IdentityCoverage } from './identityCoverage';
 import type { OperationalReadiness } from './operationalReadiness';
@@ -26,4 +27,6 @@ export interface DataHealth {
   researchHealth: ResearchHealth;
   lastRun: string;
   readiness: OperationalReadiness;
+  /** @nullable */
+  weatherRefresh: DataHealthWeatherRefresh;
 }

@@ -149,6 +149,36 @@ export const DataHealthSlateState = {
   POPULATED: 'POPULATED',
 } as const;
 
+export type DataHealthWeatherRefreshStatus = typeof DataHealthWeatherRefreshStatus[keyof typeof DataHealthWeatherRefreshStatus];
+
+
+export const DataHealthWeatherRefreshStatus = {
+  SUCCESS: 'SUCCESS',
+  PARTIAL: 'PARTIAL',
+  FAILED: 'FAILED',
+  RUNNING: 'RUNNING',
+} as const;
+
+/**
+ * @nullable
+ */
+export type DataHealthWeatherRefresh = {
+  ingestRunId: string;
+  status: DataHealthWeatherRefreshStatus;
+  slateDate: string;
+  startedAt: string;
+  /** @nullable */
+  finishedAt: string | null;
+  /** @minimum 0 */
+  gamesFound: number;
+  /** @minimum 0 */
+  observationsWritten: number;
+  /** @minimum 0 */
+  failures: number;
+  /** @nullable */
+  error: string | null;
+} | null;
+
 export type ReadinessDiagnosticStatus = typeof ReadinessDiagnosticStatus[keyof typeof ReadinessDiagnosticStatus];
 
 
@@ -237,6 +267,8 @@ export interface DataHealth {
   researchHealth: ResearchHealth;
   lastRun: string;
   readiness: OperationalReadiness;
+  /** @nullable */
+  weatherRefresh: DataHealthWeatherRefresh;
 }
 
 export interface ConnectionStatus {
@@ -258,6 +290,38 @@ export interface IngestResult {
   rowCount: number;
   normalizedRowCount: number;
   rejectedRowCount: number;
+}
+
+export interface WeatherIngestFailure {
+  scope: string;
+  detail: string;
+  fatal: boolean;
+}
+
+export type WeatherRefreshResultStatus = typeof WeatherRefreshResultStatus[keyof typeof WeatherRefreshResultStatus];
+
+
+export const WeatherRefreshResultStatus = {
+  SUCCESS: 'SUCCESS',
+  PARTIAL: 'PARTIAL',
+  FAILED: 'FAILED',
+} as const;
+
+export interface WeatherRefreshResult {
+  status: WeatherRefreshResultStatus;
+  slateDate: string;
+  /** @nullable */
+  ingestRunId: string | null;
+  /** @minimum 0 */
+  gamesFound: number;
+  /** @minimum 0 */
+  observationsWritten: number;
+  /** @minimum 0 */
+  domedGames: number;
+  /** @minimum 0 */
+  gamesWithoutGeography: number;
+  failures: WeatherIngestFailure[];
+  error?: string;
 }
 
 export type ResearchIngestSourceStatus = typeof ResearchIngestSourceStatus[keyof typeof ResearchIngestSourceStatus];
@@ -2932,6 +2996,10 @@ date?: string;
 };
 
 export type RefreshFantasyProsParams = {
+date?: string;
+};
+
+export type RefreshWeatherParams = {
 date?: string;
 };
 

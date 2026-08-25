@@ -43,6 +43,7 @@
     "test:settlement-policy": "node --test tests/settlement-policy.test.ts",
     "test:bullpen-freshness": "node --test tests/bullpen-freshness.test.ts",
     "test:park-weather": "node --test tests/park-weather.test.ts",
+    "test:weather-retry": "node --test tests/weather-refresh-retry.test.mjs",
     "test:analyst-routes": "node --test tests/analyst-routes.test.ts",
     "test:handedness-integrity": "node --test tests/handedness-integrity.test.ts",
     "test:suite-coverage": "node --test tests/test-suite-coverage.test.ts",

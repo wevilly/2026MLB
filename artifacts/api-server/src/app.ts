@@ -62,7 +62,8 @@ app.use((req, res, next) => {
   const isWrite = !["GET", "HEAD", "OPTIONS"].includes(req.method);
   const isRoutineOperation = /^\/api\/analyst\/(?:orchestration|refresh\/|market-board\/refresh)/.test(req.path);
   const isUnlock = req.path === "/api/analyst/operations/operator-session" || req.path === "/api/analyst/ai/operator-session";
-  const requireOperatorApproval = isProduction || process.env.REQUIRE_OPERATOR_APPROVAL === "true";
+  const weatherRetryRequiresApproval = req.path === "/api/analyst/refresh/weather";
+  const requireOperatorApproval = weatherRetryRequiresApproval || isProduction || process.env.REQUIRE_OPERATOR_APPROVAL === "true";
   if (!requireOperatorApproval || !isWrite || isUnlock) return next();
   const secret = process.env.AI_ANALYST_OPERATOR_APPROVAL_KEY;
   const requiredCapability = isRoutineOperation ? "OPERATIONS" : "AI_REVIEW";
@@ -87,7 +88,10 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
     res.on("finish", () => {
-      if (res.statusCode >= 200 && res.statusCode < 400) invalidateCache("");
+      // Weather retries perform their own date-scoped invalidation. All other
+      // writes retain the existing global invalidation behavior.
+      const isWeatherRetry = req.path === "/api/analyst/refresh/weather";
+      if (!isWeatherRetry && res.statusCode >= 200 && res.statusCode < 400) invalidateCache("");
     });
   }
   next();

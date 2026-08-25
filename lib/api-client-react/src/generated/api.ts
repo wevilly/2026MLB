@@ -132,6 +132,7 @@ import type {
   RefreshMlbOfficialParams,
   RefreshOfficialSettlement400,
   RefreshOfficialSettlementParams,
+  RefreshWeatherParams,
   ResearchIngestResult,
   ResearchIngestSource,
   ResearchLab,
@@ -150,6 +151,7 @@ import type {
   WALKEngineResult,
   WalkForwardValidationList,
   WalkForwardValidationResult,
+  WeatherRefreshResult,
   WriteFeatureStoreOutcome400,
   WriteHistoricalOutcomeResult,
   XBHEngineResult
@@ -1798,6 +1800,84 @@ export const useRefreshFantasyPros = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getRefreshFantasyProsMutationOptions(options));
+    }
+
+export const getRefreshWeatherUrl = (params?: RefreshWeatherParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/weather?${stringifiedParams}` : `/api/analyst/refresh/weather`
+}
+
+/**
+ * @summary Retry optional Open-Meteo weather enrichment for one Eastern MLB slate date
+ */
+export const refreshWeather = async (params?: RefreshWeatherParams, options?: Parameters<typeof customFetch>[1]): Promise<WeatherRefreshResult> => {
+
+  return customFetch<WeatherRefreshResult>(getRefreshWeatherUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshWeatherMutationOptions = <TError = ErrorType<ErrorResponse | WeatherRefreshResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshWeather>>, TError,{params?: RefreshWeatherParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshWeather>>, TError,{params?: RefreshWeatherParams}, TContext> => {
+
+const mutationKey = ['refreshWeather'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshWeather>>, {params?: RefreshWeatherParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshWeather(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshWeatherMutationResult = NonNullable<Awaited<ReturnType<typeof refreshWeather>>>
+
+    export type RefreshWeatherMutationError = ErrorType<ErrorResponse | WeatherRefreshResult>
+
+    /**
+ * @summary Retry optional Open-Meteo weather enrichment for one Eastern MLB slate date
+ */
+export const useRefreshWeather = <TError = ErrorType<ErrorResponse | WeatherRefreshResult>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshWeather>>, TError,{params?: RefreshWeatherParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshWeather>>,
+        TError,
+        {params?: RefreshWeatherParams},
+        TContext
+      > => {
+      return useMutation(getRefreshWeatherMutationOptions(options));
     }
 
 export const getRefreshAnalystResearchUrl = (params?: RefreshAnalystResearchParams,) => {
