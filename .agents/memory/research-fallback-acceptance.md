@@ -7,4 +7,4 @@ Use Ballpark Pal only for same-day simulated counting-stat averages and game-lev
 
 **Why:** Public direct retrieval was too unreliable for daily operations, and richer provider fields would violate the research-only product boundary.
 
-**How to apply:** Assess daily research freshness and coverage through same-day Ballpark Pal runs. Explicitly mark BvP, arsenal, expected-stat, and handedness evidence unavailable rather than synthesizing replacements or reading stale legacy snapshots. Historical refreshes must not issue new direct-source requests.
+**How to apply:** Assess daily research freshness and coverage through same-day Ballpark Pal runs. Keep daily player, pitcher, and park reads isolated per official game so doubleheaders cannot inherit another game's projections. Explicitly mark BvP, arsenal, expected-stat, and handedness evidence unavailable rather than synthesizing replacements or reading stale legacy snapshots. Historical refreshes must not issue new direct-source requests.

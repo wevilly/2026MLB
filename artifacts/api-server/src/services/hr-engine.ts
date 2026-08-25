@@ -281,7 +281,7 @@ async function getPitcherFeatures(playerId: number, gamePk: number): Promise<Fea
   return map;
 }
 
-async function getParkFeatures(venueId: number, gamePk: number): Promise<FeatureMap> {
+async function getParkFeatures(gamePk: number): Promise<FeatureMap> {
   const result = await pool.query<{
     metric_key: string; value: string | null; batter_side: string | null;
   }>(
@@ -289,9 +289,9 @@ async function getParkFeatures(venueId: number, gamePk: number): Promise<Feature
        f.metric_key, f.value::text, f.batter_side
      FROM park_research_features f
      JOIN park_research_snapshots s ON s.park_research_snapshot_id = f.park_research_snapshot_id
-       WHERE s.venue_id = $1 AND s.source_id = 'BALLPARK_PAL' AND (s.provenance->>'gamePk')::bigint = $2
+       WHERE s.source_id = 'BALLPARK_PAL' AND (s.provenance->>'gamePk')::bigint = $1
      ORDER BY f.metric_key, f.batter_side, s.season DESC, s.retrieved_at DESC`,
-    [venueId, gamePk],
+    [gamePk],
   );
   const map: FeatureMap = new Map();
   for (const row of result.rows) {
@@ -579,14 +579,19 @@ function computeEvidenceScore(
 
   let score = 0;
 
-  // The active daily provider supplies simulated game-average home runs. It is
-  // primary HR evidence; Statcast contact metrics below remain optional legacy
-  // context and are not synthesized when unavailable.
+  // API-backed daily mode: only permitted daily averages and context are
+  // allowed to influence an active rank. Do not fall through to retired
+  // Statcast contact metrics when the direct HR average is available.
   if (projectedHomeRuns !== null) {
     if (projectedHomeRuns >= 0.45) score += 6;
     else if (projectedHomeRuns >= 0.30) score += 4;
     else if (projectedHomeRuns >= 0.18) score += 2;
     else if (projectedHomeRuns < 0.08) score -= 1;
+    if (battingOrder !== null) score += battingOrder <= 4 ? 1 : battingOrder >= 7 ? -0.5 : 0;
+    const projectedPitcherHRA = n(pitcher, "home_runs_allowed");
+    if (projectedPitcherHRA !== null) score += projectedPitcherHRA >= 0.35 ? 2 : projectedPitcherHRA >= 0.20 ? 1 : 0;
+    if (hrFactor !== null) score += hrFactor >= 110 ? 2 : hrFactor >= 105 ? 1 : 0;
+    return score + weatherAdjustment("HR", weather).adjustment;
   }
 
   // Batting order (HR opportunity)
@@ -997,7 +1002,7 @@ async function writeEvidenceBlocks(
          value = EXCLUDED.value, direction = EXCLUDED.direction, strength = EXCLUDED.strength,
          narrative = EXCLUDED.narrative, raw_evidence = EXCLUDED.raw_evidence, retrieved_at = EXCLUDED.retrieved_at`,
       [candidateId, b.blockType, HR_ENGINE_SOURCE, b.metricKey, b.metricLabel,
-       b.value, b.unit, b.sampleSize, b.direction, b.strength, b.narrative, JSON.stringify(b.rawEvidence)],
+       b.value, b.unit, b.sampleSize === null ? null : Math.round(b.sampleSize), b.direction, b.strength, b.narrative, JSON.stringify(b.rawEvidence)],
     );
   }
 }
@@ -1119,13 +1124,11 @@ export async function runHREngine(slateDate: string): Promise<HREngineResult> {
         pitcherCache.get(pitcherKey)!.forEach((v, k) => pitcherFeatures.set(k, v));
       }
 
-      const parkKey = `${player.gamePk}:${player.venueId ?? "none"}`;
-      if (player.venueId !== null && !parkCache.has(parkKey)) {
-        parkCache.set(parkKey, await getParkFeatures(player.venueId, player.gamePk));
+      const parkKey = String(player.gamePk);
+      if (!parkCache.has(parkKey)) {
+        parkCache.set(parkKey, await getParkFeatures(player.gamePk));
       }
-      const parkFeatures = player.venueId !== null
-        ? (parkCache.get(parkKey) ?? new Map<string, N>())
-        : new Map<string, N>();
+      const parkFeatures = parkCache.get(parkKey) ?? new Map<string, N>();
 
       const bullpenKey = `${player.oppTeamId}:${slateDate}`;
       if (!bullpenCache.has(bullpenKey)) {

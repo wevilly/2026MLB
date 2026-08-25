@@ -490,7 +490,7 @@ async function getPitcherFeatures(playerId: number, gamePk: number): Promise<Fea
   return map;
 }
 
-async function getParkFeatures(venueId: number, gamePk: number): Promise<FeatureMap> {
+async function getParkFeatures(gamePk: number): Promise<FeatureMap> {
   const result = await pool.query<{
     metric_key: string; value: string | null; batter_side: string | null;
   }>(
@@ -498,9 +498,9 @@ async function getParkFeatures(venueId: number, gamePk: number): Promise<Feature
        f.metric_key, f.value::text, f.batter_side
      FROM park_research_features f
      JOIN park_research_snapshots s ON s.park_research_snapshot_id = f.park_research_snapshot_id
-       WHERE s.venue_id = $1 AND s.source_id = 'BALLPARK_PAL' AND (s.provenance->>'gamePk')::bigint = $2
+       WHERE s.source_id = 'BALLPARK_PAL' AND (s.provenance->>'gamePk')::bigint = $1
      ORDER BY f.metric_key, f.batter_side, s.season DESC, s.retrieved_at DESC`,
-    [venueId, gamePk],
+    [gamePk],
   );
   const map: FeatureMap = new Map();
   for (const row of result.rows) {
@@ -677,6 +677,9 @@ function computeEvidenceScore(
     if (projectedTotalBases >= 2.0) score += 4;
     else if (projectedTotalBases >= 1.5) score += 3;
     else if (projectedTotalBases >= 1.0) score += 1;
+    score += opportunityScore(battingOrder);
+    score += computeParkContext(park, side).adjustment;
+    return score + weatherAdjustment("TB", weather).adjustment;
   }
 
   // Opportunity, scored on the continuous expected plate appearance value
@@ -1128,7 +1131,7 @@ export async function writeEvidenceBlocks(
     const placeholders = batch.map(({ candidateId, block }, rowIndex) => {
       values.push(
         candidateId, block.blockType, TB_ENGINE_SOURCE, block.metricKey, block.metricLabel,
-        block.value, block.unit, block.sampleSize, block.direction, block.strength,
+        block.value, block.unit, block.sampleSize === null ? null : Math.round(block.sampleSize), block.direction, block.strength,
         block.narrative, JSON.stringify(block.rawEvidence),
       );
       const base = rowIndex * EVIDENCE_BLOCK_COLUMNS;
@@ -1280,11 +1283,11 @@ export async function runTBEngine(slateDate: string): Promise<TBEngineResult> {
         pitcherCache.get(pitcherKey)!.forEach((v, k) => pitcherFeatures.set(k, v));
       }
 
-      const parkKey = `${player.gamePk}:${player.venueId ?? "none"}`;
-      if (player.venueId !== null && !parkCache.has(parkKey)) {
-        parkCache.set(parkKey, await getParkFeatures(player.venueId, player.gamePk));
+      const parkKey = String(player.gamePk);
+      if (!parkCache.has(parkKey)) {
+        parkCache.set(parkKey, await getParkFeatures(player.gamePk));
       }
-      const parkFeatures = player.venueId !== null ? (parkCache.get(parkKey) ?? new Map()) : new Map<string, N>();
+      const parkFeatures = parkCache.get(parkKey) ?? new Map<string, N>();
 
       const bullpenKey = `${player.oppTeamId}:${slateDate}`;
       if (!bullpenCache.has(bullpenKey)) {

@@ -308,7 +308,9 @@ async function executeRun(runId: string, slateDate: string) {
       try {
         const health = await researchHealth(slateDate);
         const issues = Number(health.identityQuarantines ?? 0) + Number(health.metricDefinitionConflicts ?? 0)
-          + Number(health.staleWindows ?? 0) + Number(health.identityOrEligibilityGaps ?? 0);
+          + Number(health.staleWindows ?? 0) + Number(health.identityOrEligibilityGaps ?? 0)
+          + Number(health.hitterProfilesMissingEvidence ?? 0) + Number(health.pitcherProfilesMissingEvidence ?? 0)
+          + Number(health.parkVenueCoverageGaps ?? 0) + Number(health.sourceThresholdOrUnavailable ?? 0);
         healthStep.status = issues ? "WARNING" : "SUCCESS";
         healthStep.detail = issues ? `${issues} research or identity health warning(s)` : "freshness and identity coverage passed";
       } catch (error) {

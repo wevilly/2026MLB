@@ -244,6 +244,55 @@ async function persistPark(ingestRunId: string, rawPayloadId: string, effectiveD
   return true;
 }
 
+async function coverageReceipt(ingestRunId: string, effectiveDate: string) {
+  const result = await pool.query<{
+    game_gaps: number; hitter_gaps: number; pitcher_gaps: number; park_gaps: number;
+  }>(
+    `WITH expected_games AS (
+       SELECT game_pk FROM games WHERE game_date = $1
+     ), expected_hitters AS (
+       SELECT DISTINCT g.game_pk, le.player_id
+       FROM lineup_entries le
+       JOIN lineup_snapshots ls ON ls.lineup_snapshot_id = le.lineup_snapshot_id
+       JOIN games g ON g.game_pk = ls.game_pk
+       WHERE g.game_date = $1 AND le.player_id IS NOT NULL
+     ), expected_pitchers AS (
+       SELECT DISTINCT g.game_pk, s.player_id
+       FROM starters s JOIN games g ON g.game_pk = s.game_pk
+       WHERE g.game_date = $1 AND s.player_id IS NOT NULL
+     )
+     SELECT
+       (SELECT count(*)::int FROM expected_games g WHERE
+         NOT EXISTS (SELECT 1 FROM player_research_snapshots ps
+           WHERE ps.ingest_run_id = $2 AND (ps.provenance->>'gamePk')::bigint = g.game_pk)
+         OR NOT EXISTS (SELECT 1 FROM pitcher_research_snapshots ps
+           WHERE ps.ingest_run_id = $2 AND (ps.provenance->>'gamePk')::bigint = g.game_pk)
+       ) AS game_gaps,
+       (SELECT count(*)::int FROM expected_hitters h WHERE NOT EXISTS (
+         SELECT 1 FROM player_research_snapshots ps
+         WHERE ps.ingest_run_id = $2 AND ps.player_id = h.player_id
+           AND (ps.provenance->>'gamePk')::bigint = h.game_pk
+       )) AS hitter_gaps,
+       (SELECT count(*)::int FROM expected_pitchers p WHERE NOT EXISTS (
+         SELECT 1 FROM pitcher_research_snapshots ps
+         WHERE ps.ingest_run_id = $2 AND ps.player_id = p.player_id
+           AND (ps.provenance->>'gamePk')::bigint = p.game_pk
+       )) AS pitcher_gaps,
+       (SELECT count(*)::int FROM expected_games g WHERE NOT EXISTS (
+         SELECT 1 FROM park_research_snapshots ps
+         WHERE ps.ingest_run_id = $2 AND (ps.provenance->>'gamePk')::bigint = g.game_pk
+       )) AS park_gaps`,
+    [effectiveDate, ingestRunId],
+  );
+  const row = result.rows[0] ?? { game_gaps: 0, hitter_gaps: 0, pitcher_gaps: 0, park_gaps: 0 };
+  return {
+    gameGaps: Number(row.game_gaps),
+    hitterGaps: Number(row.hitter_gaps),
+    pitcherGaps: Number(row.pitcher_gaps),
+    parkGaps: Number(row.park_gaps),
+  };
+}
+
 export async function ingestBallparkPalResearch(effectiveDate: string) {
   await pool.query(
     `INSERT INTO source_registry (source_id,name,source_type,base_url,expected_freshness_minutes,notes)
@@ -268,8 +317,15 @@ export async function ingestBallparkPalResearch(effectiveDate: string) {
     const games = responseRows(gamesResponse.payload).map(safeGame).filter((game): game is ProviderGame => game !== null);
     for (const game of games) {
       const canonical = await pool.query<{ game_pk: number }>(
-        `SELECT game_pk FROM games WHERE game_date = $1 AND away_team_id = $2 AND home_team_id = $3
-         ORDER BY game_pk LIMIT 1`,
+        `SELECT game_pk FROM games
+         WHERE game_date = $1
+           AND ((away_team_id = $2 AND home_team_id = $3) OR (away_team_id = $3 AND home_team_id = $2))
+           AND 1 = (
+             SELECT count(*) FROM games same_pair
+             WHERE same_pair.game_date = $1
+               AND ((same_pair.away_team_id = $2 AND same_pair.home_team_id = $3)
+                 OR (same_pair.away_team_id = $3 AND same_pair.home_team_id = $2))
+           )`,
         [effectiveDate, game.awayTeamId, game.homeTeamId],
       );
       game.gamePk = canonical.rows[0]?.game_pk ?? null;
@@ -314,22 +370,28 @@ export async function ingestBallparkPalResearch(effectiveDate: string) {
         }
       }
     }
-    const status = rowCount === 0 ? "PARTIAL" : rejected ? "PARTIAL" : "SUCCESS";
+    const coverage = await coverageReceipt(ingestRunId, effectiveDate);
+    const coverageGaps = coverage.gameGaps + coverage.hitterGaps + coverage.pitcherGaps + coverage.parkGaps;
+    const status = rowCount === 0 || rejected || coverageGaps ? "PARTIAL" : "SUCCESS";
     const noDataNote = rowCount === 0
       ? "Ballpark Pal returned no daily records for the requested date. Daily-only provider data is unavailable rather than backfilled from retired sources."
       : null;
+    const coverageNote = coverageGaps
+      ? `Daily coverage is incomplete: ${coverage.gameGaps} game, ${coverage.hitterGaps} hitter, ${coverage.pitcherGaps} pitcher, and ${coverage.parkGaps} park gap(s). The run cannot support an operational freeze.`
+      : null;
     await pool.query(
       `UPDATE ingest_runs SET status=$2,finished_at=now(),row_count=$3,normalized_row_count=$4,rejected_row_count=$5,http_status=$6,duration_ms=$7,metadata=metadata || $8::jsonb WHERE ingest_run_id=$1`,
-      [ingestRunId, status, rowCount, normalized, rejected, httpStatus, Date.now() - started, JSON.stringify({ gameReceiptRawPayloadId: gamesRaw, rawPayloadsFiltered: true, noData: rowCount === 0 })],
+      [ingestRunId, status, rowCount, normalized, rejected, httpStatus, Date.now() - started, JSON.stringify({ gameReceiptRawPayloadId: gamesRaw, rawPayloadsFiltered: true, noData: rowCount === 0, coverage })],
     );
     return {
       status: status as "SUCCESS" | "PARTIAL",
-      sources: [{ source: "Ballpark Pal", ingestRunId, rowCount, normalizedRowCount: normalized, rejectedRowCount: rejected, status, error: noDataNote }],
+      sources: [{ source: "Ballpark Pal", ingestRunId, rowCount, normalizedRowCount: normalized, rejectedRowCount: rejected, status, error: noDataNote ?? coverageNote }],
       quarantinedRows: 0,
       notes: [
         "Ballpark Pal daily-only counting-stat averages and park multipliers were retained with filtered raw-payload lineage.",
         "Probabilities, odds, implied odds, matchup probability fields, fantasy fields, pitch-level metrics, expected stats, and historical projections were excluded or marked unavailable.",
         ...noDataNote ? [noDataNote] : [],
+        ...coverageNote ? [coverageNote] : [],
       ],
     };
   } catch (error) {

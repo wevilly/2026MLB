@@ -260,7 +260,7 @@ async function getPitcherFeatures(playerId: number, gamePk: number): Promise<Fea
   return map;
 }
 
-async function getParkFeatures(venueId: number, gamePk: number): Promise<FeatureMap> {
+async function getParkFeatures(gamePk: number): Promise<FeatureMap> {
   const result = await pool.query<{
     metric_key: string; value: string | null; batter_side: string | null;
   }>(
@@ -268,9 +268,9 @@ async function getParkFeatures(venueId: number, gamePk: number): Promise<Feature
        f.metric_key, f.value::text, f.batter_side
      FROM park_research_features f
      JOIN park_research_snapshots s ON s.park_research_snapshot_id = f.park_research_snapshot_id
-       WHERE s.venue_id = $1 AND s.source_id = 'BALLPARK_PAL' AND (s.provenance->>'gamePk')::bigint = $2
+       WHERE s.source_id = 'BALLPARK_PAL' AND (s.provenance->>'gamePk')::bigint = $1
      ORDER BY f.metric_key, f.batter_side, s.season DESC, s.retrieved_at DESC`,
-    [venueId, gamePk],
+    [gamePk],
   );
   const map: FeatureMap = new Map();
   for (const row of result.rows) {
@@ -449,6 +449,18 @@ function computeEvidenceScore(
   const pitcherBBPct  = n(pitcher, pk("bb_percent", side)) ?? n(pitcher, "bb_percent");
 
   let score = 0;
+
+  // The daily simulated walk rate is active market evidence. Unsupported
+  // chase/pitch-count fields cannot alter this API-backed rank.
+  if (hitterBBPct !== null) {
+    if (hitterBBPct >= 16.0) score += 4;
+    else if (hitterBBPct >= 12.0) score += 3;
+    else if (hitterBBPct >= 9.0) score += 2;
+    else if (hitterBBPct >= 7.0) score += 1;
+    if (battingOrder !== null) score += battingOrder <= 2 ? 2 : battingOrder <= 4 ? 1.5 : battingOrder <= 6 ? 0.5 : -1;
+    if (pitcherBBPct !== null) score += pitcherBBPct >= 12 ? 3 : pitcherBBPct >= 9 ? 2 : pitcherBBPct >= 7 ? 1 : pitcherBBPct <= 4 ? -1 : 0;
+    return score + weatherAdjustment("WALK", weather).adjustment;
+  }
 
   // Batting order (PA opportunity — moderate weight for Walk vs TB)
   if (battingOrder !== null) {
@@ -786,7 +798,7 @@ async function writeEvidenceBlocks(
          value = EXCLUDED.value, direction = EXCLUDED.direction, strength = EXCLUDED.strength,
          narrative = EXCLUDED.narrative, raw_evidence = EXCLUDED.raw_evidence, retrieved_at = EXCLUDED.retrieved_at`,
       [candidateId, b.blockType, WALK_ENGINE_SOURCE, b.metricKey, b.metricLabel,
-       b.value, b.unit, b.sampleSize, b.direction, b.strength, b.narrative, JSON.stringify(b.rawEvidence)],
+       b.value, b.unit, b.sampleSize === null ? null : Math.round(b.sampleSize), b.direction, b.strength, b.narrative, JSON.stringify(b.rawEvidence)],
     );
   }
 }
@@ -908,13 +920,11 @@ export async function runWALKEngine(slateDate: string): Promise<WALKEngineResult
         pitcherCache.get(pitcherKey)!.forEach((v, k) => pitcherFeatures.set(k, v));
       }
 
-      const parkKey = `${player.gamePk}:${player.venueId ?? "none"}`;
-      if (player.venueId !== null && !parkCache.has(parkKey)) {
-        parkCache.set(parkKey, await getParkFeatures(player.venueId, player.gamePk));
+      const parkKey = String(player.gamePk);
+      if (!parkCache.has(parkKey)) {
+        parkCache.set(parkKey, await getParkFeatures(player.gamePk));
       }
-      const parkFeatures = player.venueId !== null
-        ? (parkCache.get(parkKey) ?? new Map<string, N>())
-        : new Map<string, N>();
+      const parkFeatures = parkCache.get(parkKey) ?? new Map<string, N>();
 
       const bullpenKey = `${player.oppTeamId}:${slateDate}`;
       if (!bullpenCache.has(bullpenKey)) {
