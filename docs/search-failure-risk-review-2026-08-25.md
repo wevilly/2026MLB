@@ -124,22 +124,63 @@ two disagree, so a plain "today" search was labelled
 fall forward — for the current day. Four hours a night, in the window that
 matters most for a slate. Fixed by comparing against the same clock.
 
-### 3.3 `pnpm run test:all` has 31 failing tests on `main` — HIGH
+### 3.3 Eight tests were asserting against code that had moved — MEDIUM
 
-Not a search risk, but it undercuts every guarantee in the report. On a clean
-checkout of `main`, `test:all` is 300 tests / 210 pass / **31 fail**; `test:unit`
-is fully green. The failures are concentrated in the `phase-*-acceptance` files
-and assert against source text that has since moved (for example
-`AND ls.source_id = 'FANTASYPROS'`, which the lineup-source refactor replaced
-with the shared precedence filter).
+On a clean checkout of `main`, `pnpm run test:all` was 300 tests / 210 pass /
+**31 fail**, while `test:unit` was fully green.
 
-The failure set is byte-identical before and after this change set — verified by
-diffing the two runs — so nothing here caused or fixed any of them. But
-`tests/test-suite-coverage.test.ts` exists precisely because "a test that never
-runs is worse than no test, because it reads as coverage". Thirty-one tests that
-run and fail read the same way. They should be repaired or retired.
+An earlier revision of this document said those 31 were stale assertions that
+should be repaired or retired. That was wrong, and the correction matters
+because it changes what to do about them. Grouping the failures by cause:
 
----
+- **23 need infrastructure this container does not have.** Five
+  `phase-*-acceptance.test.mjs` files throw `DATABASE_URL must be set` before
+  they load; the rest fail on `connect ECONNREFUSED 127.0.0.1:5432` or
+  `fetch failed`. They are live integration tests against a real Postgres and a
+  running API. Nothing is wrong with them. `test:all` simply cannot pass without
+  a provisioned database and a started API, which is worth stating in the
+  runbook so the result is not read as breakage.
+- **8 were genuine, and are fixed here.** All eight asserted against source text
+  that had moved.
+
+Of the eight, seven were in `tests/data-foundation.test.mjs`, which reads
+`artifacts/api-server/src/routes/analyst.ts`. Task 5.2 split that file into
+`routes/analyst/*.ts` and left the old path as a mount barrel, so those
+assertions had been reading a file of imports. This is precisely the defect
+`tests/test-suite-coverage.test.ts` was written about — and that guard could not
+catch it, because it checks that a test is *run* by some script, not that the
+path it reads still exists. The file now reads the whole `routes/analyst/`
+directory, so a future split cannot blind it again. Every invariant it checks
+was verified still present in the split modules first: the code was correct
+throughout, only the test was looking in the wrong place.
+
+Two of the eight were not stale paths and needed judgement:
+
+- **"pregame research never falls back to MLB…" asserted an invariant the
+  project deliberately reversed.** It required every engine to pin
+  `source_id = 'FANTASYPROS'` and never select `MLB_OFFICIAL`. Task 2.7 reversed
+  exactly that: `services/lineup-sources.ts` now ranks `MLB_OFFICIAL POSTED` —
+  the card the club actually submitted — above both FantasyPros states, because
+  a forecast should not outrank a submitted card and because pinning one source
+  meant a missing feed silently produced no candidates. `tests/lineup-sources.test.ts`
+  already asserts the new rule and is green, so this test could only have been
+  made to pass by reverting Task 2.7. Retired in place, with the reasoning and a
+  pointer to its replacement; its one still-valid clause (no engine ranks
+  `UPDATED` snapshots) kept as its own test.
+- **A Phase 9B assertion was pinned to a code shape, not a behaviour.** It
+  matched the literal ternary `market === "WALK" ? line.walks : line.homeRuns`.
+  WALK grading later grew `WALK_SETTLEMENT_POLICY`, making intentional walks and
+  hit-by-pitch explicit, so the ternary became an if/else chain and the
+  assertion failed on a change that made settlement *more* correct. Rewritten to
+  assert the behaviour it was protecting.
+
+`tests/data-foundation.test.mjs` was also added to `test:unit`. It needs no
+database, and it had been reachable only through `test:all` — a suite that
+cannot pass without infrastructure, so its failures were invisible in the one
+suite anybody can run quickly.
+
+`test:all` is now 324 tests / 242 pass / 23 fail, and every remaining failure is
+a missing database or a missing API.
 
 ## 4. What this change set does not address
 
@@ -151,13 +192,15 @@ Named so they are not mistaken for closed:
 - **S-25**, off-days modelled as failed ingest.
 - **S-27**, raw payload retention.
 - **S-15**, response-enum strictness — diagnosis improved, contract deliberately unchanged.
-- The 31 pre-existing test failures in §3.3.
+- Running `test:all` against a provisioned database and a started API. The 23
+  remaining failures are environmental and cannot be settled here, so those
+  suites are unverified rather than passing.
 
 ## 5. Verification
 
 - `pnpm run typecheck` — clean.
-- `pnpm run test:unit` — 221/221 pass (was 197/197; +24 from `tests/search-failure-remediation.test.ts`).
-- `pnpm run test:all` — 234 pass / 31 fail, against a baseline of 210 pass / 31 fail. Identical failure set.
+- `pnpm run test:unit` — 238/238 pass (was 197/197: +24 from `tests/search-failure-remediation.test.ts`, +17 from adding `tests/data-foundation.test.mjs` to the suite).
+- `pnpm run test:all` — 242 pass / 23 fail, against a baseline of 210 pass / 31 fail. All 23 remaining failures are a missing database or a missing API; no assertion failures remain.
 - `pnpm --filter @workspace/api-spec run codegen` — regenerated; verified idempotent before and after the spec edit.
 
 No live database or running API was available in this environment, so the SQL

@@ -7,6 +7,27 @@ const root = process.cwd();
 const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf8"));
 const readText = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
 
+/**
+ * The analyst route surface, as one string.
+ *
+ * These assertions used to read artifacts/api-server/src/routes/analyst.ts.
+ * Task 5.2 split that file into routes/analyst/*.ts and left the old path as a
+ * mount barrel, so every `routes.includes(...)` below started reading a file of
+ * imports and passing or failing for the wrong reason. This is the same defect
+ * tests/test-suite-coverage.test.ts was written about, in a file that suite
+ * does not catch: it checks that a test is RUN by some script, not that the
+ * path it reads still exists.
+ *
+ * Reading the directory means a future split cannot silently blind them again.
+ */
+const ANALYST_ROUTES_DIR = "artifacts/api-server/src/routes/analyst";
+const readRoutes = () => {
+  const modules = fs.readdirSync(path.join(root, ANALYST_ROUTES_DIR))
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => readText(path.join(ANALYST_ROUTES_DIR, name)));
+  return [readText("artifacts/api-server/src/routes/analyst.ts"), ...modules].join("\n");
+};
+
 function allFiles(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const filePath = path.join(directory, entry.name);
@@ -54,7 +75,7 @@ test("official and FantasyPros lineup snapshot deduplication binds every checksu
 });
 
 test("Round Robin pregame lineage uses FantasyPros confirmed then projected snapshots only", () => {
-  const route = readText("artifacts/api-server/src/routes/analyst.ts");
+  const route = readRoutes();
   const comparator = readText("artifacts/api-server/src/services/round-robin-comparison.ts");
   assert.ok(route.includes("AND ls.source_id = 'FANTASYPROS'"));
   assert.ok(route.includes("AND ls.state IN ('CONFIRMED', 'PROJECTED')"));
@@ -65,13 +86,33 @@ test("Round Robin pregame lineage uses FantasyPros confirmed then projected snap
   assert.ok(comparator.includes('context.lineupSource?.split(",").includes("MISSING")'));
 });
 
-test("pregame research never falls back to MLB, unsupported sources, or UPDATED snapshots", () => {
+/**
+ * RETIRED: "pregame research never falls back to MLB, unsupported sources, or
+ * UPDATED snapshots".
+ *
+ * This asserted that every engine pinned source_id = 'FANTASYPROS' in its own
+ * SQL and never selected MLB_OFFICIAL. Task 2.7 deliberately reversed that.
+ * services/lineup-sources.ts now ranks MLB_OFFICIAL POSTED - the lineup card
+ * the club actually submitted - ABOVE both FantasyPros states, because a
+ * forecast should never outrank a submitted card, and because pinning one
+ * source meant a missing FantasyPros feed produced no candidates for that game
+ * at all, silently.
+ *
+ * So this was not a stale path like the others in this file: it was an
+ * assertion that had become the opposite of the rule. It could only have been
+ * made to pass by reverting Task 2.7.
+ *
+ * Its replacement is tests/lineup-sources.test.ts, "Task 2.7 no consumer
+ * hardcodes the lineup source", which asserts the current rule - no engine pins
+ * a source in SQL, all four use the shared reader, and a cross-source conflict
+ * blocks the candidate. That suite is in test:unit and green. Re-adding a check
+ * here would only duplicate it.
+ *
+ * The one clause worth keeping stands on its own below.
+ */
+test("no engine ranks UPDATED lineup snapshots", () => {
   for (const engine of ["tb-engine", "xbh-engine", "walk-engine", "hr-engine"]) {
     const service = readText(`artifacts/api-server/src/services/${engine}.ts`);
-    const selector = service.match(/WITH best_lineup AS \([\s\S]*?\n\s*\)\n\s*SELECT/)?.[0] ?? "";
-    assert.ok(selector.includes("source_id = 'FANTASYPROS'"), `${engine} must select FantasyPros lineups only`);
-    assert.ok(selector.includes("state IN ('CONFIRMED', 'PROJECTED')"), `${engine} must allow only FantasyPros projected and confirmed lineups`);
-    assert.ok(!selector.includes("MLB_OFFICIAL"), `${engine} must not select MLB postgame/settlement lineups`);
     assert.ok(!service.includes("WHEN 'UPDATED'"), `${engine} must not rank UPDATED snapshots`);
   }
 });
@@ -99,7 +140,7 @@ test("MLB fixtures retain official identity, lineup order, and settlement facts"
 
 test("four-market schema remains explicit and pre-model XBH remains unmodeled", () => {
   const schema = readText("lib/db/src/schema/foundation.ts");
-  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  const routes = readRoutes();
   for (const market of ["TOTAL_BASES_2_PLUS", "EXTRA_BASE_HIT", "BATTER_WALK", "HOME_RUN"]) {
     assert.ok(schema.includes(`"${market}"`));
   }
@@ -125,7 +166,7 @@ test("FantasyPros secrets and authorization headers are absent from client and f
 test("FantasyPros projected-player eligibility keeps identity and quarantine safeguards", () => {
   const schema = readText("lib/db/src/schema/foundation.ts");
   const service = readText("artifacts/api-server/src/services/data-foundation.ts");
-  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  const routes = readRoutes();
   for (const state of ["MLB_ACTIVE", "MLB_40_MAN", "MLB_IL", "MLB_OPTIONED", "MINOR_LEAGUE", "FREE_AGENT", "HISTORICAL", "RETIRED", "UNKNOWN"]) {
     assert.ok(schema.includes(`"${state}"`), `missing eligibility state ${state}`);
   }
@@ -141,7 +182,7 @@ test("FantasyPros projected-player eligibility keeps identity and quarantine saf
 
 test("official starters and posted lineups establish canonical current-player coverage", () => {
   const service = readText("artifacts/api-server/src/services/data-foundation.ts");
-  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  const routes = readRoutes();
   assert.ok(service.includes('evidence: { officialStarter: true'));
   assert.ok(service.includes('status: "MLB_ACTIVE"'));
   assert.ok(service.includes('persistOfficialTeamRoster'));
@@ -172,7 +213,7 @@ test("aliases, FantasyPros game mapping, and snapshot equality remain auditable"
 });
 
 test("projection reads are scoped to the current effective date", () => {
-  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  const routes = readRoutes();
   assert.ok(routes.includes('const date = requestedDate(req.query.date);'));
   assert.ok(routes.includes("WHERE effective_date = $1"), "Projection Center must not fall back to a historical snapshot");
   assert.ok(!routes.includes("ORDER BY f.team_abbreviation, f.source_player_id LIMIT 500"), "Latest Projection Center must include every current eligible player, not a truncated component subset");
@@ -216,7 +257,7 @@ test("Phase 2A preserves XBH semantics, source provenance, and does not introduc
 test("Phase 2A correction keeps operational shells, explicit opponent splits, and source-backed park ingestion", () => {
   const schema = readText("lib/db/src/schema/foundation.ts");
   const service = readText("artifacts/api-server/src/services/research-foundation.ts");
-  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  const routes = readRoutes();
   const apiSpec = readText("lib/api-spec/openapi.yaml");
   assert.ok(schema.includes('pitcherSide: text("pitcher_side")'), "hitter research features must retain opposing pitcher side");
   assert.ok(service.includes("min=0"), "Statcast leaderboard qualification must not define the operational player universe");

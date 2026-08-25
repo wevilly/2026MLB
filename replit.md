@@ -320,13 +320,17 @@ layer in every engine to unsplit season values.
 
 `docs/search-failure-risk-review-2026-08-25.md` verifies the 30-item Search
 Failure Risk Report against the code and records what was fixed, what was
-already fixed (S-19), what was overstated (S-22), and what remains open. Two
-things in it are worth reading even if the search is not your concern: an
-explicit `playerId` used to bypass every eligibility gate, and `pnpm run
-test:all` fails 31 tests on `main` while `test:unit` is green. Those 31 are
-stale `phase-*-acceptance` assertions against source text that has moved, not
-live regressions — but they run, and a failing test reads as coverage the same
-way an unrun one does.
+already fixed (S-19), what was overstated (S-22), and what remains open. The
+finding worth reading even if the search is not your concern: an explicit
+`playerId` used to bypass every eligibility gate, so a bookmark could return a
+hitter profile for a pitcher, or a profile for a player held for identity
+review.
+
+**`pnpm run test:all` needs a provisioned database and a started API.** Five
+`phase-*-acceptance` files throw `DATABASE_URL must be set` before they load and
+the rest fail on ECONNREFUSED or `fetch failed`. That is 23 failures on a clean
+checkout and none of them is breakage. `test:unit` is the suite that runs
+anywhere; it is green and it is the one to trust for a quick check.
 
 ## Pointers
 

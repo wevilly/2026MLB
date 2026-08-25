@@ -53,7 +53,15 @@ test("Phase 9B settles from the official engine and schedules a prior-slate nigh
   ]);
   assert.match(settlement, /market === "TB"[\s\S]*value >= 2/);
   assert.match(settlement, /market === "XBH"[\s\S]*line\.doubles \+ line\.triples \+ line\.homeRuns/);
-  assert.match(settlement, /market === "WALK" \? line\.walks : line\.homeRuns/);
+  // This used to pin the exact ternary `market === "WALK" ? line.walks :
+  // line.homeRuns`. The WALK grading later grew a policy - intentional walks
+  // and hit-by-pitch are now explicit, per WALK_SETTLEMENT_POLICY - so the
+  // ternary became an if/else chain and this assertion started failing on a
+  // change that made the settlement MORE correct. What Phase 9B actually
+  // requires is that WALK grades from the walk column and HR is the fallback,
+  // so that is what is asserted.
+  assert.match(settlement, /market === "WALK"[\s\S]*?value = line\.walks/);
+  assert.match(settlement, /\} else \{\s*\n\s*value = line\.homeRuns;/);
   assert.match(orchestration, /runNightlySettlement/);
   assert.match(orchestration, /processDueSettlementRuns/);
   assert.match(orchestration, /ORDER BY slate_date ASC/);
