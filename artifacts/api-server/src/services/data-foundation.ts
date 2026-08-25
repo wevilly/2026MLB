@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
+import { upstreamFetch } from "../lib/upstream-fetch";
 
 const MLB_SOURCE = "MLB_OFFICIAL";
 const FANTASY_PROS_SOURCE = "FANTASYPROS";
@@ -420,7 +421,7 @@ async function officialEligibilityForPlayer(playerId: number, effectiveDate: str
 }
 
 async function officialPersonFallback(playerId: number, effectiveDate: string) {
-  const response = await fetch(`https://statsapi.mlb.com/api/v1/people/${playerId}`);
+  const response = await upstreamFetch(`https://statsapi.mlb.com/api/v1/people/${playerId}`);
   const payload = await response.json() as JsonObject;
   if (!response.ok) return null;
   const person = asArray(payload.people)[0];
@@ -571,7 +572,7 @@ async function persistOfficialTeamRoster(
   teamId: number,
   rosterType: "active" | "40Man",
 ) {
-  const response = await fetch(`https://statsapi.mlb.com/api/v1/teams/${teamId}/roster?rosterType=${rosterType}`);
+  const response = await upstreamFetch(`https://statsapi.mlb.com/api/v1/teams/${teamId}/roster?rosterType=${rosterType}`);
   const payload = await response.json() as JsonObject;
   if (!response.ok) throw new Error(`MLB ${rosterType} roster for team ${teamId} returned HTTP ${response.status}`);
   await storeRawPayload(ingestRunId, MLB_SOURCE, `roster_${rosterType}`, effectiveDate, payload);
@@ -589,7 +590,7 @@ async function persistOfficialGameFeed(
   awayTeamId: number,
   homeTeamId: number,
 ) {
-  const response = await fetch(`https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live`);
+  const response = await upstreamFetch(`https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live`);
   const payload = await response.json() as JsonObject;
   if (!response.ok) throw new Error(`MLB game feed ${gamePk} returned HTTP ${response.status}`);
   await storeRawPayload(ingestRunId, MLB_SOURCE, "game_feed", effectiveDate, payload);
@@ -771,7 +772,7 @@ export async function ingestMlbOfficial(requestedDate: string) {
     url.searchParams.set("sportId", "1");
     url.searchParams.set("date", effectiveDate);
     url.searchParams.set("hydrate", "team,venue,probablePitcher");
-    const response = await fetch(url);
+    const response = await upstreamFetch(url);
     const payload = await response.json() as JsonObject;
     if (!response.ok) throw new Error(`MLB Stats API returned HTTP ${response.status}`);
     await storeRawPayload(ingestRunId, MLB_SOURCE, "schedule", effectiveDate, payload);
@@ -781,7 +782,7 @@ export async function ingestMlbOfficial(requestedDate: string) {
     let rejected = 0;
     const rosterTeams = new Set<number>();
     try {
-      const teamsResponse = await fetch(MLB_TEAMS_URL);
+      const teamsResponse = await upstreamFetch(MLB_TEAMS_URL);
       const teamsPayload = await teamsResponse.json() as JsonObject;
       if (!teamsResponse.ok) throw new Error(`MLB teams endpoint returned HTTP ${teamsResponse.status}`);
       await storeRawPayload(ingestRunId, MLB_SOURCE, "teams", effectiveDate, teamsPayload);
@@ -896,7 +897,7 @@ export async function ingestFantasyPros(requestedDate: string) {
       const url = new URL(`${FANTASY_PROS_BASE_URL}${path}`);
       Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
       try {
-        const response = await fetch(url, { headers });
+        const response = await upstreamFetch(url, { headers });
         const payload = await response.json() as JsonObject;
         return response.ok
           ? { payload, status: response.status, endpoint: url.toString(), error: null }

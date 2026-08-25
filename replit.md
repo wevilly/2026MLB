@@ -233,6 +233,32 @@ Exactly one ACTIVE model per market, enforced by the partial unique index
   so it aborts the WHOLE diff, including every unrelated additive change in it.
   Write the change as explicit idempotent DDL in
   `lib/db/scripts/pre-push-migrations.mjs` instead. Pure additions never prompt.
+- **A rejected lab parameter is a 400, and that is the only 400 the search
+  path produces.** `app.ts` has one error middleware. It used to answer every
+  uncaught error with `500 Internal server error`, and the lab routes hand all
+  parameter failures to `next(error)`, so a mistyped `playerId` or an
+  unsupported `window` reached the browser as a server fault. Parameter parsers
+  in `routes/analyst/shared.ts` now throw `RequestValidationError`
+  (`lib/http-errors.ts`), which the middleware answers with 400 and the error's
+  own message. Anything else is still an opaque 500 with the detail confined to
+  the log. If you add a parser, throw that type — a bare `Error` silently
+  becomes a 500 again.
+- **Outbound provider calls go through `upstreamFetch`, never bare `fetch`.**
+  `lib/upstream-fetch.ts`. Bare `fetch` has no timeout: a provider that accepts
+  the connection and then stops sending never settles, the ingest run stays
+  RUNNING, and the refresh request holds until the proxy cuts it. Default 60s,
+  `UPSTREAM_FETCH_TIMEOUT_MS`-overridable, clamped to 1s–300s.
+- **The Player Lab answers the query it was given, or says it has none.** An
+  empty search used to become `ILIKE '%%'` and then take the first row, which
+  presented an arbitrary player as an answer. An explicit `playerId` used to
+  bypass the eligibility join entirely, so a pitcher id answered on the hitter
+  lab. Both gates are in `labProfile`; the reason for every empty state reaches
+  the UI through `sourceStatus` and `notices`.
+- **Codegen sets `clean: true`.** A failed `orval` run deletes every generated
+  file before it fails. Recover with
+  `git checkout -- lib/api-zod/src/generated lib/api-client-react/src/generated`,
+  then fix the spec and re-run. Codegen is idempotent: a run with no spec change
+  must leave no diff.
 - **Handedness is NULL when unknown, never an empty string.** `players.bats` and
   `players.throws` feed the platoon layer, and an empty string is not null: it
   reads as a recorded value, `resolveBatterSide` returns null for a switch
@@ -291,6 +317,16 @@ game-feed player upsert, which silently degrades the platoon and split-metric
 layer in every engine to unsplit season values.
 
 `docs/repository-inventory.md` holds the repository hygiene assessment.
+
+`docs/search-failure-risk-review-2026-08-25.md` verifies the 30-item Search
+Failure Risk Report against the code and records what was fixed, what was
+already fixed (S-19), what was overstated (S-22), and what remains open. Two
+things in it are worth reading even if the search is not your concern: an
+explicit `playerId` used to bypass every eligibility gate, and `pnpm run
+test:all` fails 31 tests on `main` while `test:unit` is green. Those 31 are
+stale `phase-*-acceptance` assertions against source text that has moved, not
+live regressions — but they run, and a failing test reads as coverage the same
+way an unrun one does.
 
 ## Pointers
 

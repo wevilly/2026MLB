@@ -11,6 +11,7 @@
  */
 import { Router, type IRouter, type RequestHandler } from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { RequestValidationError } from "../../lib/http-errors";
 import {
   GetAnalystBullpenRoomResponse,
   GetAnalystDataHealthResponse,
@@ -197,33 +198,47 @@ export type OperationalReadiness = {
   observedAt: string;
 };
 
+/**
+ * Risk report S-14. The shape check alone accepted 2026-02-31 and 2026-13-01:
+ * both match the pattern and neither is a day. Postgres rejects the impossible
+ * ones outright, so the request surfaced as a 500, while a date that rolls over
+ * silently answered for a different day than the operator asked for. The
+ * calendar check is the same one requestedBoardDate and requestedBettorDate
+ * already applied to their own surfaces; it belongs to every caller of the
+ * shared parser, not to two of them.
+ */
+export function isRealCalendarDate(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
+}
+
 export function requestedDate(value: unknown) {
   const date = value instanceof Date
     ? value.toISOString().slice(0, 10)
     : typeof value === "string"
       ? value
       : currentEasternDate();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must use YYYY-MM-DD");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new RequestValidationError("date must use YYYY-MM-DD");
+  if (!isRealCalendarDate(date)) throw new RequestValidationError("date must be a real calendar date using YYYY-MM-DD");
   return date;
 }
 
 export function requiredDate(value: unknown) {
-  if (value == null || value === "") throw new Error("date is required");
+  if (value == null || value === "") throw new RequestValidationError("date is required");
   return requestedDate(value);
 }
 
 export function requestedBoardDate(value: unknown) {
-  const date = requestedDate(value);
-  const [year, month, day] = date.split("-").map(Number);
-  const parsed = new Date(Date.UTC(year, month - 1, day));
-  if (
-    parsed.getUTCFullYear() !== year
-    || parsed.getUTCMonth() !== month - 1
-    || parsed.getUTCDate() !== day
-  ) {
-    throw new DailyMarketBoardValidationError("date must be a real calendar date");
+  try {
+    return requestedDate(value);
+  } catch (error) {
+    // The board surface answers its own validation error type; requestedDate
+    // now performs the calendar check that used to live here.
+    throw new DailyMarketBoardValidationError(error instanceof Error ? error.message : "date must be a real calendar date");
   }
-  return date;
 }
 
 export function requestedBettorDate(value: unknown) {
@@ -253,15 +268,23 @@ export function engineResponseDate<T extends { slateDate: Date }>(response: T, s
 export function requestedWindow(value: unknown) {
   const window = typeof value === "string" ? value : "SEASON";
   if (!["SEASON", "CAREER", "ROLLING_7", "ROLLING_14", "ROLLING_30", "ROLLING_60"].includes(window)) {
-    throw new Error("window must be SEASON, CAREER, ROLLING_7, ROLLING_14, ROLLING_30, or ROLLING_60");
+    throw new RequestValidationError("window must be SEASON, CAREER, ROLLING_7, ROLLING_14, ROLLING_30, or ROLLING_60");
   }
   return window as "SEASON" | "CAREER" | "ROLLING_7" | "ROLLING_14" | "ROLLING_30" | "ROLLING_60";
 }
 
+/**
+ * Risk report S-13. `?playerId=` and `?playerId=null` are what a client sends
+ * when its own state is empty, and both used to reach Number() as "" and
+ * "null". "" coerces to 0 and "null" to NaN, so the first was rejected with a
+ * message about integers and the second reported as a server fault. An absent
+ * value and an empty value mean the same thing here: no player was selected.
+ */
 export function requestedPlayerId(value: unknown) {
-  if (value === undefined) return null;
+  if (value === undefined || value === null || value === "" || value === "null" || value === "undefined") return null;
+  if (Array.isArray(value)) throw new RequestValidationError("playerId must be supplied at most once");
   const playerId = Number(value);
-  if (!Number.isSafeInteger(playerId) || playerId <= 0) throw new Error("playerId must be a positive integer");
+  if (!Number.isSafeInteger(playerId) || playerId <= 0) throw new RequestValidationError("playerId must be a positive integer");
   return playerId;
 }
 

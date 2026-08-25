@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
+import { upstreamFetch } from "../lib/upstream-fetch";
+import { logger } from "../lib/logger";
 
 const STATCAST_SOURCE = "STATCAST";
 const FANGRAPHS_SOURCE = "FANGRAPHS";
@@ -105,6 +107,21 @@ const asNumber = (value: unknown) => {
   return null;
 };
 const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
+
+/**
+ * Risk report follow-up. The lab used dateOnly(new Date()) to decide whether the
+ * caller had asked for a back-date, but every default date on the request side
+ * is the Eastern civil date. Between 20:00 ET and midnight the two disagree, so
+ * a plain "today" search was labelled NO SNAPSHOT FOR REQUESTED AS-OF DATE and
+ * told the operator the view would not fall forward - for the current day.
+ * The comparison has to use the same clock the default came from.
+ */
+const currentEasternDate = () => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+}).format(new Date());
 
 function parseCsv(text: string): Array<Record<string, string>> {
   const parseLine = (line: string) => {
@@ -546,7 +563,7 @@ async function ingestStatcast(effectiveDate: string) {
   try {
     for (const role of ["HITTER", "PITCHER"] as const) {
       const endpoint = csvUrl(role, Number(effectiveDate.slice(0, 4)));
-      const response = await fetch(endpoint);
+      const response = await upstreamFetch(endpoint);
       const payload = await response.text();
       lastStatus = response.status;
       if (!response.ok) throw new Error(`Statcast ${role.toLowerCase()} request returned HTTP ${response.status}`);
@@ -674,7 +691,7 @@ export async function ingestStatcastHandednessFallback(effectiveDate: string, ta
       await Promise.all(work.slice(offset, offset + batchSize).map(async ({ role, playerId }) => {
         const endpoint = statcastSearchUrl(role, playerId, scope);
         try {
-          const response = await fetch(endpoint, { headers: { accept: "text/csv,text/plain", "user-agent": "Mozilla/5.0 (compatible; MLBAnalystResearch/1.0)" } });
+          const response = await upstreamFetch(endpoint, { headers: { accept: "text/csv,text/plain", "user-agent": "Mozilla/5.0 (compatible; MLBAnalystResearch/1.0)" } });
           const payload = await response.text();
           lastStatus = response.status;
           if (!response.ok) throw new Error(`Statcast Search ${role.toLowerCase()} ${playerId} returned HTTP ${response.status}`);
@@ -697,8 +714,17 @@ export async function ingestStatcastHandednessFallback(effectiveDate: string, ta
             if (role === "HITTER") await persistHitterSnapshot(playerId, STATCAST_SOURCE, ingestRunId, rawPayloadId, scope, derived, side, true);
             else await persistPitcherSnapshot(playerId, STATCAST_SOURCE, ingestRunId, rawPayloadId, scope, derived, side, true);
           }
-        } catch {
+        } catch (error) {
+          // Risk report S-22. This swallowed the reason entirely: the run was
+          // correctly downgraded to PARTIAL by the rejected counter, but every
+          // per-player failure - a 404 batch, a provider format change, a
+          // timeout - was indistinguishable in the record. The count says how
+          // many; the log now says why, per player.
           rejected += 1;
+          logger.warn(
+            { err: error, ingestRunId, role, playerId, effectiveDate, targetScope },
+            "statcast split fallback rejected one player",
+          );
         }
       }));
     }
@@ -727,7 +753,7 @@ async function ingestFanGraphs(effectiveDate: string) {
       const scope = windowScope(window, effectiveDate);
       for (const role of ["HITTER", "PITCHER"] as const) {
         const endpoint = fanGraphsUrl(role, scope);
-        const response = await fetch(endpoint);
+        const response = await upstreamFetch(endpoint);
         lastStatus = response.status;
         const payload = await response.json() as JsonObject;
         if (!response.ok) throw new Error(`FanGraphs ${role.toLowerCase()} ${window} request returned HTTP ${response.status}`);
@@ -761,7 +787,7 @@ async function ingestFanGraphs(effectiveDate: string) {
         : [{ splitId: 5, side: "L" }, { splitId: 6, side: "R" }];
       for (const { splitId, side } of splitDefinitions) {
         const request = fanGraphsSplitRequest(role, splitScope, splitId);
-        const response = await fetch(request.endpoint, request.init);
+        const response = await upstreamFetch(request.endpoint, request.init);
         lastStatus = response.status;
         const payload = await response.json() as JsonObject;
         if (!response.ok) throw new Error(`FanGraphs ${role.toLowerCase()} split ${splitId} request returned HTTP ${response.status}`);
@@ -826,7 +852,7 @@ async function ingestParkFactorsLegacy(effectiveDate: string) {
   let rejected = 0;
   let failure: string | null = null;
   try {
-    const response = await fetch(endpoint, {
+    const response = await upstreamFetch(endpoint, {
       headers: {
         accept: "text/html,application/xhtml+xml",
         "user-agent": "Mozilla/5.0 (compatible; MLBAnalystResearch/1.0)",
@@ -890,7 +916,7 @@ async function ingestParkFactorsLegacy(effectiveDate: string) {
 
 async function persistStatcastParkSide(ingestRunId: string, effectiveDate: string, requestedSide: "All" | "L" | "R") {
   const endpoint = `https://baseballsavant.mlb.com/leaderboard/statcast-park-factors?type=year&year=${effectiveDate.slice(0, 4)}&batSide=${requestedSide}`;
-  const response = await fetch(endpoint, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 (compatible; MLBAnalystResearch/1.0)" } });
+  const response = await upstreamFetch(endpoint, { headers: { accept: "text/html,application/xhtml+xml", "user-agent": "Mozilla/5.0 (compatible; MLBAnalystResearch/1.0)" } });
   const payload = await response.text();
   if (!response.ok) throw new Error(`Statcast park factor ${requestedSide} request returned HTTP ${response.status}`);
   const rows = extractEmbeddedArray(payload);
@@ -1000,10 +1026,33 @@ function metricPlaceholder(family: string, key: string, label: string, unit: str
   return { key, label, value: null, unit, denominator: null, sampleSize: null, source: "NOT FOUND", definition: "No compatible source value is available for this snapshot.", transformation: "RAW", status: "NOT_FOUND", retrievedAt: "NOT FOUND" };
 }
 
+/**
+ * The hard cap on a name search. Risk report S-17: the query took exactly 100
+ * rows and the response said nothing about the ones it dropped, so a broad
+ * search read as a complete answer. It now asks for one row more than it will
+ * show, purely to know whether more existed, and says so in the notices.
+ */
+const SEARCH_RESULT_LIMIT = 100;
+
 async function labProfile(role: ResearchRole, playerId: number | null, search: string, researchWindow: ResearchWindow, effectiveDate: string) {
   const table = role === "HITTER" ? "player_research_snapshots" : "pitcher_research_snapshots";
   const featureTable = role === "HITTER" ? "player_research_features" : "pitcher_research_features";
-  const profileCount = await pool.query<{ player_id: number; full_name: string; abbreviation: string | null; primary_position: string | null }>(
+  const roleLabel = role === "HITTER" ? "hitter" : "pitcher";
+
+  // Risk report S-18. An empty search became ILIKE '%%', which matches every
+  // eligible player, and the profile then resolved to whichever row Postgres
+  // ordered first. That is an arbitrary player presented as an answer. With no
+  // query and no selected id there is nothing to answer, so the view says so.
+  if (playerId == null && !search) {
+    return {
+      sourceStatus: "NO SEARCH SUBMITTED",
+      searchResults: [],
+      profile: null,
+      notices: [`Enter a ${roleLabel} name, or select a player id. This view does not choose a player on your behalf.`],
+    };
+  }
+
+  const profileCount = search ? await pool.query<{ player_id: number; full_name: string; abbreviation: string | null; primary_position: string | null }>(
     `SELECT DISTINCT ON (p.player_id) p.player_id, p.full_name, t.abbreviation, p.primary_position
      FROM players p
      JOIN player_eligibility pe ON pe.player_id = p.player_id
@@ -1013,9 +1062,14 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
      LEFT JOIN teams t ON t.team_id = p.current_team_id
      WHERE p.full_name ILIKE $1
        AND CASE WHEN $3 = 'HITTER' THEN COALESCE(p.primary_position, '') <> 'P' ELSE p.primary_position = 'P' END
-     ORDER BY p.player_id, p.full_name LIMIT 100`,
-    [`%${search}%`, effectiveDate, role],
-  );
+     ORDER BY p.player_id, p.full_name LIMIT $4`,
+    [`%${search}%`, effectiveDate, role, SEARCH_RESULT_LIMIT + 1],
+  ) : { rows: [] as Array<{ player_id: number; full_name: string; abbreviation: string | null; primary_position: string | null }> };
+  const searchTruncated = profileCount.rows.length > SEARCH_RESULT_LIMIT;
+  if (searchTruncated) profileCount.rows.length = SEARCH_RESULT_LIMIT;
+  const truncationNotice = searchTruncated
+    ? [`More than ${SEARCH_RESULT_LIMIT} eligible ${roleLabel}s match "${search.trim()}". Only the first ${SEARCH_RESULT_LIMIT} are listed; narrow the search to see the rest.`]
+    : [];
   // Name collision protection.
   //
   // Resolving a player by name alone silently picked the first row. There are
@@ -1042,20 +1096,65 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
       notices: [
         `${exactNameMatches.length} players named "${search.trim()}" are carried by different clubs `
         + `(${[...collidingClubs].sort().join(", ")}). Select one by player id; this view will not guess.`,
+        ...truncationNotice,
       ],
     };
   }
 
+  // Risk report follow-up to prevention item 4. An explicit playerId used to be
+  // trusted straight through: `playerId ?? first row` skipped the eligibility
+  // join entirely, so a pitcher id answered on the hitter lab, and a player
+  // held for identity review answered anywhere. A link or a stale bookmark was
+  // enough to produce a profile the search itself would never return. The id is
+  // now held to the same gate the search results pass.
+  if (playerId != null) {
+    const eligible = await pool.query<{ player_id: number }>(
+      `SELECT p.player_id
+       FROM players p
+       JOIN player_eligibility pe ON pe.player_id = p.player_id
+         AND pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = $2
+         AND NOT pe.requires_identity_review AND NOT pe.quarantined_from_current_research
+         AND CASE WHEN $3 = 'HITTER' THEN pe.eligible_today_research ELSE pe.eligible_pitcher_research END
+       WHERE p.player_id = $1
+         AND CASE WHEN $3 = 'HITTER' THEN COALESCE(p.primary_position, '') <> 'P' ELSE p.primary_position = 'P' END
+       LIMIT 1`,
+      [playerId, effectiveDate, role],
+    );
+    if (!eligible.rows.length) {
+      const known = await pool.query<{ full_name: string; primary_position: string | null }>(
+        `SELECT full_name, primary_position FROM players WHERE player_id = $1 LIMIT 1`,
+        [playerId],
+      );
+      const person = known.rows[0];
+      const wrongRole = person
+        ? role === "HITTER" ? person.primary_position === "P" : person.primary_position !== "P"
+        : false;
+      return {
+        sourceStatus: wrongRole ? "PLAYER NOT ELIGIBLE FOR THIS ROLE" : "PLAYER NOT ELIGIBLE FOR REQUESTED DATE",
+        searchResults: profileCount.rows.map((row) => ({ playerId: row.player_id, name: row.full_name, team: row.abbreviation ?? "NOT FOUND", position: row.primary_position ?? "NOT FOUND", role: role === "HITTER" ? "HITTER" : "PITCHER" })),
+        profile: null,
+        notices: [
+          person
+            ? wrongRole
+              ? `${person.full_name} is a ${person.primary_position === "P" ? "pitcher" : "position player"} and cannot be inspected on the ${roleLabel} lab. Use the other lab for this player.`
+              : `${person.full_name} has no MLB_OFFICIAL ${roleLabel} eligibility record for ${effectiveDate}, or is held for identity review. Check the requested date and the ingest state for that day before treating this as an outage.`
+            : `Player id ${playerId} is not a canonical player in this database.`,
+          ...truncationNotice,
+        ],
+      };
+    }
+  }
+
   const selectedId = playerId ?? profileCount.rows[0]?.player_id ?? null;
   if (!selectedId) {
-    const hasRequestedAsOfDate = effectiveDate !== dateOnly(new Date());
+    const hasRequestedAsOfDate = effectiveDate !== currentEasternDate();
     return {
       sourceStatus: hasRequestedAsOfDate ? "NO SNAPSHOT FOR REQUESTED AS-OF DATE" : "WAITING FOR RESEARCH INGEST",
       searchResults: [],
       profile: null,
       notices: [hasRequestedAsOfDate
-        ? "No eligible source snapshot exists on or before this as-of date. The view intentionally does not fall forward to newer evidence."
-        : "Run the research ingest to retrieve public Statcast and FanGraphs evidence."],
+        ? `No eligible ${roleLabel} matched "${search.trim()}" on ${effectiveDate}. No eligible source snapshot exists on or before this as-of date. The view intentionally does not fall forward to newer evidence.`
+        : `No eligible ${roleLabel} matched "${search.trim()}" on ${effectiveDate}. Run the research ingest to retrieve public Statcast and FanGraphs evidence.`],
     };
   }
   const identity = await pool.query<{ player_id: number; full_name: string; abbreviation: string | null; bats: string | null; throws: string | null; primary_position: string | null; status: string | null }>(
@@ -1150,7 +1249,10 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
            : "Vs-LHP/RHP panels use explicit opposing-pitcher split evidence; the hitter's own batting hand is not used as a substitute.",
       ],
     } : null,
-    notices: snapshotRows.rows.length ? [] : ["NO MLB SAMPLE / SOURCE COVERAGE for this player and window. The operational shell is retained; the view intentionally does not fall back to another window."],
+    notices: [
+      ...(snapshotRows.rows.length ? [] : [`NO MLB SAMPLE / SOURCE COVERAGE for this player on the ${researchWindow} window as of ${effectiveDate}. The operational shell is retained; the view intentionally does not fall back to another window.`]),
+      ...truncationNotice,
+    ],
   };
 }
 

@@ -104,12 +104,35 @@ export function LoadingPanel({ rows = 4 }: { rows?: number }) {
   );
 }
 
-export function QueryMessage({ kind, onRetry }: { kind: 'error' | 'empty'; onRetry?: () => void }) {
+/**
+ * Risk report S-30. The API already returns the reason - sourceStatus, notices,
+ * and for a rejected request a typed 400 body - and none of it reached the
+ * screen. "Signal unavailable" and "No records in this view" read identically
+ * whether the API was down, the date had no ingest, the player was held for
+ * identity review, or the query string was malformed, so every empty result
+ * looked like the same outage and sent the operator to the logs.
+ *
+ * `title` and `detail` stay optional so the existing call sites keep their
+ * wording; the lab surfaces pass what the API told them.
+ */
+export function QueryMessage({ kind, onRetry, title, detail, notices, requestId }: {
+  kind: 'error' | 'empty';
+  onRetry?: () => void;
+  title?: string;
+  detail?: string;
+  notices?: string[];
+  requestId?: string;
+}) {
+  const extra = (notices ?? []).filter(Boolean);
   if (kind === 'error') {
     return (
       <div className="query-message query-error" data-testid="error-state">
         <div className="query-icon"><AlertTriangle size={18} /></div>
-        <div><strong>Signal unavailable</strong><p>The analyst service did not return a usable payload.</p></div>
+        <div>
+          <strong>{title ?? 'Signal unavailable'}</strong>
+          <p data-testid="error-detail">{detail ?? 'The analyst service did not return a usable payload.'}</p>
+          {requestId && <p className="text-xs font-mono opacity-70" data-testid="error-request-id">Request {requestId}</p>}
+        </div>
         {onRetry && <button className="button button-quiet ml-auto" onClick={onRetry} data-testid="button-retry"><RefreshCw size={14} /> Retry</button>}
       </div>
     );
@@ -117,9 +140,62 @@ export function QueryMessage({ kind, onRetry }: { kind: 'error' | 'empty'; onRet
   return (
     <div className="query-message" data-testid="empty-state">
       <div className="query-icon"><Database size={18} /></div>
-      <div><strong>No records in this view</strong><p>Once the source publishes a payload, it will appear here.</p></div>
+      <div>
+        <strong>{title ?? 'No records in this view'}</strong>
+        <p data-testid="empty-detail">{detail ?? 'Once the source publishes a payload, it will appear here.'}</p>
+        {extra.length > 0 && (
+          <ul className="mt-2 text-xs space-y-1" data-testid="empty-notices">
+            {extra.map((notice) => <li key={notice}>{notice}</li>)}
+          </ul>
+        )}
+      </div>
     </div>
   );
+}
+
+/**
+ * What the API said went wrong, as far as it can be trusted to the screen.
+ *
+ * A 400 body is authored by this API and states which parameter was rejected,
+ * so it is shown. A 5xx body is deliberately opaque, so the operator gets the
+ * requestId to quote and a pointer at the checks that distinguish an API fault
+ * from a database one. A transport failure never reached the API at all, which
+ * is the /api routing case in the triage guide (S-04).
+ */
+export function describeQueryError(error: unknown): { title: string; detail: string; requestId?: string } {
+  const candidate = error as { status?: number; data?: unknown; message?: string } | null;
+  const status = typeof candidate?.status === 'number' ? candidate.status : undefined;
+  const body = candidate?.data as { error?: string; requestId?: string } | null | undefined;
+  const requestId = typeof body?.requestId === 'string' ? body.requestId : undefined;
+
+  if (status === undefined) {
+    return {
+      title: 'The analyst API was not reachable',
+      detail: 'The request did not reach /api. Check the API workflow, and that the API artifact is still mounted under /api.',
+    };
+  }
+  if (status === 400) {
+    return { title: 'The request was rejected', detail: body?.error ?? 'One of the search parameters was not valid.', requestId };
+  }
+  if (status === 404) {
+    return {
+      title: 'The search endpoint was not found',
+      detail: 'The static site is being served without the API behind /api. Verify the API artifact route before treating this as a data problem.',
+      requestId,
+    };
+  }
+  if (status === 503) {
+    return {
+      title: 'The API cannot reach its database',
+      detail: 'GET /api/healthz is failing its dependency checks. Verify database availability, DATABASE_URL, and that the schema chain has been applied.',
+      requestId,
+    };
+  }
+  return {
+    title: 'The analyst service failed this request',
+    detail: `${body?.error ?? 'The API returned an error'} (HTTP ${status}). The reason is in the API log${requestId ? ' under the request id below' : ''}.`,
+    requestId,
+  };
 }
 
 function Metric({ label, value, note, tone = 'neutral' }: { label: string; value: ReactNode; note: string; tone?: Tone }) {
@@ -580,7 +656,14 @@ function FuturePage({ label }: { label: string }) {
 }
 
 
-function LabSearchPanel({ searchInput, setSearchInput, onSearch, results, onSelect, selectedId, placeholder = "Search entities..." }: { searchInput: string, setSearchInput: (s: string) => void, onSearch: (e: React.FormEvent) => void, results?: ResearchSearchResult[], onSelect: (id: number) => void, selectedId?: number, placeholder?: string }) {
+/**
+ * Risk report S-11. Selecting a result sets playerId and leaves the earlier
+ * search string in the URL, so the profile describes one player while the list
+ * beside it is the answer to a different query. Clearing the search would throw
+ * away the list the operator is picking from, so the list says whose query it
+ * is instead, and the selected row is called out as selected.
+ */
+function LabSearchPanel({ searchInput, setSearchInput, onSearch, results, onSelect, selectedId, activeSearch, placeholder = "Search entities..." }: { searchInput: string, setSearchInput: (s: string) => void, onSearch: (e: React.FormEvent) => void, results?: ResearchSearchResult[], onSelect: (id: number) => void, selectedId?: number, activeSearch?: string, placeholder?: string }) {
   return (
     <Panel className="lab-sidebar">
       <SectionHeading eyebrow="Entity resolution" title="Directory" />
@@ -589,6 +672,12 @@ function LabSearchPanel({ searchInput, setSearchInput, onSearch, results, onSele
           <input type="search" className="search-input" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={placeholder} data-testid="input-lab-search" />
           <button type="submit" className="button button-dark" data-testid="button-lab-search"><Search size={14} /></button>
         </form>
+        {results && results.length > 0 && (
+          <p className="text-muted-foreground text-xs font-mono mt-3" data-testid="text-lab-search-scope">
+            {results.length} match{results.length === 1 ? '' : 'es'} for "{activeSearch ?? ''}"
+            {selectedId ? ' · the profile shows the selected row only' : ''}
+          </p>
+        )}
         {results && results.length > 0 && (
           <div className="search-results">
             {results.map((r) => (
@@ -600,7 +689,9 @@ function LabSearchPanel({ searchInput, setSearchInput, onSearch, results, onSele
           </div>
         )}
         {results && results.length === 0 && (
-          <p className="text-muted-foreground text-xs font-mono">No records matched.</p>
+          <p className="text-muted-foreground text-xs font-mono" data-testid="text-lab-search-empty">
+            {activeSearch ? `No eligible player matched "${activeSearch}".` : 'Enter a name to search.'}
+          </p>
         )}
       </div>
     </Panel>
@@ -700,12 +791,22 @@ function PlayerLabPage() {
   const searchString = useSearch();
   const params = new URLSearchParams(searchString);
   const playerIdParam = params.get('playerId');
-  const playerId = playerIdParam ? parseInt(playerIdParam, 10) : undefined;
+  // Risk report S-13. parseInt('abc') is NaN and parseInt('12x') is 12. The
+  // first was serialised into the request and came back as a server error; the
+  // second silently answered for a player nobody asked for. Neither is a
+  // request worth sending.
+  const parsedPlayerId = playerIdParam !== null ? Number(playerIdParam) : Number.NaN;
+  const playerId = Number.isSafeInteger(parsedPlayerId) && parsedPlayerId > 0 ? parsedPlayerId : undefined;
   const search = params.get('search') || undefined;
   const windowParam = (params.get('window') || 'SEASON') as any;
   const dateParam = params.get('date') || undefined;
 
   const [searchInput, setSearchInput] = useState(search || '');
+  // Risk report S-12. The input was seeded from the URL once, at mount. Browser
+  // back/forward, and any link that changes the query string while the page
+  // stays mounted, moved the results without moving the box the operator is
+  // reading, so the visible query and the answered query disagreed.
+  useEffect(() => { setSearchInput(search || ''); }, [search]);
 
   const query = useGetAnalystPlayerLab({ playerId, search, window: windowParam, date: dateParam });
   const data = query.data;
@@ -762,13 +863,14 @@ function PlayerLabPage() {
           results={data?.searchResults} 
           onSelect={handleSelect} 
           selectedId={playerId} 
+          activeSearch={search}
           placeholder="Search hitters..."
         />
         
         {query.isLoading ? (
           <div className="flex-1"><LoadingPanel rows={10} /></div>
         ) : query.isError ? (
-          <div className="flex-1"><QueryMessage kind="error" onRetry={() => query.refetch()} /></div>
+          <div className="flex-1"><QueryMessage kind="error" onRetry={() => query.refetch()} {...describeQueryError(query.error)} /></div>
         ) : data?.profile ? (
           <LabProfile 
             profile={data.profile} 
@@ -779,7 +881,12 @@ function PlayerLabPage() {
         ) : (
           <div className="flex-1">
             <Panel className="h-full min-h-[400px] flex items-center justify-center border-dashed">
-              <QueryMessage kind="empty" />
+              <QueryMessage
+                kind="empty"
+                title={data?.sourceStatus}
+                detail={data?.notices?.[0]}
+                notices={data?.notices?.slice(1)}
+              />
             </Panel>
           </div>
         )}
@@ -793,12 +900,22 @@ function PitcherLabPage() {
   const searchString = useSearch();
   const params = new URLSearchParams(searchString);
   const playerIdParam = params.get('playerId');
-  const playerId = playerIdParam ? parseInt(playerIdParam, 10) : undefined;
+  // Risk report S-13. parseInt('abc') is NaN and parseInt('12x') is 12. The
+  // first was serialised into the request and came back as a server error; the
+  // second silently answered for a player nobody asked for. Neither is a
+  // request worth sending.
+  const parsedPlayerId = playerIdParam !== null ? Number(playerIdParam) : Number.NaN;
+  const playerId = Number.isSafeInteger(parsedPlayerId) && parsedPlayerId > 0 ? parsedPlayerId : undefined;
   const search = params.get('search') || undefined;
   const windowParam = (params.get('window') || 'SEASON') as any;
   const dateParam = params.get('date') || undefined;
 
   const [searchInput, setSearchInput] = useState(search || '');
+  // Risk report S-12. The input was seeded from the URL once, at mount. Browser
+  // back/forward, and any link that changes the query string while the page
+  // stays mounted, moved the results without moving the box the operator is
+  // reading, so the visible query and the answered query disagreed.
+  useEffect(() => { setSearchInput(search || ''); }, [search]);
 
   const query = useGetAnalystPitcherLab({ playerId, search, window: windowParam, date: dateParam });
   const data = query.data;
@@ -855,13 +972,14 @@ function PitcherLabPage() {
           results={data?.searchResults} 
           onSelect={handleSelect} 
           selectedId={playerId} 
+          activeSearch={search}
           placeholder="Search pitchers..."
         />
         
         {query.isLoading ? (
           <div className="flex-1"><LoadingPanel rows={10} /></div>
         ) : query.isError ? (
-          <div className="flex-1"><QueryMessage kind="error" onRetry={() => query.refetch()} /></div>
+          <div className="flex-1"><QueryMessage kind="error" onRetry={() => query.refetch()} {...describeQueryError(query.error)} /></div>
         ) : data?.profile ? (
           <LabProfile 
             profile={data.profile} 
@@ -872,7 +990,12 @@ function PitcherLabPage() {
         ) : (
           <div className="flex-1">
             <Panel className="h-full min-h-[400px] flex items-center justify-center border-dashed">
-              <QueryMessage kind="empty" />
+              <QueryMessage
+                kind="empty"
+                title={data?.sourceStatus}
+                detail={data?.notices?.[0]}
+                notices={data?.notices?.slice(1)}
+              />
             </Panel>
           </div>
         )}

@@ -6,6 +6,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { startOrchestrationScheduler } from "./services/orchestration";
 import { invalidateCache } from "./services/cache";
+import { isRequestValidationError } from "./lib/http-errors";
 
 const app: Express = express();
 const isProduction = process.env.NODE_ENV === "production";
@@ -93,7 +94,17 @@ app.use((req, res, next) => {
 });
 
 app.use("/api", router);
+// Risk report S-13/S-16. A malformed playerId, window, or date is the caller's
+// mistake, not a server fault. Reporting it as 500 hid the reason from the
+// operator and left the triage guide's 400 branch unreachable. Validation
+// failures now carry their own message and status; everything else is still an
+// opaque 500 with the detail confined to the log.
 app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (isRequestValidationError(error)) {
+    req.log.warn({ err: error, requestId: req.id }, "request validation failure");
+    res.status(error.status).json({ error: error.message, requestId: req.id });
+    return;
+  }
   req.log.error({ err: error, requestId: req.id }, "unhandled request error");
   res.status(500).json({ error: "Internal server error", requestId: req.id });
 });

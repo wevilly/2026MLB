@@ -249,6 +249,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResearchLab"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /analyst/pitcher-lab:
     get:
       operationId: getAnalystPitcherLab
@@ -278,6 +282,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResearchLab"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /analyst/batter-pitcher:
     get:
       operationId: getAnalystBatterPitcher
@@ -1632,6 +1640,24 @@ paths:
               schema:
                 $ref: "#/components/schemas/BullpenIngestResult"
 components:
+  responses:
+    # Risk report S-16. The lab operations documented only their 200. A
+    # generated caller therefore had no typed contract for a rejected request
+    # or a server fault, which is why the UI could say no more than "the
+    # analyst service did not return a usable payload". These are the two
+    # non-2xx bodies the API actually emits, declared once.
+    BadRequest:
+      description: The request parameters were rejected. The body states which one and why.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: The request failed inside the API. The reason is in the API log under the returned requestId.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
   schemas:
     HealthStatus:
       type: object
@@ -3008,6 +3034,9 @@ components:
       additionalProperties: false
       properties:
         error: { type: string }
+        # The correlation id echoed in the X-Request-ID header. It is what an
+        # operator quotes to find the matching API log line for a 500.
+        requestId: { type: string }
       required: [error]
     BettorSourceInput:
       type: object

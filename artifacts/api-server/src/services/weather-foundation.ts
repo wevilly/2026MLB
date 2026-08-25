@@ -17,6 +17,7 @@
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { upstreamFetch } from "../lib/upstream-fetch";
 
 export const WEATHER_SOURCE = "OPEN_METEO";
 const WEATHER_BASE = "https://api.open-meteo.com/v1/forecast";
@@ -247,7 +248,7 @@ export async function ingestVenueGeography(
   let updated = 0;
   try {
     const url = `${MLB_VENUE_BASE}?venueIds=${venueIds.join(",")}&hydrate=location,fieldInfo`;
-    const response = await fetch(url);
+    const response = await upstreamFetch(url);
     if (!response.ok) {
       recordFailure(failures, "venues", new Error(`MLB venues endpoint returned HTTP ${response.status}`), true);
       return 0;
@@ -406,7 +407,7 @@ export async function refreshWeather(slateDate: string): Promise<WeatherRefreshR
       const url = `${WEATHER_BASE}?latitude=${game.latitude}&longitude=${game.longitude}`
         + "&hourly=temperature_2m,relative_humidity_2m,precipitation_probability,wind_speed_10m,wind_direction_10m"
         + "&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=UTC";
-      const response = await fetch(url);
+      const response = await upstreamFetch(url);
       if (!response.ok) {
         recordFailure(failures, `forecast:${game.gamePk}`, new Error(`Forecast endpoint returned HTTP ${response.status}`));
         continue;

@@ -2031,6 +2031,7 @@ export interface DailyBoardGameSummary {
 
 export interface ErrorResponse {
   error: string;
+  requestId?: string;
 }
 
 export interface BettorSourceInput {
@@ -2782,6 +2783,16 @@ export interface AuditEventList {
   events: AuditEvent[];
   total: number;
 }
+
+/**
+ * The request parameters were rejected. The body states which one and why.
+ */
+export type BadRequestResponse = ErrorResponse;
+
+/**
+ * The request failed inside the API. The reason is in the API log under the returned requestId.
+ */
+export type InternalErrorResponse = ErrorResponse;
 
 export type GetAnalystTodayParams = {
 /**
