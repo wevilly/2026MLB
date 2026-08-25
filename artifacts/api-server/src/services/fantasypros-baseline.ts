@@ -80,7 +80,7 @@ export async function runFantasyProsBaseline(slateDate: string): Promise<Fantasy
          FROM starters WHERE source_id = 'FANTASYPROS'
          ORDER BY game_pk, team_id, observed_at DESC
        )
-       SELECT ll.game_pk::bigint, le.player_id, p.full_name AS player_name, le.batting_order,
+        SELECT ll.game_pk::bigint, le.player_id, p.full_name AS player_name, le.batting_order,
          f.normalized_stats, ll.state AS lineup_state, hs.retrieved_at::text AS snapshot_retrieved_at,
          starter.player_id AS starter_player_id, starter.starter_state
        FROM latest_lineups ll
@@ -117,55 +117,15 @@ export async function runFantasyProsBaseline(slateDate: string): Promise<Fantasy
         const item = marketValues[index];
         if (previousValue === null || item.value !== previousValue) rank = index + 1;
         previousValue = item.value;
-        const starterKnown = item.row.starter_player_id !== null && Boolean(item.row.starter_state);
-        const missing = [
-          !starterKnown ? "FantasyPros projected starter identity is not yet mapped." : null,
-          "Optional enrichment still running: current bullpen role path, park, and matchup research are not yet available.",
-        ].filter(Boolean).join(" ");
         await pool.query(
-          `INSERT INTO market_research_candidates
-             (slate_date, game_pk, player_id, market, research_rank, research_state,
-              primary_mechanism, secondary_mechanism, opportunity_evidence,
-              starter_matchup_evidence, bullpen_path_evidence, park_evidence,
-              recent_vs_season_vs_career, counter_evidence, missing_stale_evidence,
-              rank_semantics, ingest_run_id)
-           VALUES ($1, $2, $3, $4, $5, 'POSITIVE', 'FANTASYPROS_DAILY_PROJECTION', NULL,
-             $6, $7, $8, $9, $10, '{}', $11, $12, $13)
-           ON CONFLICT (slate_date, market, player_id, game_pk) DO UPDATE SET
-             research_rank = EXCLUDED.research_rank, research_state = EXCLUDED.research_state,
-             primary_mechanism = EXCLUDED.primary_mechanism, secondary_mechanism = EXCLUDED.secondary_mechanism,
-             opportunity_evidence = EXCLUDED.opportunity_evidence,
-             starter_matchup_evidence = EXCLUDED.starter_matchup_evidence,
-             bullpen_path_evidence = EXCLUDED.bullpen_path_evidence, park_evidence = EXCLUDED.park_evidence,
-             recent_vs_season_vs_career = EXCLUDED.recent_vs_season_vs_career,
-             counter_evidence = EXCLUDED.counter_evidence, missing_stale_evidence = EXCLUDED.missing_stale_evidence,
-             rank_semantics = EXCLUDED.rank_semantics, ingest_run_id = EXCLUDED.ingest_run_id, updated_at = now()`,
+          `INSERT INTO fantasypros_reference_ranks
+             (slate_date, game_pk, player_id, market, projected_value, reference_rank,
+              snapshot_retrieved_at, lineup_state, batting_order, ingest_run_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8, $9, $10)
+           ON CONFLICT (slate_date, market, player_id, game_pk, snapshot_retrieved_at) DO NOTHING`,
           [
-            slateDate, item.row.game_pk, item.row.player_id, definition.market, rank,
-            {
-              source: "FANTASYPROS",
-              snapshotLabel: "Hitter daily",
-              snapshotRetrievedAt: item.row.snapshot_retrieved_at,
-              projectedValue: item.value,
-              baselineRank: rank,
-              lineupState: item.row.lineup_state,
-              battingOrder: item.row.batting_order,
-            },
-            {
-              source: "FANTASYPROS",
-              starterPlayerId: item.row.starter_player_id,
-              starterState: item.row.starter_state ?? "UNKNOWN",
-              status: starterKnown ? "PROJECTED" : "NOT_FOUND",
-            },
-            {
-              status: "MISSING",
-              reason: "Optional enrichment still running; no current 7th/8th/9th bullpen role path is available.",
-            },
-            { status: "NOT_FOUND", reason: "Optional park research still running." },
-            { source: "FANTASYPROS", note: "Daily projected components only; no probability, odds, or recommendation." },
-            missing,
-            "RANK_DONT_GATE: baseline ordinal rank from the FantasyPros daily projection snapshot; ties share ranks. Optional research may later disagree, but no probability or recommendation is implied.",
-            ingestRunId,
+            slateDate, item.row.game_pk, item.row.player_id, definition.market, item.value, rank,
+            item.row.snapshot_retrieved_at, item.row.lineup_state, item.row.batting_order, ingestRunId,
           ],
         );
         written += 1;
@@ -182,8 +142,8 @@ export async function runFantasyProsBaseline(slateDate: string): Promise<Fantasy
       candidatesWritten: written,
       skippedMissingProjectionFields: skipped,
       notes: [
-        "FantasyPros baseline rankings are available before optional Statcast, park, and bullpen enrichment.",
-        "H+R+RBI is emitted only when FantasyPros provides hits, runs, and RBI projection fields.",
+        "FantasyPros reference ranks are available before independent Statcast, park, bullpen, and matchup research.",
+        "Reference values are comparison-only and never create, sort, or overwrite a research candidate.",
       ],
     };
   } catch (error) {

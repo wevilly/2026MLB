@@ -2219,15 +2219,14 @@ export const GetAnalystModelValidationResponse = zod.object({
 
 /**
  * Resolves current research candidates to corrected frozen pregame snapshots,
- * verifies the immutable ACTIVE model artifact for each market, then stores
- * calibrated probability and confidence. FIRE/HALF/HOLD/NONE are confidence
- * states, not betting recommendations. This endpoint accepts no odds,
- * prices, EV, CLV, sportsbook, or recommendation data.
- * @summary Persist the server-computed daily confidence board
+ * materializes independent research ranks and retains FantasyPros values as
+ * reference-only lineage. It does not train, promote, or present models,
+ * calibrated probabilities, confidence labels, or recommendations.
+ * @summary Materialize the independent daily research board
  */
 export const RefreshAnalystDailyMarketBoardQueryParams = zod.object({
   "date": zod.date().optional(),
-  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional()
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI']).optional()
 })
 
 export const refreshAnalystDailyMarketBoardResponseCandidatesFoundMin = 0;
@@ -2240,7 +2239,7 @@ export const refreshAnalystDailyMarketBoardResponseResearchOnlyRowsMin = 0;
 
 export const RefreshAnalystDailyMarketBoardResponse = zod.object({
   "slateDate": zod.coerce.date(),
-  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).nullable(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI']).nullable(),
   "candidatesFound": zod.number().int().min(refreshAnalystDailyMarketBoardResponseCandidatesFoundMin),
   "modeledRows": zod.number().int().min(refreshAnalystDailyMarketBoardResponseModeledRowsMin),
   "researchOnlyRows": zod.number().int().min(refreshAnalystDailyMarketBoardResponseResearchOnlyRowsMin)
@@ -2248,14 +2247,15 @@ export const RefreshAnalystDailyMarketBoardResponse = zod.object({
 
 
 /**
- * Returns only server-persisted research and model confidence rows. A FIRE
- * requires STRONG research plus model confirmation at the FIRE probability
- * threshold. No model or calibration is exposed as NONE / RESEARCH_ONLY.
- * @summary Get persisted market confidence rows
+ * Returns independently ranked research rows with optional FantasyPros
+ * comparison ranks, evidence readiness, and PASS/BLOCKED conclusions.
+ * No model prediction, confidence, probability, or betting fields are
+ * presented.
+ * @summary Get independent daily market research rows
  */
 export const GetAnalystDailyMarketBoardQueryParams = zod.object({
   "date": zod.date().optional(),
-  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).optional()
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI']).optional()
 })
 
 export const getAnalystDailyMarketBoardResponseTotalMin = 0;
@@ -2264,27 +2264,28 @@ export const getAnalystDailyMarketBoardResponseTotalMin = 0;
 
 export const GetAnalystDailyMarketBoardResponse = zod.object({
   "date": zod.coerce.date(),
-  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']).nullable(),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI']).nullable(),
   "entries": zod.array(zod.object({
   "boardId": zod.string(),
   "slateDate": zod.coerce.date(),
   "gamePk": zod.number().int(),
   "playerId": zod.number().int(),
   "playerName": zod.string(),
-  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI']),
   "researchRank": zod.number().int().nullable(),
   "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
   "primaryMechanism": zod.string().nullable(),
-  "modelPrediction": zod.number().nullable(),
-  "confidenceLabel": zod.enum(['FIRE', 'HALF', 'HOLD', 'NONE']),
-  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_DECLINED', 'ARTIFACT_INVALID', 'MARKET_MISMATCH', 'INSUFFICIENT_FEATURES']).describe('Why the row carries the confidence it does. ARTIFACT_INVALID means\nthe ACTIVE artifact failed verification. MARKET_MISMATCH means the\nartifact is for another market. INSUFFICIENT_FEATURES means the\ninference vector did not cover enough of the model\'s frozen feature\nschema for a probability to be emitted. MODEL_DECLINED means the\nmodel ran and returned a probability below the confirmation\nthreshold, and carries that probability.\n'),
-  "calibratedProbability": zod.number().nullable(),
-  "modelVersionId": zod.string().nullable(),
-  "featureCoverage": zod.number().nullable().describe('Fraction of the model\'s frozen feature schema this row supplied.'),
-  "imputedFeatures": zod.array(zod.string()).describe('Features the model expected that this row did not supply. Imputed with their training means.'),
-  "unknownFeatures": zod.array(zod.string()).describe('Feature keys this row supplied that the model has never seen.'),
-  "boardFrozenAt": zod.string()
-}).describe('One persisted confidence record. Model values are generated only by a\nverified ACTIVE artifact with accepted calibration; no betting fields are\npart of this contract.\n')),
+  "referenceRank": zod.number().int().nullable(),
+  "referenceProjectedValue": zod.number().nullable(),
+  "referenceRetrievedAt": zod.string().nullable(),
+  "referenceComparison": zod.enum(['AGREE', 'DISAGREE', 'NOT_AVAILABLE']),
+  "evidenceStatus": zod.enum(['READY', 'PARTIAL', 'BLOCKED']),
+  "decisionStatus": zod.enum(['PASS', 'BLOCKED']),
+  "counterEvidence": zod.record(zod.string(), zod.unknown()),
+  "starterMatchupEvidence": zod.record(zod.string(), zod.unknown()),
+  "bullpenPathEvidence": zod.record(zod.string(), zod.unknown()),
+  "parkEvidence": zod.record(zod.string(), zod.unknown())
+}).describe('One independent market-research record with an optional FantasyPros\nreference rank. FantasyPros values are comparison-only and cannot\nselect, sort, or overwrite the independent rank.\n')),
   "total": zod.number().int().min(getAnalystDailyMarketBoardResponseTotalMin),
   "readiness": zod.object({
   "currentDate": zod.string(),
@@ -2341,20 +2342,21 @@ export const GetAnalystDailyBoardGameSummaryResponse = zod.object({
   "gamePk": zod.number().int(),
   "playerId": zod.number().int(),
   "playerName": zod.string(),
-  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR']),
+  "market": zod.enum(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI']),
   "researchRank": zod.number().int().nullable(),
   "researchState": zod.enum(['STRONG', 'POSITIVE', 'NEUTRAL', 'NEGATIVE', 'BLOCKED']),
   "primaryMechanism": zod.string().nullable(),
-  "modelPrediction": zod.number().nullable(),
-  "confidenceLabel": zod.enum(['FIRE', 'HALF', 'HOLD', 'NONE']),
-  "confidenceBasis": zod.enum(['RESEARCH_ONLY', 'MODEL_CONFIRMED', 'MODEL_DECLINED', 'ARTIFACT_INVALID', 'MARKET_MISMATCH', 'INSUFFICIENT_FEATURES']).describe('Why the row carries the confidence it does. ARTIFACT_INVALID means\nthe ACTIVE artifact failed verification. MARKET_MISMATCH means the\nartifact is for another market. INSUFFICIENT_FEATURES means the\ninference vector did not cover enough of the model\'s frozen feature\nschema for a probability to be emitted. MODEL_DECLINED means the\nmodel ran and returned a probability below the confirmation\nthreshold, and carries that probability.\n'),
-  "calibratedProbability": zod.number().nullable(),
-  "modelVersionId": zod.string().nullable(),
-  "featureCoverage": zod.number().nullable().describe('Fraction of the model\'s frozen feature schema this row supplied.'),
-  "imputedFeatures": zod.array(zod.string()).describe('Features the model expected that this row did not supply. Imputed with their training means.'),
-  "unknownFeatures": zod.array(zod.string()).describe('Feature keys this row supplied that the model has never seen.'),
-  "boardFrozenAt": zod.string()
-}).describe('One persisted confidence record. Model values are generated only by a\nverified ACTIVE artifact with accepted calibration; no betting fields are\npart of this contract.\n'))
+  "referenceRank": zod.number().int().nullable(),
+  "referenceProjectedValue": zod.number().nullable(),
+  "referenceRetrievedAt": zod.string().nullable(),
+  "referenceComparison": zod.enum(['AGREE', 'DISAGREE', 'NOT_AVAILABLE']),
+  "evidenceStatus": zod.enum(['READY', 'PARTIAL', 'BLOCKED']),
+  "decisionStatus": zod.enum(['PASS', 'BLOCKED']),
+  "counterEvidence": zod.record(zod.string(), zod.unknown()),
+  "starterMatchupEvidence": zod.record(zod.string(), zod.unknown()),
+  "bullpenPathEvidence": zod.record(zod.string(), zod.unknown()),
+  "parkEvidence": zod.record(zod.string(), zod.unknown())
+}).describe('One independent market-research record with an optional FantasyPros\nreference rank. FantasyPros values are comparison-only and cannot\nselect, sort, or overwrite the independent rank.\n'))
 })),
   "total": zod.number().int().min(getAnalystDailyBoardGameSummaryResponseTotalMin),
   "readiness": zod.object({

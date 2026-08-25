@@ -1916,6 +1916,7 @@ export const DailyMarketBoardEntryMarket = {
   XBH: 'XBH',
   WALK: 'WALK',
   HR: 'HR',
+  H_R_RBI: 'H_R_RBI',
 } as const;
 
 export type DailyMarketBoardEntryResearchState = typeof DailyMarketBoardEntryResearchState[keyof typeof DailyMarketBoardEntryResearchState];
@@ -1929,41 +1930,44 @@ export const DailyMarketBoardEntryResearchState = {
   BLOCKED: 'BLOCKED',
 } as const;
 
-export type DailyMarketBoardEntryConfidenceLabel = typeof DailyMarketBoardEntryConfidenceLabel[keyof typeof DailyMarketBoardEntryConfidenceLabel];
+export type DailyMarketBoardEntryReferenceComparison = typeof DailyMarketBoardEntryReferenceComparison[keyof typeof DailyMarketBoardEntryReferenceComparison];
 
 
-export const DailyMarketBoardEntryConfidenceLabel = {
-  FIRE: 'FIRE',
-  HALF: 'HALF',
-  HOLD: 'HOLD',
-  NONE: 'NONE',
+export const DailyMarketBoardEntryReferenceComparison = {
+  AGREE: 'AGREE',
+  DISAGREE: 'DISAGREE',
+  NOT_AVAILABLE: 'NOT_AVAILABLE',
 } as const;
 
-/**
- * Why the row carries the confidence it does. ARTIFACT_INVALID means
- * the ACTIVE artifact failed verification. MARKET_MISMATCH means the
- * artifact is for another market. INSUFFICIENT_FEATURES means the
- * inference vector did not cover enough of the model's frozen feature
- * schema for a probability to be emitted. MODEL_DECLINED means the
- * model ran and returned a probability below the confirmation
- * threshold, and carries that probability.
- */
-export type DailyMarketBoardEntryConfidenceBasis = typeof DailyMarketBoardEntryConfidenceBasis[keyof typeof DailyMarketBoardEntryConfidenceBasis];
+export type DailyMarketBoardEntryEvidenceStatus = typeof DailyMarketBoardEntryEvidenceStatus[keyof typeof DailyMarketBoardEntryEvidenceStatus];
 
 
-export const DailyMarketBoardEntryConfidenceBasis = {
-  RESEARCH_ONLY: 'RESEARCH_ONLY',
-  MODEL_CONFIRMED: 'MODEL_CONFIRMED',
-  MODEL_DECLINED: 'MODEL_DECLINED',
-  ARTIFACT_INVALID: 'ARTIFACT_INVALID',
-  MARKET_MISMATCH: 'MARKET_MISMATCH',
-  INSUFFICIENT_FEATURES: 'INSUFFICIENT_FEATURES',
+export const DailyMarketBoardEntryEvidenceStatus = {
+  READY: 'READY',
+  PARTIAL: 'PARTIAL',
+  BLOCKED: 'BLOCKED',
 } as const;
 
+export type DailyMarketBoardEntryDecisionStatus = typeof DailyMarketBoardEntryDecisionStatus[keyof typeof DailyMarketBoardEntryDecisionStatus];
+
+
+export const DailyMarketBoardEntryDecisionStatus = {
+  PASS: 'PASS',
+  BLOCKED: 'BLOCKED',
+} as const;
+
+export type DailyMarketBoardEntryCounterEvidence = { [key: string]: unknown };
+
+export type DailyMarketBoardEntryStarterMatchupEvidence = { [key: string]: unknown };
+
+export type DailyMarketBoardEntryBullpenPathEvidence = { [key: string]: unknown };
+
+export type DailyMarketBoardEntryParkEvidence = { [key: string]: unknown };
+
 /**
- * One persisted confidence record. Model values are generated only by a
- * verified ACTIVE artifact with accepted calibration; no betting fields are
- * part of this contract.
+ * One independent market-research record with an optional FantasyPros
+ * reference rank. FantasyPros values are comparison-only and cannot
+ * select, sort, or overwrite the independent rank.
  */
 export interface DailyMarketBoardEntry {
   boardId: string;
@@ -1978,32 +1982,18 @@ export interface DailyMarketBoardEntry {
   /** @nullable */
   primaryMechanism: string | null;
   /** @nullable */
-  modelPrediction: number | null;
-  confidenceLabel: DailyMarketBoardEntryConfidenceLabel;
-  /**
-     * Why the row carries the confidence it does. ARTIFACT_INVALID means
-     * the ACTIVE artifact failed verification. MARKET_MISMATCH means the
-     * artifact is for another market. INSUFFICIENT_FEATURES means the
-     * inference vector did not cover enough of the model's frozen feature
-     * schema for a probability to be emitted. MODEL_DECLINED means the
-     * model ran and returned a probability below the confirmation
-     * threshold, and carries that probability.
-     */
-  confidenceBasis: DailyMarketBoardEntryConfidenceBasis;
+  referenceRank: number | null;
   /** @nullable */
-  calibratedProbability: number | null;
+  referenceProjectedValue: number | null;
   /** @nullable */
-  modelVersionId: string | null;
-  /**
-     * Fraction of the model's frozen feature schema this row supplied.
-     * @nullable
-     */
-  featureCoverage: number | null;
-  /** Features the model expected that this row did not supply. Imputed with their training means. */
-  imputedFeatures: string[];
-  /** Feature keys this row supplied that the model has never seen. */
-  unknownFeatures: string[];
-  boardFrozenAt: string;
+  referenceRetrievedAt: string | null;
+  referenceComparison: DailyMarketBoardEntryReferenceComparison;
+  evidenceStatus: DailyMarketBoardEntryEvidenceStatus;
+  decisionStatus: DailyMarketBoardEntryDecisionStatus;
+  counterEvidence: DailyMarketBoardEntryCounterEvidence;
+  starterMatchupEvidence: DailyMarketBoardEntryStarterMatchupEvidence;
+  bullpenPathEvidence: DailyMarketBoardEntryBullpenPathEvidence;
+  parkEvidence: DailyMarketBoardEntryParkEvidence;
 }
 
 /**
@@ -2017,6 +2007,7 @@ export const DailyMarketBoardMarket = {
   XBH: 'XBH',
   WALK: 'WALK',
   HR: 'HR',
+  H_R_RBI: 'H_R_RBI',
 } as const;
 
 export interface DailyMarketBoard {
@@ -2041,6 +2032,7 @@ export const DailyMarketBoardRefreshResultMarket = {
   XBH: 'XBH',
   WALK: 'WALK',
   HR: 'HR',
+  H_R_RBI: 'H_R_RBI',
 } as const;
 
 export interface DailyMarketBoardRefreshResult {
@@ -3257,6 +3249,7 @@ export const RefreshAnalystDailyMarketBoardMarket = {
   XBH: 'XBH',
   WALK: 'WALK',
   HR: 'HR',
+  H_R_RBI: 'H_R_RBI',
 } as const;
 
 export type RefreshAnalystDailyMarketBoard400 = {
@@ -3276,6 +3269,7 @@ export const GetAnalystDailyMarketBoardMarket = {
   XBH: 'XBH',
   WALK: 'WALK',
   HR: 'HR',
+  H_R_RBI: 'H_R_RBI',
 } as const;
 
 export type GetAnalystDailyMarketBoard400 = {

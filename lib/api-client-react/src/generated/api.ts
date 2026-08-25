@@ -3937,11 +3937,10 @@ export const getRefreshAnalystDailyMarketBoardUrl = (params?: RefreshAnalystDail
 
 /**
  * Resolves current research candidates to corrected frozen pregame snapshots,
- * verifies the immutable ACTIVE model artifact for each market, then stores
- * calibrated probability and confidence. FIRE/HALF/HOLD/NONE are confidence
- * states, not betting recommendations. This endpoint accepts no odds,
- * prices, EV, CLV, sportsbook, or recommendation data.
- * @summary Persist the server-computed daily confidence board
+ * materializes independent research ranks and retains FantasyPros values as
+ * reference-only lineage. It does not train, promote, or present models,
+ * calibrated probabilities, confidence labels, or recommendations.
+ * @summary Materialize the independent daily research board
  */
 export const refreshAnalystDailyMarketBoard = async (params?: RefreshAnalystDailyMarketBoardParams, options?: Parameters<typeof customFetch>[1]): Promise<DailyMarketBoardRefreshResult> => {
 
@@ -3990,7 +3989,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RefreshAnalystDailyMarketBoardMutationError = ErrorType<RefreshAnalystDailyMarketBoard400>
 
     /**
- * @summary Persist the server-computed daily confidence board
+ * @summary Materialize the independent daily research board
  */
 export const useRefreshAnalystDailyMarketBoard = <TError = ErrorType<RefreshAnalystDailyMarketBoard400>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshAnalystDailyMarketBoard>>, TError,{params?: RefreshAnalystDailyMarketBoardParams}, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -4019,10 +4018,11 @@ export const getGetAnalystDailyMarketBoardUrl = (params?: GetAnalystDailyMarketB
 }
 
 /**
- * Returns only server-persisted research and model confidence rows. A FIRE
- * requires STRONG research plus model confirmation at the FIRE probability
- * threshold. No model or calibration is exposed as NONE / RESEARCH_ONLY.
- * @summary Get persisted market confidence rows
+ * Returns independently ranked research rows with optional FantasyPros
+ * comparison ranks, evidence readiness, and PASS/BLOCKED conclusions.
+ * No model prediction, confidence, probability, or betting fields are
+ * presented.
+ * @summary Get independent daily market research rows
  */
 export const getAnalystDailyMarketBoard = async (params?: GetAnalystDailyMarketBoardParams, options?: Parameters<typeof customFetch>[1]): Promise<DailyMarketBoard> => {
 
@@ -4069,7 +4069,7 @@ export type GetAnalystDailyMarketBoardQueryError = ErrorType<GetAnalystDailyMark
 
 
 /**
- * @summary Get persisted market confidence rows
+ * @summary Get independent daily market research rows
  */
 
 export function useGetAnalystDailyMarketBoard<TData = Awaited<ReturnType<typeof getAnalystDailyMarketBoard>>, TError = ErrorType<GetAnalystDailyMarketBoard400>>(

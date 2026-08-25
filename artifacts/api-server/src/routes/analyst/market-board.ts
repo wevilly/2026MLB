@@ -197,7 +197,6 @@ router.get("/analyst/market-board", async (req, res, next) => {
     const market = requestedBoardMarket(req.query.market);
     const entries = await queryDailyMarketBoard(date, market);
     const health = await analystDataHealth(date);
-    const allowValidatedModelPresentation = date === health.readiness.currentDate && health.readiness.usable;
     const presentationEntries = marketBoardPresentation(entries, health.readiness, date);
     res.json(GetAnalystDailyMarketBoardResponse.parse({
       date,
@@ -206,10 +205,8 @@ router.get("/analyst/market-board", async (req, res, next) => {
       total: presentationEntries.length,
       readiness: health.readiness,
       notes: [
-        allowValidatedModelPresentation
-          ? "Model-derived fields are shown only because the current date is READY and the persisted row has an accepted, explicitly validated ACTIVE model contract."
-          : `Research-only presentation: ${health.readiness.reason}`,
-        "Without the current-date validation contract, model prediction, calibrated probability, and confidence are intentionally suppressed.",
+        `Independent research presentation: ${health.readiness.reason}`,
+        "FantasyPros values are comparison-only; model prediction, calibrated probability, and confidence are never presented on this board.",
         "No odds, prices, EV, CLV, or related betting fields are included.",
       ],
     }));

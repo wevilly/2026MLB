@@ -1143,13 +1143,12 @@ paths:
     post:
       operationId: refreshAnalystDailyMarketBoard
       tags: [analyst]
-      summary: Persist the server-computed daily confidence board
+      summary: Materialize the independent daily research board
       description: |
         Resolves current research candidates to corrected frozen pregame snapshots,
-        verifies the immutable ACTIVE model artifact for each market, then stores
-        calibrated probability and confidence. FIRE/HALF/HOLD/NONE are confidence
-        states, not betting recommendations. This endpoint accepts no odds,
-        prices, EV, CLV, sportsbook, or recommendation data.
+        materializes independent research ranks and retains FantasyPros values as
+        reference-only lineage. It does not train, promote, or present models,
+        calibrated probabilities, confidence labels, or recommendations.
       parameters:
         - name: date
           in: query
@@ -1158,7 +1157,7 @@ paths:
         - name: market
           in: query
           required: false
-          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+          schema: { type: string, enum: [TB, XBH, WALK, HR, H_R_RBI] }
       responses:
         "201":
           description: Daily board population completed
@@ -1179,11 +1178,12 @@ paths:
     get:
       operationId: getAnalystDailyMarketBoard
       tags: [analyst]
-      summary: Get persisted market confidence rows
+      summary: Get independent daily market research rows
       description: |
-        Returns only server-persisted research and model confidence rows. A FIRE
-        requires STRONG research plus model confirmation at the FIRE probability
-        threshold. No model or calibration is exposed as NONE / RESEARCH_ONLY.
+        Returns independently ranked research rows with optional FantasyPros
+        comparison ranks, evidence readiness, and PASS/BLOCKED conclusions.
+        No model prediction, confidence, probability, or betting fields are
+        presented.
       parameters:
         - name: date
           in: query
@@ -1192,7 +1192,7 @@ paths:
         - name: market
           in: query
           required: false
-          schema: { type: string, enum: [TB, XBH, WALK, HR] }
+          schema: { type: string, enum: [TB, XBH, WALK, HR, H_R_RBI] }
       responses:
         "200":
           description: Persisted daily market board
@@ -2980,53 +2980,36 @@ components:
       type: object
       additionalProperties: false
       description: |
-        One persisted confidence record. Model values are generated only by a
-        verified ACTIVE artifact with accepted calibration; no betting fields are
-        part of this contract.
+        One independent market-research record with an optional FantasyPros
+        reference rank. FantasyPros values are comparison-only and cannot
+        select, sort, or overwrite the independent rank.
       properties:
         boardId: { type: string }
         slateDate: { type: string, format: date }
         gamePk: { type: integer }
         playerId: { type: integer }
         playerName: { type: string }
-        market: { type: string, enum: [TB, XBH, WALK, HR] }
+        market: { type: string, enum: [TB, XBH, WALK, HR, H_R_RBI] }
         researchRank: { type: ["integer", "null"] }
         researchState: { type: string, enum: [STRONG, POSITIVE, NEUTRAL, NEGATIVE, BLOCKED] }
         primaryMechanism: { type: ["string", "null"] }
-        modelPrediction: { type: ["number", "null"] }
-        confidenceLabel: { type: string, enum: [FIRE, HALF, HOLD, NONE] }
-        confidenceBasis:
-          type: string
-          description: |
-            Why the row carries the confidence it does. ARTIFACT_INVALID means
-            the ACTIVE artifact failed verification. MARKET_MISMATCH means the
-            artifact is for another market. INSUFFICIENT_FEATURES means the
-            inference vector did not cover enough of the model's frozen feature
-            schema for a probability to be emitted. MODEL_DECLINED means the
-            model ran and returned a probability below the confirmation
-            threshold, and carries that probability.
-          enum: [RESEARCH_ONLY, MODEL_CONFIRMED, MODEL_DECLINED, ARTIFACT_INVALID, MARKET_MISMATCH, INSUFFICIENT_FEATURES]
-        calibratedProbability: { type: ["number", "null"] }
-        modelVersionId: { type: ["string", "null"] }
-        featureCoverage:
-          type: ["number", "null"]
-          description: Fraction of the model's frozen feature schema this row supplied.
-        imputedFeatures:
-          type: array
-          description: Features the model expected that this row did not supply. Imputed with their training means.
-          items: { type: string }
-        unknownFeatures:
-          type: array
-          description: Feature keys this row supplied that the model has never seen.
-          items: { type: string }
-        boardFrozenAt: { type: string }
-      required: [boardId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, modelPrediction, confidenceLabel, confidenceBasis, calibratedProbability, modelVersionId, featureCoverage, imputedFeatures, unknownFeatures, boardFrozenAt]
+        referenceRank: { type: ["integer", "null"] }
+        referenceProjectedValue: { type: ["number", "null"] }
+        referenceRetrievedAt: { type: ["string", "null"] }
+        referenceComparison: { type: string, enum: [AGREE, DISAGREE, NOT_AVAILABLE] }
+        evidenceStatus: { type: string, enum: [READY, PARTIAL, BLOCKED] }
+        decisionStatus: { type: string, enum: [PASS, BLOCKED] }
+        counterEvidence: { type: object, additionalProperties: true }
+        starterMatchupEvidence: { type: object, additionalProperties: true }
+        bullpenPathEvidence: { type: object, additionalProperties: true }
+        parkEvidence: { type: object, additionalProperties: true }
+      required: [boardId, slateDate, gamePk, playerId, playerName, market, researchRank, researchState, primaryMechanism, referenceRank, referenceProjectedValue, referenceRetrievedAt, referenceComparison, evidenceStatus, decisionStatus, counterEvidence, starterMatchupEvidence, bullpenPathEvidence, parkEvidence]
     DailyMarketBoard:
       type: object
       additionalProperties: false
       properties:
         date: { type: string, format: date }
-        market: { type: ["string", "null"], enum: [TB, XBH, WALK, HR] }
+        market: { type: ["string", "null"], enum: [TB, XBH, WALK, HR, H_R_RBI] }
         entries:
           type: array
           items: { $ref: "#/components/schemas/DailyMarketBoardEntry" }
@@ -3039,7 +3022,7 @@ components:
       additionalProperties: false
       properties:
         slateDate: { type: string, format: date }
-        market: { type: ["string", "null"], enum: [TB, XBH, WALK, HR] }
+        market: { type: ["string", "null"], enum: [TB, XBH, WALK, HR, H_R_RBI] }
         candidatesFound: { type: integer, minimum: 0 }
         modeledRows: { type: integer, minimum: 0 }
         researchOnlyRows: { type: integer, minimum: 0 }

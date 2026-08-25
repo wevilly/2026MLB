@@ -877,7 +877,7 @@ type Queryable = Pick<typeof pool, "query">;
 const RANK_SEMANTICS =
   "RANK_DONT_GATE: ordinal rank with transparent feature evidence; ties surfaced not collapsed; no threshold or gate implied";
 
-const CANDIDATE_COLUMNS = 17;
+const CANDIDATE_COLUMNS = 16;
 const CANDIDATE_CHUNK_ROWS = 200;
 
 function candidateValues(c: TBCandidate, ingestRunId: string) {
@@ -891,7 +891,6 @@ function candidateValues(c: TBCandidate, ingestRunId: string) {
     JSON.stringify(buildParkEvidence(c)),
     JSON.stringify(buildRecentVsSeasonVsCareer(c)),
     JSON.stringify(buildCounterEvidenceJson(c)),
-    c.missingData.length > 0 ? c.missingData.join("; ") : null,
     RANK_SEMANTICS,
     ingestRunId,
   ];
@@ -933,26 +932,19 @@ export async function writeCandidates(
           primary_mechanism, secondary_mechanism,
           opportunity_evidence, starter_matchup_evidence, bullpen_path_evidence,
           park_evidence, recent_vs_season_vs_career, counter_evidence,
-          missing_stale_evidence, rank_semantics, ingest_run_id)
+          rank_semantics, ingest_run_id)
        VALUES ${rowPlaceholders.join(",")}
        ON CONFLICT (slate_date, market, player_id, game_pk) DO UPDATE SET
          research_rank = EXCLUDED.research_rank,
          research_state = EXCLUDED.research_state,
          primary_mechanism = EXCLUDED.primary_mechanism,
          secondary_mechanism = EXCLUDED.secondary_mechanism,
-          opportunity_evidence = CASE
-            WHEN market_research_candidates.opportunity_evidence->>'source' = 'FANTASYPROS'
-              THEN jsonb_build_object('baseline', market_research_candidates.opportunity_evidence, 'research', EXCLUDED.opportunity_evidence)
-            WHEN market_research_candidates.opportunity_evidence ? 'baseline'
-              THEN jsonb_set(market_research_candidates.opportunity_evidence, '{research}', EXCLUDED.opportunity_evidence, true)
-            ELSE EXCLUDED.opportunity_evidence
-          END,
+          opportunity_evidence = EXCLUDED.opportunity_evidence,
          starter_matchup_evidence = EXCLUDED.starter_matchup_evidence,
          bullpen_path_evidence = EXCLUDED.bullpen_path_evidence,
          park_evidence = EXCLUDED.park_evidence,
          recent_vs_season_vs_career = EXCLUDED.recent_vs_season_vs_career,
          counter_evidence = EXCLUDED.counter_evidence,
-         missing_stale_evidence = EXCLUDED.missing_stale_evidence,
          ingest_run_id = EXCLUDED.ingest_run_id,
          updated_at = now()
        RETURNING candidate_id, player_id, game_pk::text AS game_pk`,

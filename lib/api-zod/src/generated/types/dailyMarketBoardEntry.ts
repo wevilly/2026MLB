@@ -5,15 +5,20 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { DailyMarketBoardEntryConfidenceBasis } from './dailyMarketBoardEntryConfidenceBasis';
-import type { DailyMarketBoardEntryConfidenceLabel } from './dailyMarketBoardEntryConfidenceLabel';
+import type { DailyMarketBoardEntryBullpenPathEvidence } from './dailyMarketBoardEntryBullpenPathEvidence';
+import type { DailyMarketBoardEntryCounterEvidence } from './dailyMarketBoardEntryCounterEvidence';
+import type { DailyMarketBoardEntryDecisionStatus } from './dailyMarketBoardEntryDecisionStatus';
+import type { DailyMarketBoardEntryEvidenceStatus } from './dailyMarketBoardEntryEvidenceStatus';
 import type { DailyMarketBoardEntryMarket } from './dailyMarketBoardEntryMarket';
+import type { DailyMarketBoardEntryParkEvidence } from './dailyMarketBoardEntryParkEvidence';
+import type { DailyMarketBoardEntryReferenceComparison } from './dailyMarketBoardEntryReferenceComparison';
 import type { DailyMarketBoardEntryResearchState } from './dailyMarketBoardEntryResearchState';
+import type { DailyMarketBoardEntryStarterMatchupEvidence } from './dailyMarketBoardEntryStarterMatchupEvidence';
 
 /**
- * One persisted confidence record. Model values are generated only by a
- * verified ACTIVE artifact with accepted calibration; no betting fields are
- * part of this contract.
+ * One independent market-research record with an optional FantasyPros
+ * reference rank. FantasyPros values are comparison-only and cannot
+ * select, sort, or overwrite the independent rank.
  */
 export interface DailyMarketBoardEntry {
   boardId: string;
@@ -28,30 +33,16 @@ export interface DailyMarketBoardEntry {
   /** @nullable */
   primaryMechanism: string | null;
   /** @nullable */
-  modelPrediction: number | null;
-  confidenceLabel: DailyMarketBoardEntryConfidenceLabel;
-  /**
-     * Why the row carries the confidence it does. ARTIFACT_INVALID means
-     * the ACTIVE artifact failed verification. MARKET_MISMATCH means the
-     * artifact is for another market. INSUFFICIENT_FEATURES means the
-     * inference vector did not cover enough of the model's frozen feature
-     * schema for a probability to be emitted. MODEL_DECLINED means the
-     * model ran and returned a probability below the confirmation
-     * threshold, and carries that probability.
-     */
-  confidenceBasis: DailyMarketBoardEntryConfidenceBasis;
+  referenceRank: number | null;
   /** @nullable */
-  calibratedProbability: number | null;
+  referenceProjectedValue: number | null;
   /** @nullable */
-  modelVersionId: string | null;
-  /**
-     * Fraction of the model's frozen feature schema this row supplied.
-     * @nullable
-     */
-  featureCoverage: number | null;
-  /** Features the model expected that this row did not supply. Imputed with their training means. */
-  imputedFeatures: string[];
-  /** Feature keys this row supplied that the model has never seen. */
-  unknownFeatures: string[];
-  boardFrozenAt: string;
+  referenceRetrievedAt: string | null;
+  referenceComparison: DailyMarketBoardEntryReferenceComparison;
+  evidenceStatus: DailyMarketBoardEntryEvidenceStatus;
+  decisionStatus: DailyMarketBoardEntryDecisionStatus;
+  counterEvidence: DailyMarketBoardEntryCounterEvidence;
+  starterMatchupEvidence: DailyMarketBoardEntryStarterMatchupEvidence;
+  bullpenPathEvidence: DailyMarketBoardEntryBullpenPathEvidence;
+  parkEvidence: DailyMarketBoardEntryParkEvidence;
 }

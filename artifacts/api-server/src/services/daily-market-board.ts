@@ -2,6 +2,7 @@ import { pool } from "@workspace/db";
 import { verifyModelArtifact } from "../lib/model-artifact-storage";
 import {
   DB_TO_MARKET,
+  HRRBI_DB_MARKET,
   MARKET_TO_DB,
   type DbModelMarket,
   type ModelMarket,
@@ -18,8 +19,8 @@ import {
 } from "./model-math";
 
 type JsonObject = Record<string, unknown>;
-export type BoardMarket = ModelMarket;
-type DbMarket = DbModelMarket;
+export type BoardMarket = ModelMarket | "H_R_RBI";
+type DbMarket = DbModelMarket | typeof HRRBI_DB_MARKET;
 
 /**
  * Research states that must never appear on the materialized board.
@@ -37,7 +38,7 @@ const EXCLUDED_RESEARCH_STATES_SQL = BOARD_EXCLUDED_RESEARCH_STATES
 
 type ActiveModel = {
   versionId: string;
-  market: DbMarket;
+  market: DbModelMarket;
   featureSetHash: string;
   algorithm: string;
   artifactKey: string;
@@ -57,7 +58,7 @@ export class DailyMarketBoardValidationError extends Error {
 async function loadActiveModels() {
   const result = await pool.query<{
     version_id: string;
-    market: DbMarket;
+    market: DbModelMarket;
     feature_set_hash: string;
     algorithm: string;
     artifact_key: string;
@@ -76,8 +77,8 @@ async function loadActiveModels() {
        AND calibration_intercept IS NOT NULL
      ORDER BY market, trained_at DESC`,
   );
-  const models = new Map<DbMarket, { model: ActiveModel; artifact: ModelArtifact }>();
-  const rejectedModels = new Map<DbMarket, ActiveModel>();
+  const models = new Map<DbModelMarket, { model: ActiveModel; artifact: ModelArtifact }>();
+  const rejectedModels = new Map<DbModelMarket, ActiveModel>();
   for (const row of result.rows) {
     const model: ActiveModel = {
       versionId: row.version_id,
@@ -215,18 +216,13 @@ export function confidenceFor(
 }
 
 export async function populateDailyMarketBoard(slateDate: string, market: BoardMarket | null = null) {
-  const dbMarket = market ? MARKET_TO_DB[market] : null;
+  const dbMarket = market
+    ? market === "H_R_RBI" ? HRRBI_DB_MARKET : MARKET_TO_DB[market]
+    : null;
   const activeModels = await loadActiveModels();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    // H+R+RBI is a Round Robin research-only market. It has no daily-board
-    // model contract and must never be materialized alongside settled markets.
-    await client.query(
-      `DELETE FROM daily_market_board
-        WHERE slate_date = $1 AND market = 'HITS_RUNS_RBI_2_PLUS'`,
-      [slateDate],
-    );
     const candidates = await client.query<{
     game_pk: number;
     player_id: number;
@@ -255,7 +251,6 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
           LIMIT 1
        ) pfs ON true
       WHERE mrc.slate_date = $1
-        AND mrc.market <> 'HITS_RUNS_RBI_2_PLUS'
         AND ($2::market_type IS NULL OR mrc.market = $2::market_type)
         AND mrc.research_state NOT IN (${EXCLUDED_RESEARCH_STATES_SQL})
       ORDER BY mrc.market, mrc.research_rank ASC NULLS LAST, mrc.player_id`,
@@ -286,14 +281,24 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
     );
     let modeledRows = 0;
     for (const candidate of candidates.rows) {
-      const marketCode = DB_TO_MARKET[candidate.market];
-      const confidence = confidenceFor(
-        marketCode,
-        candidate.research_state,
-        activeModels.models.get(candidate.market),
-        activeModels.rejectedModels.get(candidate.market),
-        candidate.features,
-      );
+      const confidence = candidate.market === HRRBI_DB_MARKET
+        ? {
+          modelVersionId: null,
+          modelPrediction: null,
+          calibratedProbability: null,
+          confidenceLabel: "NONE" as const,
+          confidenceBasis: "RESEARCH_ONLY" as const,
+          featureCoverage: null,
+          imputedFeatures: [] as string[],
+          unknownFeatures: [] as string[],
+        }
+        : confidenceFor(
+          DB_TO_MARKET[candidate.market],
+          candidate.research_state,
+          activeModels.models.get(candidate.market),
+          activeModels.rejectedModels.get(candidate.market),
+          candidate.features,
+        );
       if (confidence.calibratedProbability !== null) modeledRows += 1;
       await client.query(
       `INSERT INTO daily_market_board
@@ -338,7 +343,6 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
          SELECT mrc.player_id, mrc.game_pk, mrc.market
            FROM market_research_candidates mrc
           WHERE mrc.slate_date = $1
-            AND mrc.market <> 'HITS_RUNS_RBI_2_PLUS'
             AND ($2::market_type IS NULL OR mrc.market = $2::market_type)
             AND mrc.research_state NOT IN (${EXCLUDED_RESEARCH_STATES_SQL})
        ),
@@ -381,52 +385,64 @@ export async function populateDailyMarketBoard(slateDate: string, market: BoardM
 }
 
 export async function queryDailyMarketBoard(slateDate: string, market: BoardMarket | null = null) {
-  const dbMarket = market ? MARKET_TO_DB[market] : null;
+  const dbMarket = market
+    ? market === "H_R_RBI" ? HRRBI_DB_MARKET : MARKET_TO_DB[market]
+    : null;
   const result = await pool.query<{
-    board_id: string; slate_date: string; game_pk: number; player_id: number; player_name: string;
+    candidate_id: string; slate_date: string; game_pk: number; player_id: number; player_name: string;
     market: DbMarket; research_rank: number | null; research_state: string; primary_mechanism: string | null;
-    model_prediction: string | null; confidence_label: string; confidence_basis: string;
-    calibrated_probability: string | null; model_version_id: string | null; board_frozen_at: string;
-    feature_coverage: string | null; imputed_features: unknown; unknown_features: unknown;
+    counter_evidence: unknown; starter_matchup_evidence: unknown; bullpen_path_evidence: unknown; park_evidence: unknown;
+    reference_rank: number | null; reference_projected_value: string | null; reference_retrieved_at: string | null;
   }>(
-    `SELECT dmb.board_id, dmb.slate_date::text, dmb.game_pk::bigint, dmb.player_id,
-            COALESCE(p.full_name, 'Unknown') AS player_name, dmb.market, dmb.research_rank,
-            dmb.research_state, dmb.primary_mechanism, dmb.model_prediction, dmb.confidence_label,
-            dmb.confidence_basis, dmb.calibrated_probability, dmb.model_version_id,
-            dmb.feature_coverage, dmb.imputed_features, dmb.unknown_features,
-            dmb.board_frozen_at::text
-       FROM daily_market_board dmb
-       JOIN players p ON p.player_id = dmb.player_id
-      WHERE dmb.slate_date = $1
-        AND ($2::market_type IS NULL OR dmb.market = $2::market_type)
-       ORDER BY dmb.market, dmb.research_rank ASC NULLS LAST, player_name`,
+    `SELECT mrc.candidate_id, mrc.slate_date::text, mrc.game_pk::bigint, mrc.player_id,
+            COALESCE(p.full_name, 'Unknown') AS player_name, mrc.market, mrc.research_rank,
+            mrc.research_state, mrc.primary_mechanism, mrc.counter_evidence,
+            mrc.starter_matchup_evidence, mrc.bullpen_path_evidence, mrc.park_evidence,
+            fp.reference_rank, fp.projected_value::text AS reference_projected_value,
+            fp.snapshot_retrieved_at::text AS reference_retrieved_at
+       FROM market_research_candidates mrc
+       JOIN players p ON p.player_id = mrc.player_id
+       LEFT JOIN LATERAL (
+         SELECT reference_rank, projected_value, snapshot_retrieved_at
+           FROM fantasypros_reference_ranks
+          WHERE slate_date = mrc.slate_date
+            AND game_pk = mrc.game_pk
+            AND player_id = mrc.player_id
+            AND market = mrc.market
+          ORDER BY snapshot_retrieved_at DESC, created_at DESC
+          LIMIT 1
+       ) fp ON true
+      WHERE mrc.slate_date = $1
+        AND ($2::market_type IS NULL OR mrc.market = $2::market_type)
+       ORDER BY mrc.market, mrc.research_rank ASC NULLS LAST, player_name`,
     [slateDate, dbMarket],
   );
   return result.rows.map((row) => ({
-    boardId: row.board_id,
+    boardId: row.candidate_id,
     slateDate: row.slate_date,
     gamePk: Number(row.game_pk),
     playerId: row.player_id,
     playerName: row.player_name,
-    market: DB_TO_MARKET[row.market],
+    market: row.market === HRRBI_DB_MARKET ? "H_R_RBI" : DB_TO_MARKET[row.market],
     researchRank: row.research_rank,
     researchState: row.research_state,
     primaryMechanism: row.primary_mechanism,
-    modelPrediction: row.model_prediction === null ? null : Number(row.model_prediction),
-    confidenceLabel: row.confidence_label,
-    confidenceBasis: row.confidence_basis,
-    calibratedProbability: row.calibrated_probability === null ? null : Number(row.calibrated_probability),
-    modelVersionId: row.model_version_id,
-    // Which of the model's frozen features this row did not supply, and what
-    // fraction it did supply. A probability produced from a partial vector is
-    // visible as such rather than looking like a complete one.
-    featureCoverage: row.feature_coverage === null ? null : Number(row.feature_coverage),
-    imputedFeatures: Array.isArray(row.imputed_features) ? (row.imputed_features as string[]) : [],
-    // Keys the feature store now produces that the model has never seen. Not a
-    // failure, but a signal that the feature store has moved and the model is
-    // becoming stale.
-    unknownFeatures: Array.isArray(row.unknown_features) ? (row.unknown_features as string[]) : [],
-    boardFrozenAt: row.board_frozen_at,
+    referenceRank: row.reference_rank,
+    referenceProjectedValue: row.reference_projected_value === null ? null : Number(row.reference_projected_value),
+    referenceRetrievedAt: row.reference_retrieved_at,
+    referenceComparison: row.reference_rank === null || row.research_rank === null
+      ? "NOT_AVAILABLE"
+      : row.reference_rank === row.research_rank ? "AGREE" : "DISAGREE",
+    evidenceStatus: row.research_state === "BLOCKED"
+      ? "BLOCKED"
+      : row.reference_rank === null || !row.starter_matchup_evidence || !row.bullpen_path_evidence || !row.park_evidence
+        ? "PARTIAL"
+        : "READY",
+    decisionStatus: row.research_state === "BLOCKED" || row.research_rank === null ? "BLOCKED" : "PASS",
+    counterEvidence: row.counter_evidence && typeof row.counter_evidence === "object" ? row.counter_evidence : {},
+    starterMatchupEvidence: row.starter_matchup_evidence && typeof row.starter_matchup_evidence === "object" ? row.starter_matchup_evidence : {},
+    bullpenPathEvidence: row.bullpen_path_evidence && typeof row.bullpen_path_evidence === "object" ? row.bullpen_path_evidence : {},
+    parkEvidence: row.park_evidence && typeof row.park_evidence === "object" ? row.park_evidence : {},
   }));
 }
 
@@ -483,7 +499,8 @@ export async function queryDailyBoardGameSummary(
     topCandidates: entries
       .filter((entry) => entry.gamePk === Number(game.game_pk))
       .reduce<Partial<Record<BoardMarket, typeof entries[number]>>>((byMarket, entry) => {
-        if (!byMarket[entry.market]) byMarket[entry.market] = entry;
+        const market = entry.market as BoardMarket;
+        if (!byMarket[market]) byMarket[market] = entry;
         return byMarket;
       }, {}),
   }));

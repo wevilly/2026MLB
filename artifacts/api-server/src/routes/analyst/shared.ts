@@ -85,7 +85,7 @@ import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFa
 import { getBatterPitcherEvidence, refreshBatterPitcherSlate, type BvpMarket } from "../../services/batter-pitcher-research";
 import { compareRoundRobinGame, type RoundRobinBoardId, type RoundRobinCandidate } from "../../services/round-robin-comparison";
 import { LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter } from "../../services/lineup-sources";
-import { RR_DB_TO_MARKET, RR_MARKET_TO_DB } from "../../services/market-codes";
+import { ROUND_ROBIN_MARKETS, RR_DB_TO_MARKET, RR_MARKET_TO_DB } from "../../services/market-codes";
 import { getBullpenRoom, refreshBullpen } from "../../services/bullpen-foundation";
 import { runTBEngine } from "../../services/tb-engine";
 import { runXBHEngine } from "../../services/xbh-engine";
@@ -746,8 +746,8 @@ export function requestedModelMarket(value: unknown): ModelMarket {
 export function requestedBoardMarket(value: unknown): BoardMarket | null {
   if (value == null || value === "") return null;
   const market = String(value).trim().toUpperCase();
-  if (!MODEL_MARKETS.includes(market as ModelMarket)) {
-    throw new DailyMarketBoardValidationError("market must be TB, XBH, WALK, or HR");
+  if (!ROUND_ROBIN_MARKETS.includes(market as (typeof ROUND_ROBIN_MARKETS)[number])) {
+    throw new DailyMarketBoardValidationError("market must be TB, XBH, WALK, HR, or H_R_RBI");
   }
   return market as BoardMarket;
 }
@@ -757,21 +757,9 @@ export function marketBoardPresentation(
   readiness: OperationalReadiness,
   date: string,
 ) {
-  const validatedCurrentPresentation = date === readiness.currentDate && readiness.usable;
-  return validatedCurrentPresentation ? entries : entries.map((entry) => ({
-    ...entry,
-    modelPrediction: null,
-    calibratedProbability: null,
-    modelVersionId: null,
-    confidenceLabel: "NONE" as const,
-    confidenceBasis: "RESEARCH_ONLY" as const,
-    // The feature coverage disclosures describe a model output. When the model
-    // output is suppressed they are suppressed with it, so a research-only
-    // presentation never carries half of a model row.
-    featureCoverage: null,
-    imputedFeatures: [] as string[],
-    unknownFeatures: [] as string[],
-  }));
+  void readiness;
+  void date;
+  return entries;
 }
 
 // ── Phase 7A – Bettor Intelligence Ingestion and Lineage ──────────────────────

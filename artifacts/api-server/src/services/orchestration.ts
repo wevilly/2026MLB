@@ -2,6 +2,7 @@ import { pool } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { ingestFantasyPros, ingestMlbOfficial } from "./data-foundation";
 import { ingestResearch, researchHealth } from "./research-foundation";
+import { refreshBatterPitcherSlate } from "./batter-pitcher-research";
 import { refreshBullpen } from "./bullpen-foundation";
 import { refreshWeather } from "./weather-foundation";
 import { runTBEngine } from "./tb-engine";
@@ -15,9 +16,6 @@ import { populateDailyMarketBoard } from "./daily-market-board";
 import { recordAuditEvent } from "./audit";
 import { createMarketPostmortem, settleOfficialDate } from "./settlement";
 import { invalidateCache } from "./cache";
-import { MODEL_MARKETS } from "./market-codes";
-import { trainMarketModel } from "./model-training";
-import { validateModelVersion } from "./walk-forward-validation";
 
 export type OrchestrationTrigger = "SCHEDULED" | "OPERATOR";
 export type RunStepStatus = "PENDING" | "RUNNING" | "SUCCESS" | "WARNING" | "FAILED" | "CANCELLED";
@@ -31,8 +29,8 @@ export type RunStep = {
 
 const STEP_NAMES = [
   "fantasypros_ingest", "fantasypros_baseline", "research_refresh", "bullpen_refresh",
-  "weather_refresh", "tb_engine", "xbh_engine", "walk_engine", "hr_engine", "hrrbi_engine", "market_board",
-  "model_training", "health_check", "feature_snapshot_freeze",
+  "weather_refresh", "slate_matchup_refresh", "tb_engine", "xbh_engine", "walk_engine", "hr_engine", "hrrbi_engine", "market_board",
+  "health_check", "feature_snapshot_freeze",
 ] as const;
 
 const activeRuns = new Set<string>();
@@ -42,44 +40,6 @@ let schedulerStarted = false;
 // FantasyPros baseline while optional research was unavailable. Only work that
 // is still executing may block an operator-triggered refresh.
 const QUALIFYING_RUN_STATUSES = ["RUNNING"] as const;
-
-/**
- * Trains and validates each market, tolerating per-market failure. One market
- * without enough settled history must not stop the other three from
- * accumulating validation runs.
- */
-async function trainAndValidateMarkets() {
-  const outcomes: Array<Record<string, unknown>> = [];
-  for (const market of MODEL_MARKETS) {
-    try {
-      const trained = await trainMarketModel(market);
-      try {
-        const validated = await validateModelVersion(trained.versionId);
-        outcomes.push({
-          market,
-          versionId: trained.versionId,
-          validation: validated.status,
-          foldCount: validated.foldCount,
-          expectedCalibrationError: validated.expectedCalibrationError,
-        });
-      } catch (error) {
-        outcomes.push({
-          market,
-          versionId: trained.versionId,
-          validation: "ERROR",
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    } catch (error) {
-      outcomes.push({
-        market,
-        training: "ERROR",
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  return { markets: outcomes, promoted: false, note: "Promotion is operator-initiated and is never performed here." };
-}
 
 /** Games scheduled on the slate. The denominator for every expected-volume check. */
 async function scheduledGameCount(slateDate: string): Promise<number> {
@@ -313,10 +273,9 @@ async function executeRun(runId: string, slateDate: string) {
     if (!await runRequiredStep(runId, slateDate, steps, "fantasypros_baseline", () => runFantasyProsBaseline(slateDate))) return;
     const postIngestStart = await earliestStart(slateDate);
     await pool.query(`UPDATE orchestration_runs SET schedule = schedule || $2::jsonb WHERE run_id = $1`, [runId, JSON.stringify(scheduleFor(slateDate, postIngestStart))]);
-    // The baseline is a complete, auditable FantasyPros product. Everything
-    // below is optional enrichment and may not erase or delay it. Record any
-    // failure in the ledger, but continue so one unavailable research source
-    // cannot turn a usable projected-lineup slate into a blocked slate.
+    // FantasyPros establishes only the projected slate and reference context.
+    // Independent research below creates the actual ranks; a source outage is
+    // surfaced as PARTIAL rather than silently replaced by projection ordering.
     // How much work this slate should have produced. A warning-tolerant step
     // that returns nothing on a day with real games is recorded as a WARNING
     // with the expected versus actual counts, not as a clean pass.
@@ -326,21 +285,13 @@ async function executeRun(runId: string, slateDate: string) {
     // Weather must land before the engines: they read the slate's observations
     // and score a bounded weather term from them.
     await runStep(runId, steps, "weather_refresh", () => refreshWeather(slateDate), true, scheduledGames);
+    await runStep(runId, steps, "slate_matchup_refresh", () => refreshBatterPitcherSlate(slateDate), true, scheduledGames);
     await runStep(runId, steps, "tb_engine", () => runTBEngine(slateDate), true, scheduledGames);
     await runStep(runId, steps, "xbh_engine", () => runXBHEngine(slateDate), true, scheduledGames);
     await runStep(runId, steps, "walk_engine", () => runWALKEngine(slateDate), true, scheduledGames);
     await runStep(runId, steps, "hr_engine", () => runHREngine(slateDate), true, scheduledGames);
     await runStep(runId, steps, "hrrbi_engine", () => runHRRBIEngine(slateDate), true, scheduledGames);
     await runStep(runId, steps, "market_board", () => populateDailyMarketBoard(slateDate), true, scheduledGames);
-    // Train and validate every market on each run. The pipeline never trained
-    // or validated anything, which is why the model tables were stale and no
-    // version had ever accumulated validation history.
-    //
-    // This step writes CANDIDATE versions and walk-forward runs only. It does
-    // NOT promote: promotion is operator-initiated through
-    // POST /analyst/models/:versionId/promote and stays that way until at
-    // least two weeks of validation history exist.
-    await runStep(runId, steps, "model_training", () => trainAndValidateMarkets(), true);
     if (await cancellationRequested(runId)) {
       markPendingSkipped(steps, "Skipped because the run was interrupted");
       await finaliseRun(runId, slateDate, steps, "CANCELLED");

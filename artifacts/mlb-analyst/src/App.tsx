@@ -1498,6 +1498,7 @@ const MARKET_LABELS: Record<string, string> = {
   XBH: '1+ Extra Base Hit',
   WALK: 'Batter Walk',
   HR: 'Home Run',
+  H_R_RBI: 'H+R+RBI',
 };
 
 /**
@@ -2168,11 +2169,11 @@ function FeatureStorePage() {
 
 function MarketBoardPage() {
   const [dateParam, setDateParam] = useState('');
-  const [marketParam, setMarketParam] = useState<SettledMarketShortCode | ''>('');
+  const [marketParam, setMarketParam] = useState<MarketShortCode | ''>('');
   const effectiveDate = dateParam || currentEasternDate();
   const params = {
     date: effectiveDate,
-    ...(marketParam ? { market: marketParam as SettledMarketShortCode } : {}),
+    ...(marketParam ? { market: marketParam } : {}),
   };
   const boardQuery = useGetAnalystDailyMarketBoard(params);
   const gameQuery = useGetAnalystDailyBoardGameSummary({ date: effectiveDate });
@@ -2196,8 +2197,8 @@ function MarketBoardPage() {
           <Kicker>Daily research evidence / Phase 6</Kicker>
           <h1>Market <span className="slash">//</span> board</h1>
           <p>
-            Server-persisted research evidence for 2+ Total Bases, Extra Base Hit, Batter Walk, and Home Run.
-            Model signals remain hidden unless the current-date readiness and validation contract both pass.
+            Independent research for 2+ Total Bases, Extra Base Hit, Batter Walk, Home Run, and H+R+RBI.
+            FantasyPros ranks are retained as reference context only; they never determine the research order.
           </p>
         </div>
         <button
@@ -2221,11 +2222,11 @@ function MarketBoardPage() {
         <select
           className="search-input !h-[35px]"
           value={marketParam}
-          onChange={(e) => setMarketParam(e.target.value as SettledMarketShortCode | '')}
+          onChange={(e) => setMarketParam(e.target.value as MarketShortCode | '')}
           data-testid="select-market-board-market"
         >
           <option value="">All markets</option>
-          {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
+          {(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI'] as MarketShortCode[]).map((m) => (
             <option key={m} value={m}>{MARKET_LABELS[m]}</option>
           ))}
         </select>
@@ -2235,15 +2236,15 @@ function MarketBoardPage() {
         <div className="p-4 space-y-3">
           <Kicker>Operational presentation policy</Kicker>
           <p className="text-xs font-mono text-muted-foreground" data-testid="confidence-policy">
-            This is a research board by default. Model prediction, calibrated probability, and confidence are suppressed
-            unless the current Eastern-date health response is READY and the persisted row has an accepted, explicitly validated ACTIVE contract.
+            This board shows independently ranked research only. FantasyPros values are retained as comparison lineage;
+            model prediction, calibrated probability, and confidence are never displayed or used to make a selection.
           </p>
           <div className="flex flex-wrap gap-3 mt-3">
-            {(['TB', 'XBH', 'WALK', 'HR'] as MarketShortCode[]).map((m) => (
+          {(['TB', 'XBH', 'WALK', 'HR', 'H_R_RBI'] as MarketShortCode[]).map((m) => (
               <button
                 key={m}
                 className={`button button-quiet text-xs ${marketParam === m ? 'button-dark' : ''}`}
-                onClick={() => setMarketParam(marketParam === m ? '' : m as SettledMarketShortCode)}
+                onClick={() => setMarketParam(marketParam === m ? '' : m)}
                 data-testid={`market-filter-${m}`}
               >
                 {MARKET_LABELS[m]}
@@ -2261,9 +2262,9 @@ function MarketBoardPage() {
         <ReadinessStrip health={{ readiness: board.readiness, sources: [] }} />
         <div className="metric-grid mb-6">
           <Metric label="Candidates" value={board.total} note={`${marketParam ? MARKET_LABELS[marketParam] : 'all markets'} · ${effectiveDate}`} tone="accent" />
-          <Metric label="Market" value={marketParam ? MARKET_LABELS[marketParam] : 'All 4 markets'} note="TB / XBH / WALK / HR are independent" tone="neutral" />
-          <Metric label="Usable now" value={board.readiness.usable ? entries.length : 0} note={board.readiness.usable ? 'Current validated presentation' : 'Evidence remains audit-only'} tone={board.readiness.usable ? 'good' : 'warn'} />
-          <Metric label="Research-only" value={entries.filter((entry) => entry.confidenceBasis === 'RESEARCH_ONLY').length} note="No unsupported probability signal shown" tone="neutral" />
+          <Metric label="Market" value={marketParam ? MARKET_LABELS[marketParam] : 'All 5 markets'} note="Each market is independently ranked" tone="neutral" />
+          <Metric label="Evidence ready" value={entries.filter((entry) => entry.evidenceStatus === 'READY').length} note="Partial evidence is visible, not silently filled" tone="good" />
+          <Metric label="Auto picks" value="0" note="Research board records PASS or BLOCKED; no automatic selection" tone="neutral" />
         </div>
         </>
       )}
@@ -2275,11 +2276,10 @@ function MarketBoardPage() {
       ) : !board || board.total === 0 ? (
         <Panel>
           <div className="p-8 text-center space-y-3">
-            <Kicker>No persisted board rows</Kicker>
-            <h2 className="text-lg">Refresh the daily board after the research engines and snapshot capture have completed</h2>
+            <Kicker>No research rows</Kicker>
+            <h2 className="text-lg">Refresh the research engines after projected lineups have landed</h2>
             <p className="text-sm text-muted-foreground max-w-lg mx-auto">
-              This view intentionally reads persisted server outputs, not browser-derived confidence.
-              Research evidence stays visible for audit. It is never converted into probability or confidence guidance without a current accepted validation contract.
+              This view reads persisted research evidence, not browser-derived rankings. FantasyPros projections remain comparison values and never become selection inputs.
             </p>
           </div>
         </Panel>
@@ -2287,21 +2287,22 @@ function MarketBoardPage() {
         <>
         <Panel>
           <SectionHeading
-            eyebrow={`${board.total} persisted rows · ${effectiveDate}`}
+            eyebrow={`${board.total} independent research rows · ${effectiveDate}`}
             title="Research evidence board"
-            detail={board.readiness.usable ? 'Validated model context is eligible for display under the current-date contract.' : 'Audit-only evidence: model-derived probability and confidence are intentionally suppressed.'}
+            detail="Each row pairs an independent rank with its optional FantasyPros reference rank, readiness, and audit evidence."
           />
           <div className="table-wrap">
             <table className="data-table" data-testid="market-board-table">
               <thead>
                 <tr>
-                  <th>Rank</th>
+                  <th>Independent rank</th>
                   <th>Player</th>
                   <th>Market</th>
-                  <th>Research</th>
+                  <th>FantasyPros ref.</th>
+                  <th>Comparison</th>
                   <th>Mechanism</th>
-                  <th>Operational state</th>
-                  <th>Evidence policy</th>
+                  <th>Evidence</th>
+                  <th>Decision</th>
                 </tr>
               </thead>
               <tbody>
@@ -2310,19 +2311,15 @@ function MarketBoardPage() {
                     <td className="font-mono">{entry.researchRank ?? '—'}</td>
                     <td><strong>{entry.playerName}</strong></td>
                     <td><Badge tone="accent">{MARKET_LABELS[entry.market as MarketShortCode] ?? entry.market}</Badge></td>
-                    <td><Badge tone={toneFor(entry.researchState)}>{entry.researchState}</Badge></td>
+                    <td className="font-mono">{entry.referenceRank ?? '—'}</td>
+                    <td><Badge tone={entry.referenceComparison === 'DISAGREE' ? 'warn' : entry.referenceComparison === 'AGREE' ? 'good' : 'neutral'}>{entry.referenceComparison}</Badge></td>
                     <td className="text-xs">{entry.primaryMechanism ?? 'Not classified'}</td>
                     <td className="text-xs">
-                      <Badge tone={board.readiness.usable && entry.confidenceBasis === 'MODEL_CONFIRMED' ? 'good' : 'warn'}>{board.readiness.usable && entry.confidenceBasis === 'MODEL_CONFIRMED' ? 'VALIDATED MODEL' : 'RESEARCH ONLY'}</Badge>
+                      <Badge tone={toneFor(entry.evidenceStatus)}>{entry.evidenceStatus}</Badge>
                     </td>
                     <td className="text-xs">
-                      {CONFIDENCE_BASIS_NOTES[entry.confidenceBasis] ?? CONFIDENCE_BASIS_NOTES.RESEARCH_ONLY}
-                      {entry.imputedFeatures.length > 0 ? (
-                        <div className="mt-1 opacity-70">
-                          {entry.imputedFeatures.length} feature(s) imputed from training means
-                          {entry.featureCoverage === null ? '' : ` - ${Math.round(entry.featureCoverage * 100)}% coverage`}
-                        </div>
-                      ) : null}
+                      <Badge tone={toneFor(entry.decisionStatus)}>{entry.decisionStatus}</Badge>
+                      <div className="mt-1 opacity-70">No automatic pick or probability claim</div>
                     </td>
                   </tr>
                 ))}

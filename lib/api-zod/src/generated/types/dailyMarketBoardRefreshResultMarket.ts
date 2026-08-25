@@ -17,4 +17,5 @@ export const DailyMarketBoardRefreshResultMarket = {
   XBH: 'XBH',
   WALK: 'WALK',
   HR: 'HR',
+  H_R_RBI: 'H_R_RBI',
 } as const;

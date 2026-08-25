@@ -1274,6 +1274,36 @@ export const marketResearchCandidates = pgTable(
 );
 
 /**
+ * FantasyPros projections are retained as a pregame reference only. They are
+ * deliberately separate from market_research_candidates so a provider value
+ * cannot become an input, tie-breaker, or overwrite path for an independent
+ * research ranking.
+ */
+export const fantasyprosReferenceRanks = pgTable(
+  "fantasypros_reference_ranks",
+  {
+    referenceId: uuid("reference_id").primaryKey().defaultRandom(),
+    slateDate: date("slate_date").notNull(),
+    gamePk: bigint("game_pk", { mode: "number" }).notNull().references(() => games.gamePk),
+    playerId: integer("player_id").notNull().references(() => players.playerId),
+    market: marketTypeEnum("market").notNull(),
+    projectedValue: numeric("projected_value"),
+    referenceRank: integer("reference_rank").notNull(),
+    snapshotRetrievedAt: timestamp("snapshot_retrieved_at", { withTimezone: true }).notNull(),
+    lineupState: text("lineup_state").notNull(),
+    battingOrder: integer("batting_order"),
+    ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    referenceSnapshotUnique: uniqueIndex("fp_reference_snapshot_unique_idx").on(
+      table.slateDate, table.market, table.playerId, table.gamePk, table.snapshotRetrievedAt,
+    ),
+    referenceLookup: index("fp_reference_lookup_idx").on(table.slateDate, table.market, table.playerId, table.gamePk),
+  }),
+);
+
+/**
  * Structured evidence blocks for a candidate, keyed by block type and metric.
  * Each block is one atomic evidence item from one source.
  *
