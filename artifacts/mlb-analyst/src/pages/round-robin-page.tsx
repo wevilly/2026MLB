@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  exportAnalystRoundRobinWorkbook,
   useGetAnalystDataHealth,
   useGetAnalystMarketResearch,
   useGetAnalystRoundRobinComparison,
@@ -8,7 +9,7 @@ import {
   type MarketResearchCandidate,
   type RoundRobinSideComparison,
 } from '@workspace/api-client-react';
-import { AlertTriangle, CalendarDays, Info, Layers, Plus, RefreshCw, Search, X } from 'lucide-react';
+import { AlertTriangle, CalendarDays, Download, Info, Layers, Plus, RefreshCw, Search, X } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge, Kicker, LoadingPanel, Panel, QueryMessage, ReadinessStrip, SectionHeading, toneFor } from '../App';
 
@@ -189,6 +190,8 @@ export default function RoundRobinPage() {
   const [trays, setTrays] = useState<Record<BoardId, MarketResearchCandidate[]>>(createEmptyTrays);
   const [pendingCandidate, setPendingCandidate] = useState<MarketResearchCandidate | null>(null);
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const researchQuery = useGetAnalystMarketResearch({ date });
   const slateQuery = useGetAnalystToday({ date });
@@ -315,6 +318,30 @@ export default function RoundRobinPage() {
     setPendingCandidate(null);
   };
 
+  // The workbook is derived output: the platform stays the official record.
+  // It carries the comparison for RR1 through RR5 as it stands right now,
+  // including the sides that lost and the games with no selection.
+  const downloadWorkbook = async () => {
+    setExporting(true);
+    setExportStatus(null);
+    try {
+      const workbook = await exportAnalystRoundRobinWorkbook({ date });
+      const url = URL.createObjectURL(workbook);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `mlb-round-robins-${date}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setExportStatus(`Excel workbook for ${date} downloaded. RR1 through RR5, one sheet per surface.`);
+    } catch (error) {
+      setExportStatus(`Excel export failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const startRefresh = () => {
     setRefreshStatus(null);
     refreshOrchestration.mutate(
@@ -339,11 +366,16 @@ export default function RoundRobinPage() {
           <h1>Round Robin <span className="slash">//</span> workspace</h1>
           <p>Construct market-specific research combinations from the active MLB slate using only source-backed player context.</p>
         </div>
+        <button className="button button-quiet" onClick={downloadWorkbook} disabled={exporting} data-testid="button-export-round-robin-excel">
+          <Download size={15} />
+          {exporting ? 'Building workbook…' : 'Download Excel'}
+        </button>
         <button className="button button-dark" onClick={startRefresh} disabled={refreshOrchestration.isPending} data-testid="button-refresh-round-robin">
           <RefreshCw size={15} className={refreshOrchestration.isPending ? 'animate-spin' : ''} />
           {refreshOrchestration.isPending ? 'Starting…' : 'Refresh research'}
         </button>
         {refreshStatus && <small className="round-robin-refresh-status" role="status">{refreshStatus}</small>}
+        {exportStatus && <small className="round-robin-refresh-status" role="status" data-testid="text-export-status">{exportStatus}</small>}
       </div>
 
       <div className="round-robin-context">

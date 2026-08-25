@@ -117,6 +117,8 @@ export * from './dataHealthWeatherRefresh';
 export * from './dataHealthWeatherRefreshStatus';
 export * from './detectAnalystLateScratchesParams';
 export * from './errorResponse';
+export * from './exportAnalystRoundRobinWorkbookBoard';
+export * from './exportAnalystRoundRobinWorkbookParams';
 export * from './exportAnalystSlateJsonParams';
 export * from './exportAnalystWorkbookParams';
 export * from './featureSnapshotCorrectionInput';

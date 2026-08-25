@@ -62,6 +62,7 @@ import type {
   DataHealth,
   DetectAnalystLateScratchesParams,
   ErrorResponse,
+  ExportAnalystRoundRobinWorkbookParams,
   ExportAnalystSlateJsonParams,
   ExportAnalystWorkbookParams,
   FeatureSnapshotCorrectionInput,
@@ -1063,6 +1064,97 @@ export function useExportAnalystWorkbook<TData = Awaited<ReturnType<typeof expor
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getExportAnalystWorkbookQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getExportAnalystRoundRobinWorkbookUrl = (params?: ExportAnalystRoundRobinWorkbookParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/export/round-robin/workbook?${stringifiedParams}` : `/api/analyst/export/round-robin/workbook`
+}
+
+/**
+ * Derived output. One .xlsx carrying the same comparison the JSON surface
+ * returns: the selected construction per game, every leg with its evidence,
+ * both sides including the one that lost the comparison, and the ties,
+ * no-pair causes and bullpen disclosures as their own columns.
+ *
+ * Omit board to export RR1 through RR5 in one workbook. Excludes odds,
+ * price, EV, CLV, vig and probabilities, exactly as the comparison does.
+ * @summary Export the Round Robin comparison boards as an Excel workbook
+ */
+export const exportAnalystRoundRobinWorkbook = async (params?: ExportAnalystRoundRobinWorkbookParams, options?: Parameters<typeof customFetch>[1]): Promise<Blob> => {
+
+  return customFetch<Blob>(getExportAnalystRoundRobinWorkbookUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportAnalystRoundRobinWorkbookQueryKey = (params?: ExportAnalystRoundRobinWorkbookParams,) => {
+    return [
+    `/api/analyst/export/round-robin/workbook`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getExportAnalystRoundRobinWorkbookQueryOptions = <TData = Awaited<ReturnType<typeof exportAnalystRoundRobinWorkbook>>, TError = ErrorType<unknown>>(params?: ExportAnalystRoundRobinWorkbookParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportAnalystRoundRobinWorkbook>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportAnalystRoundRobinWorkbookQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportAnalystRoundRobinWorkbook>>> = ({ signal }) => exportAnalystRoundRobinWorkbook(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportAnalystRoundRobinWorkbook>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ExportAnalystRoundRobinWorkbookQueryResult = NonNullable<Awaited<ReturnType<typeof exportAnalystRoundRobinWorkbook>>>
+export type ExportAnalystRoundRobinWorkbookQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Export the Round Robin comparison boards as an Excel workbook
+ */
+
+export function useExportAnalystRoundRobinWorkbook<TData = Awaited<ReturnType<typeof exportAnalystRoundRobinWorkbook>>, TError = ErrorType<unknown>>(
+ params?: ExportAnalystRoundRobinWorkbookParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof exportAnalystRoundRobinWorkbook>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getExportAnalystRoundRobinWorkbookQueryOptions(params,options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

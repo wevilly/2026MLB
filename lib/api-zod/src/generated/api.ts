@@ -385,6 +385,24 @@ export const ExportAnalystWorkbookResponse = zod.unknown()
 
 
 /**
+ * Derived output. One .xlsx carrying the same comparison the JSON surface
+ * returns: the selected construction per game, every leg with its evidence,
+ * both sides including the one that lost the comparison, and the ties,
+ * no-pair causes and bullpen disclosures as their own columns.
+ *
+ * Omit board to export RR1 through RR5 in one workbook. Excludes odds,
+ * price, EV, CLV, vig and probabilities, exactly as the comparison does.
+ * @summary Export the Round Robin comparison boards as an Excel workbook
+ */
+export const ExportAnalystRoundRobinWorkbookQueryParams = zod.object({
+  "date": zod.date().optional(),
+  "board": zod.enum(['RR1', 'RR2', 'RR3', 'RR4', 'RR5']).optional()
+})
+
+export const ExportAnalystRoundRobinWorkbookResponse = zod.unknown()
+
+
+/**
  * @summary List append-only operational audit events
  */
 export const getAnalystAuditEventsQueryLimitMax = 500;

@@ -859,3 +859,211 @@ export function hasOperatorApprovalCapability(req: Parameters<RequestHandler>[0]
     return null;
   }
 }
+
+
+/**
+ * The Round Robin comparison, read from the database and compared.
+ *
+ * Lifted out of the GET /analyst/round-robin/comparison handler unchanged when
+ * the Excel export was added, so the JSON surface and the workbook answer from
+ * one query and one comparison rather than two that can drift apart. Both
+ * routes now format what this returns; neither decides anything the comparison
+ * did not.
+ */
+export const ROUND_ROBIN_BOARDS: RoundRobinBoardId[] = ["RR1", "RR2", "RR3", "RR4", "RR5"];
+
+export function isRoundRobinBoard(value: unknown): value is RoundRobinBoardId {
+  return typeof value === "string" && (ROUND_ROBIN_BOARDS as string[]).includes(value);
+}
+
+/** Both teams are evaluated before a construction is selected. Ties are surfaced, never collapsed. */
+export async function buildRoundRobinComparison(date: string, board: RoundRobinBoardId) {
+  const health = await analystDataHealth(date);
+  const operationallyUsable = date === health.readiness.currentDate && health.readiness.usable;
+  const rows = await pool.query<{
+    candidate_id: string; game_pk: number; player_id: number; player_name: string; market: string;
+    research_rank: number | null; research_state: "STRONG" | "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "BLOCKED";
+    primary_mechanism: string | null; opportunity_evidence: Record<string, unknown>; starter_matchup_evidence: Record<string, unknown>;
+    bullpen_path_evidence: Record<string, unknown>; park_evidence: Record<string, unknown>; counter_evidence: Record<string, unknown>;
+     missing_stale_evidence: string | null; identity_resolved: boolean; side: "AWAY" | "HOME"; team: string;
+     lineup_state: "POSTED" | "CONFIRMED" | "PROJECTED"; lineup_source: string;
+  }>(
+    `WITH accepted AS (
+       SELECT * FROM unnest($2::text[], $3::text[]) AS s(source_id, state)
+     ),
+     latest_lineup AS (
+       -- One projected lineup per team, selected through the documented
+       -- pregame policy in lineup-sources.ts. Official MLB cards are
+       -- retained separately for audit and settlement context.
+       SELECT DISTINCT ON (ls.game_pk, ls.team_id)
+          ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state, ls.source_id
+       FROM lineup_snapshots ls
+       JOIN games g ON g.game_pk = ls.game_pk
+       JOIN accepted a ON a.source_id = ls.source_id AND a.state = ls.state::text
+       WHERE g.game_date = $1
+       ORDER BY ls.game_pk, ls.team_id,
+         array_position($2::text[], ls.source_id),
+         CASE ls.state::text
+           WHEN 'POSTED' THEN 1
+           WHEN 'CONFIRMED' THEN 2
+           WHEN 'UPDATED' THEN 3
+           WHEN 'PROJECTED' THEN 4
+           ELSE 9
+         END,
+         ls.observed_at DESC
+     )
+     SELECT mrc.candidate_id, mrc.game_pk::bigint, mrc.player_id, COALESCE(p.full_name, 'Unknown') AS player_name,
+            mrc.market, mrc.research_rank, mrc.research_state, mrc.primary_mechanism,
+            mrc.opportunity_evidence, mrc.starter_matchup_evidence, mrc.bullpen_path_evidence,
+             mrc.park_evidence, mrc.counter_evidence, mrc.missing_stale_evidence, ll.state AS lineup_state, ll.source_id AS lineup_source,
+            CASE WHEN ll.team_id = g.away_team_id THEN 'AWAY' ELSE 'HOME' END AS side,
+            CASE WHEN ll.team_id = g.away_team_id THEN away.abbreviation ELSE home.abbreviation END AS team,
+            NOT EXISTS (
+              SELECT 1 FROM player_eligibility pe
+              WHERE pe.player_id = mrc.player_id
+                AND pe.source_id = 'FANTASYPROS'
+                AND pe.effective_date = mrc.slate_date
+                AND pe.requires_identity_review
+            ) AS identity_resolved
+     FROM market_research_candidates mrc
+     JOIN games g ON g.game_pk = mrc.game_pk
+     JOIN teams away ON away.team_id = g.away_team_id
+     JOIN teams home ON home.team_id = g.home_team_id
+     JOIN latest_lineup ll ON ll.game_pk = mrc.game_pk
+     JOIN lineup_entries le ON le.lineup_snapshot_id = ll.lineup_snapshot_id AND le.player_id = mrc.player_id
+     LEFT JOIN players p ON p.player_id = mrc.player_id
+     WHERE mrc.slate_date = $1
+     ORDER BY mrc.game_pk, side, mrc.research_rank ASC NULLS LAST, player_name`,
+    [date, ROUND_ROBIN_LINEUP_FILTER.sourceIds, ROUND_ROBIN_LINEUP_FILTER.states],
+  );
+
+  const candidates = await Promise.all(rows.rows.map(async (row) => {
+    const starterId = typeof row.starter_matchup_evidence?.starterPlayerId === "number"
+      ? row.starter_matchup_evidence.starterPlayerId
+      : null;
+    const starterState = typeof row.starter_matchup_evidence?.starterState === "string"
+      ? row.starter_matchup_evidence.starterState
+      : "UNKNOWN";
+    const baseEligibility = getMarketResearchSelectionEligibility({
+      researchState: row.research_state,
+      missingStaleEvidence: row.missing_stale_evidence,
+      identityResolved: row.identity_resolved,
+    });
+    const starterResolved = starterId !== null && !["UNKNOWN", "TBD"].includes(starterState);
+    const selectionBlockReason = !operationallyUsable
+      ? "BLOCKED"
+      : !starterResolved
+      ? "BLOCKED"
+      : baseEligibility.selectionBlockReason;
+    const selectable = operationallyUsable && starterResolved && baseEligibility.selectable;
+    const bvpEvidence = starterId && MARKET_DB_TO_SHORTCODE[row.market] !== "H_R_RBI"
+      ? await getBatterPitcherEvidence(row.player_id, starterId, date, MARKET_DB_TO_SHORTCODE[row.market] as BvpMarket)
+      : null;
+    const evidenceFreshness = row.missing_stale_evidence
+      ? /\bstale\b/i.test(row.missing_stale_evidence) ? "STALE" : "INCOMPLETE"
+      : "CURRENT";
+    return {
+      candidateId: row.candidate_id,
+      gamePk: Number(row.game_pk),
+      playerId: row.player_id,
+      playerName: row.player_name,
+      market: MARKET_DB_TO_SHORTCODE[row.market] as RoundRobinCandidate["market"],
+      researchRank: row.research_rank,
+      researchState: row.research_state,
+      side: row.side,
+      team: row.team,
+      selectable,
+      selectionBlockReason,
+      lineupState: row.lineup_state,
+      starterState,
+      bvpStatus: bvpEvidence?.status ?? "NOT_FOUND",
+      bvpEvidence,
+      arsenalStatus: bvpEvidence?.arsenal.status ?? "NOT_FOUND",
+      evidenceFreshness,
+      evidenceFreshnessDetail: row.missing_stale_evidence,
+      primaryMechanism: row.primary_mechanism,
+      opportunityEvidence: stripProhibitedKeys(row.opportunity_evidence ?? {}) as Record<string, unknown>,
+      starterMatchupEvidence: stripProhibitedKeys(row.starter_matchup_evidence ?? {}) as Record<string, unknown>,
+      bullpenPathEvidence: stripProhibitedKeys(row.bullpen_path_evidence ?? {}) as Record<string, unknown>,
+      parkEvidence: stripProhibitedKeys(row.park_evidence ?? {}) as Record<string, unknown>,
+      counterEvidence: stripProhibitedKeys(row.counter_evidence ?? {}) as Record<string, unknown>,
+      sourceLineage: { lineupSource: row.lineup_source, lineupState: row.lineup_state, starterSource: "FANTASYPROS" },
+      sampleDenominators: {
+        starter: (row.starter_matchup_evidence ?? {}).sampleSize ?? null,
+        bullpen: (row.bullpen_path_evidence ?? {}).sampleSize ?? null,
+        park: (row.park_evidence ?? {}).sampleSize ?? null,
+      },
+    } satisfies RoundRobinCandidate;
+  }));
+
+  const gameMetadata = await pool.query<{
+    game_pk: number; away: string; home: string;
+    away_lineup_state: "POSTED" | "CONFIRMED" | "PROJECTED" | null; away_lineup_source: string | null;
+    away_lineup_observed_at: string | null; away_lineup_hitters: number;
+    home_lineup_state: "POSTED" | "CONFIRMED" | "PROJECTED" | null; home_lineup_source: string | null;
+    home_lineup_observed_at: string | null; home_lineup_hitters: number;
+  }>(
+    `WITH latest_lineup AS (
+       SELECT DISTINCT ON (ls.game_pk, ls.team_id)
+         ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state, ls.source_id, ls.observed_at
+       FROM lineup_snapshots ls
+       JOIN games g ON g.game_pk = ls.game_pk
+       WHERE g.game_date = $1
+         AND ls.source_id = 'FANTASYPROS'
+         AND ls.state = 'PROJECTED'
+       ORDER BY ls.game_pk, ls.team_id,
+         ls.observed_at DESC
+     ),
+     lineup_hitter_counts AS (
+       SELECT lineup_snapshot_id, count(*)::int AS hitter_count
+       FROM lineup_entries
+       GROUP BY lineup_snapshot_id
+     )
+     SELECT g.game_pk::bigint, away.abbreviation AS away, home.abbreviation AS home,
+            away_lineup.state AS away_lineup_state, away_lineup.source_id AS away_lineup_source,
+            away_lineup.observed_at::text AS away_lineup_observed_at,
+            COALESCE(away_count.hitter_count, 0)::int AS away_lineup_hitters,
+            home_lineup.state AS home_lineup_state, home_lineup.source_id AS home_lineup_source,
+            home_lineup.observed_at::text AS home_lineup_observed_at,
+            COALESCE(home_count.hitter_count, 0)::int AS home_lineup_hitters
+     FROM games g
+     JOIN teams away ON away.team_id = g.away_team_id
+     JOIN teams home ON home.team_id = g.home_team_id
+     LEFT JOIN latest_lineup away_lineup ON away_lineup.game_pk = g.game_pk AND away_lineup.team_id = g.away_team_id
+     LEFT JOIN lineup_hitter_counts away_count ON away_count.lineup_snapshot_id = away_lineup.lineup_snapshot_id
+     LEFT JOIN latest_lineup home_lineup ON home_lineup.game_pk = g.game_pk AND home_lineup.team_id = g.home_team_id
+     LEFT JOIN lineup_hitter_counts home_count ON home_count.lineup_snapshot_id = home_lineup.lineup_snapshot_id
+     WHERE g.game_date = $1
+     ORDER BY g.start_time_utc NULLS LAST`,
+    [date],
+  );
+  const byGame = new Map<number, RoundRobinCandidate[]>();
+  for (const candidate of candidates) {
+    const gameCandidates = byGame.get(candidate.gamePk) ?? [];
+    gameCandidates.push(candidate);
+    byGame.set(candidate.gamePk, gameCandidates);
+  }
+  const games = gameMetadata.rows.map((game) => compareRoundRobinGame(
+    board as RoundRobinBoardId,
+    Number(game.game_pk),
+    game.away,
+    game.home,
+    byGame.get(Number(game.game_pk)) ?? [],
+    {
+      lineupState: `${game.away_lineup_state ?? "UNKNOWN"},${game.home_lineup_state ?? "UNKNOWN"}`,
+      lineupSource: `${game.away_lineup_source ?? "MISSING"},${game.home_lineup_source ?? "MISSING"}`,
+      starterState: "FANTASYPROS_PROJECTED_CONTEXT",
+      evidenceGaps: [
+        !game.away_lineup_state || !game.home_lineup_state ? "Missing selected lineup snapshot for one or both teams" : null,
+        !operationallyUsable ? (health.readiness.reason ?? "Research readiness is unavailable") : null,
+      ].filter((gap): gap is string => Boolean(gap)),
+    },
+  ));
+  return {
+    date,
+    board,
+    games,
+    readiness: health.readiness,
+    prohibitedFields: PROHIBITED_FIELDS,
+  };
+}

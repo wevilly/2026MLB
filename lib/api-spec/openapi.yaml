@@ -192,6 +192,34 @@ paths:
           content:
             application/vnd.ms-excel:
               schema: { type: string, format: binary }
+  /analyst/export/round-robin/workbook:
+    get:
+      operationId: exportAnalystRoundRobinWorkbook
+      tags: [analyst]
+      summary: Export the Round Robin comparison boards as an Excel workbook
+      description: |
+        Derived output. One .xlsx carrying the same comparison the JSON surface
+        returns: the selected construction per game, every leg with its evidence,
+        both sides including the one that lost the comparison, and the ties,
+        no-pair causes and bullpen disclosures as their own columns.
+
+        Omit board to export RR1 through RR5 in one workbook. Excludes odds,
+        price, EV, CLV, vig and probabilities, exactly as the comparison does.
+      parameters:
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: board
+          in: query
+          required: false
+          schema: { type: string, enum: [RR1, RR2, RR3, RR4, RR5] }
+      responses:
+        "200":
+          description: Round Robin workbook, one sheet per surface
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
   /analyst/audit-events:
     get:
       operationId: getAnalystAuditEvents

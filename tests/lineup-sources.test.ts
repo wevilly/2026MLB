@@ -88,8 +88,9 @@ describe("Task 2.7 no consumer hardcodes the lineup source", () => {
     "artifacts/api-server/src/services/walk-engine.ts",
     "artifacts/api-server/src/services/xbh-engine.ts",
     "artifacts/api-server/src/services/hr-engine.ts",
-    // Task 5.2 moved the Round Robin route into its own domain module.
-    "artifacts/api-server/src/routes/analyst/research.ts",
+    // Task 5.2 moved the Round Robin route into its own domain module, and the
+    // Excel export lifted its query into the shared module both routes read.
+    "artifacts/api-server/src/routes/analyst/shared.ts",
   ];
 
   test("no engine pins the lineup source inside its SQL", () => {
@@ -103,14 +104,14 @@ describe("Task 2.7 no consumer hardcodes the lineup source", () => {
   });
 
   test("the Round Robin lineup selection is parameterised", () => {
-    const source = readFileSync("artifacts/api-server/src/routes/analyst/research.ts", "utf8");
     const shared = readFileSync("artifacts/api-server/src/routes/analyst/shared.ts", "utf8");
-    const cte = source.slice(source.indexOf("latest_lineup AS ("), source.indexOf("SELECT mrc.candidate_id"));
+    const cte = shared.slice(shared.indexOf("latest_lineup AS ("), shared.indexOf("SELECT mrc.candidate_id"));
+    assert.ok(cte.length > 0, "the Round Robin selection CTE must be findable");
     assert.ok(!/source_id = 'FANTASYPROS'/.test(cte), "the selection CTE must not pin a source");
     assert.ok(cte.includes("JOIN accepted a"), "the selection CTE must join the accepted source and state pairs");
     assert.ok(
-      source.includes("ROUND_ROBIN_LINEUP_FILTER") && shared.includes("ROUND_ROBIN_LINEUP_FILTER"),
-      "the pairs must come from the shared precedence list",
+      shared.includes("ROUND_ROBIN_LINEUP_FILTER") && shared.includes("buildRoundRobinComparison"),
+      "the pairs must come from the shared precedence list, in the one builder both routes read",
     );
     // The readiness counters elsewhere in this file deliberately count each
     // source separately; they select nothing and are not part of this defect.

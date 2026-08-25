@@ -2953,6 +2953,22 @@ export type ExportAnalystWorkbookParams = {
 date: string;
 };
 
+export type ExportAnalystRoundRobinWorkbookParams = {
+date?: string;
+board?: ExportAnalystRoundRobinWorkbookBoard;
+};
+
+export type ExportAnalystRoundRobinWorkbookBoard = typeof ExportAnalystRoundRobinWorkbookBoard[keyof typeof ExportAnalystRoundRobinWorkbookBoard];
+
+
+export const ExportAnalystRoundRobinWorkbookBoard = {
+  RR1: 'RR1',
+  RR2: 'RR2',
+  RR3: 'RR3',
+  RR4: 'RR4',
+  RR5: 'RR5',
+} as const;
+
 export type GetAnalystAuditEventsParams = {
 /**
  * @minimum 1

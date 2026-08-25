@@ -17,7 +17,10 @@ For each slate date the platform produces:
   calibrated probability and a confidence label.
 - **Round Robin comparisons**, same-team two-leg constructions per game, with
   the losing side's alternatives retained and ties surfaced rather than
-  collapsed.
+  collapsed. `GET /analyst/export/round-robin/workbook` returns the same
+  comparison as an .xlsx, one sheet per surface, RR1 through RR5 by default.
+  Derived output: the platform stays the official record, and the workbook
+  carries nothing the comparison API does not.
 - **Settlement**, the official post-game record every board candidate is graded
   against, which is also the training data for the modelling layer.
 
@@ -75,6 +78,7 @@ Read this before adding anything.
 | API contract | `lib/api-spec/openapi.yaml` |
 | Generated request/response types and hooks | `lib/api-zod/src/generated`, `lib/api-client-react/src/generated` |
 | Selection eligibility rules | `lib/api-zod/src/market-research-eligibility.ts` |
+| Round Robin comparison query, for the API and the Excel export alike | `artifacts/api-server/src/routes/analyst/shared.ts` |
 | Frontend theme and styles | `artifacts/mlb-analyst/src/index.css` |
 
 **Repo map:**
@@ -92,6 +96,8 @@ artifacts/api-server/src/
     tb-engine.ts              total bases research and ranking
     xbh-engine.ts / walk-engine.ts / hr-engine.ts / hrrbi-engine.ts
     round-robin-comparison.ts pure pair construction and comparison
+    round-robin-workbook.ts   the comparison boards flattened into Excel sheets
+    xlsx-workbook.ts          dependency-free .xlsx writer, no domain knowledge
     lineup-sources.ts         lineup source precedence and conflict detection
     bullpen-foundation.ts     reliever appearances, availability, leverage maps
     weather-foundation.ts     per-game forecast, wind relative to the park

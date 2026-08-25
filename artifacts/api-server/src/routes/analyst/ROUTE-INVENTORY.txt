@@ -20,6 +20,7 @@ GET     /analyst/bettor/picks
 GET     /analyst/bettor/sources
 GET     /analyst/bullpen-room
 GET     /analyst/data-health
+GET     /analyst/export/round-robin/workbook
 GET     /analyst/export/slate-json
 GET     /analyst/export/workbook
 GET     /analyst/feature-store
