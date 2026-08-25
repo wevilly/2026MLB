@@ -764,12 +764,43 @@ async function persistFantasyProsLineups(
 }
 
 /**
+ * Removes a stray official-schedule game row that duplicates a projected-slate
+ * row (same date and team pair under a different game_pk). Only the probable
+ * starters this refresh itself wrote are deleted alongside it; any other
+ * dependent row (lineups, weather, research, board state) makes the delete
+ * fail its foreign keys and the row is left alone and reported instead.
+ */
+async function removeDuplicateOfficialGame(gamePk: number): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM starters WHERE game_pk = $1`, [gamePk]);
+    await client.query(`DELETE FROM games WHERE game_pk = $1`, [gamePk]);
+    await client.query("COMMIT");
+    return true;
+  } catch {
+    await client.query("ROLLBACK");
+    return false;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Schedule-metadata-only official refresh, safe to run pregame on the current
- * slate date. Persists games, venues, start times, doubleheader codes and
- * probable starters. It deliberately ingests NO lineups, NO rosters and NO
- * settlement facts, so the postgame-only policy on the full ingestMlbOfficial
- * path is preserved. This is what keeps venue geometry and start times fresh
- * for weather and doubleheader reconciliation on the active slate.
+ * slate date. It deliberately ingests NO lineups, NO rosters and NO settlement
+ * facts, so the postgame-only policy on the full ingestMlbOfficial path is
+ * preserved.
+ *
+ * The projected slate's game rows use FantasyPros game IDs as game_pk, so the
+ * official gamePk can never hit them via ON CONFLICT. Each official game is
+ * therefore matched to the existing slate row by date and (unordered) team
+ * pair and UPDATED in place — venue, start time, status, doubleheader code —
+ * which is what actually re-enables venue weather. Inserting a parallel row
+ * under the official gamePk would double every game on the slate. A previous
+ * run's parallel rows are self-healed here when they carry no other evidence.
+ * Same-team doubleheaders get their shared venue but no guessed per-game start
+ * time or starters; the ambiguity is recorded as an issue instead.
  */
 export async function refreshMlbSchedule(requestedDate: string) {
   const effectiveDate = parseDate(requestedDate);
@@ -788,63 +819,127 @@ export async function refreshMlbSchedule(requestedDate: string) {
     const games = asArray(payload.dates).flatMap((day) => asArray(day.games));
     let normalized = 0;
     let rejected = 0;
+    let unmatchedOfficialGames = 0;
+    let duplicateRowsRemoved = 0;
     for (const game of games) {
-      const gamePk = Number(game.gamePk);
+      const officialGamePk = Number(game.gamePk);
       const teams = asObject(game.teams);
       const away = asObject(asObject(teams.away).team);
       const home = asObject(asObject(teams.home).team);
       const venue = asObject(game.venue);
       const awayId = Number(away.id);
       const homeId = Number(home.id);
-      if (!Number.isFinite(gamePk) || !Number.isFinite(awayId) || !Number.isFinite(homeId)) {
+      if (!Number.isFinite(officialGamePk) || !Number.isFinite(awayId) || !Number.isFinite(homeId)) {
         rejected += 1;
         continue;
       }
       await upsertTeam(away);
       await upsertTeam(home);
-      if (Number.isFinite(Number(venue.id))) {
+      const venueId = Number.isFinite(Number(venue.id)) ? Number(venue.id) : null;
+      if (venueId !== null) {
         await pool.query(
           `INSERT INTO venues (venue_id, name, metadata) VALUES ($1, $2, $3)
            ON CONFLICT (venue_id) DO UPDATE SET name = EXCLUDED.name, metadata = EXCLUDED.metadata`,
-          [Number(venue.id), String(venue.name ?? "Unknown venue"), venue],
+          [venueId, String(venue.name ?? "Unknown venue"), venue],
         );
       }
-      await pool.query(
-        `INSERT INTO games (game_pk, game_date, start_time_utc, away_team_id, home_team_id, venue_id, game_status, game_type, doubleheader_code)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (game_pk) DO UPDATE SET
-           start_time_utc = COALESCE(EXCLUDED.start_time_utc, games.start_time_utc),
-           venue_id = COALESCE(EXCLUDED.venue_id, games.venue_id),
-           game_status = EXCLUDED.game_status,
-           game_type = EXCLUDED.game_type,
-           doubleheader_code = EXCLUDED.doubleheader_code,
-           updated_at = now()`,
-        [
-          gamePk,
-          effectiveDate,
-          game.gameDate ? new Date(String(game.gameDate)).toISOString() : null,
-          awayId,
-          homeId,
-          Number.isFinite(Number(venue.id)) ? Number(venue.id) : null,
-          String(asObject(game.status).detailedState ?? "UNKNOWN"),
-          String(game.gameType ?? ""),
-          String(game.doubleHeader ?? ""),
-        ],
+      const startTimeUtc = game.gameDate ? new Date(String(game.gameDate)).toISOString() : null;
+      const gameStatus = String(asObject(game.status).detailedState ?? "UNKNOWN");
+      const doubleheaderCode = String(game.doubleHeader ?? "");
+
+      const pairRows = await pool.query<{ game_pk: string }>(
+        `SELECT game_pk::text AS game_pk FROM games
+          WHERE game_date = $1
+            AND ((away_team_id = $2 AND home_team_id = $3) OR (away_team_id = $3 AND home_team_id = $2))
+          ORDER BY game_pk`,
+        [effectiveDate, awayId, homeId],
       );
-      const awayProbable = asObject(asObject(teams.away).probablePitcher);
-      const homeProbable = asObject(asObject(teams.home).probablePitcher);
-      if (Object.keys(awayProbable).length) await upsertStarter(awayProbable, awayId, gamePk, "PROBABLE", awayProbable, effectiveDate);
-      if (Object.keys(homeProbable).length) await upsertStarter(homeProbable, homeId, gamePk, "PROBABLE", homeProbable, effectiveDate);
-      normalized += 1;
+      const slateGamePks = pairRows.rows
+        .map((row) => Number(row.game_pk))
+        .filter((gamePk) => gamePk !== officialGamePk);
+      const strayOfficialRow = pairRows.rows.some((row) => Number(row.game_pk) === officialGamePk);
+
+      if (slateGamePks.length === 0) {
+        // No projected-slate row yet for this matchup: nothing safe to update.
+        // The refresh does not insert a parallel official row — that is how the
+        // slate ends up with two rows per game. Re-run after the FantasyPros
+        // ingest has established the slate.
+        unmatchedOfficialGames += 1;
+        await recordIssue(
+          MLB_SOURCE,
+          ingestRunId,
+          "OFFICIAL_SCHEDULE_UNMATCHED_GAME",
+          "WARNING",
+          `Official game ${officialGamePk} (${awayId} at ${homeId}) has no projected-slate row on ${effectiveDate}; run the FantasyPros ingest first, then re-run this refresh.`,
+        );
+        continue;
+      }
+
+      if (slateGamePks.length === 1) {
+        const slateGamePk = slateGamePks[0];
+        await pool.query(
+          `UPDATE games SET
+             venue_id = COALESCE($2, venue_id),
+             start_time_utc = COALESCE($3, start_time_utc),
+             game_status = $4,
+             doubleheader_code = $5,
+             updated_at = now()
+           WHERE game_pk = $1`,
+          [slateGamePk, venueId, startTimeUtc, gameStatus, doubleheaderCode],
+        );
+        const awayProbable = asObject(asObject(teams.away).probablePitcher);
+        const homeProbable = asObject(asObject(teams.home).probablePitcher);
+        if (Object.keys(awayProbable).length) await upsertStarter(awayProbable, awayId, slateGamePk, "PROBABLE", awayProbable, effectiveDate);
+        if (Object.keys(homeProbable).length) await upsertStarter(homeProbable, homeId, slateGamePk, "PROBABLE", homeProbable, effectiveDate);
+        normalized += 1;
+      } else {
+        // Same-team doubleheader: the venue is shared and safe to set on both
+        // rows. A per-game start time or starter assignment would be a guess,
+        // so it is recorded as an unresolved issue instead of assigned.
+        await pool.query(
+          `UPDATE games SET venue_id = COALESCE($2, venue_id), updated_at = now()
+           WHERE game_pk = ANY($1)`,
+          [slateGamePks, venueId],
+        );
+        await recordIssue(
+          MLB_SOURCE,
+          ingestRunId,
+          "DOUBLEHEADER_START_TIME_UNRESOLVED",
+          "WARNING",
+          `Official game ${officialGamePk} is one of ${slateGamePks.length} slate rows for the same team pair on ${effectiveDate}; venue was set on all, start times and starters were not guessed.`,
+        );
+        normalized += 1;
+      }
+
+      if (strayOfficialRow) {
+        if (await removeDuplicateOfficialGame(officialGamePk)) duplicateRowsRemoved += 1;
+        else {
+          await recordIssue(
+            MLB_SOURCE,
+            ingestRunId,
+            "DUPLICATE_OFFICIAL_GAME_ROW",
+            "WARNING",
+            `Official game row ${officialGamePk} duplicates a projected-slate row but carries dependent evidence and was not removed.`,
+          );
+        }
+      }
     }
     await finishRun(ingestRunId, rejected ? "PARTIAL" : "SUCCESS", {
       rowCount: games.length,
       normalizedRowCount: normalized,
       rejectedRowCount: rejected,
       httpStatus: response.status,
-      metadata: { endpoint: url.toString(), scheduleOnly: true },
+      metadata: { endpoint: url.toString(), scheduleOnly: true, unmatchedOfficialGames, duplicateRowsRemoved },
     }, startedAt);
-    return { source: "MLB Official (schedule only)", ingestRunId, rowCount: games.length, normalizedRowCount: normalized, rejectedRowCount: rejected };
+    return {
+      source: "MLB Official (schedule only)",
+      ingestRunId,
+      rowCount: games.length,
+      normalizedRowCount: normalized,
+      rejectedRowCount: rejected,
+      unmatchedOfficialGames,
+      duplicateRowsRemoved,
+    };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown MLB schedule failure";
     await recordIssue(MLB_SOURCE, ingestRunId, "SOURCE_FAILURE", "BLOCKING", detail);
