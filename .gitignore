@@ -37,6 +37,21 @@ yarn-error.log
 testem.log
 /typings
 
+# local environment and credentials
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+credentials.*.json
+secrets.json
+secrets.*.json
+service-account*.json
+
 # System Files
 .DS_Store
 Thumbs.db
