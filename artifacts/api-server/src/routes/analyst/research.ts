@@ -101,6 +101,7 @@ import { compareRoundRobinGame, type RoundRobinBoardId, type RoundRobinCandidate
 import { LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter } from "../../services/lineup-sources";
 import { RR_DB_TO_MARKET, RR_MARKET_TO_DB } from "../../services/market-codes";
 import { getBullpenRoom, refreshBullpen } from "../../services/bullpen-foundation";
+import { formatRoofLabel, formatWeatherSummary, getSlateWeather } from "../../services/weather-foundation";
 import { runTBEngine } from "../../services/tb-engine";
 import { runXBHEngine } from "../../services/xbh-engine";
 import { runWALKEngine } from "../../services/walk-engine";
@@ -203,13 +204,14 @@ const router: IRouter = Router();
 router.get("/analyst/today", async (req, res, next) => {
   try {
     const date = requestedDate(req.query.date);
-    const [gameResult, health] = await Promise.all([
+    const [gameResult, health, slateWeather] = await Promise.all([
       pool.query<{
         game_pk: number; start_time_utc: string | null; away: string; home: string; park: string | null;
+         roof_type: string | null;
          away_starter: string | null; home_starter: string | null; away_hand: string | null; home_hand: string | null;
          away_state: string | null; home_state: string | null; posted_lineup_teams: number; projected_lineup_teams: number;
       }>(
-        `SELECT g.game_pk, g.start_time_utc, away.abbreviation AS away, home.abbreviation AS home, v.name AS park,
+        `SELECT g.game_pk, g.start_time_utc, away.abbreviation AS away, home.abbreviation AS home, v.name AS park, v.roof_type,
           away_start.full_name AS away_starter, home_start.full_name AS home_starter,
           away_start.throws AS away_hand, home_start.throws AS home_hand,
           away_start.starter_state AS away_state, home_start.starter_state AS home_state,
@@ -236,6 +238,7 @@ router.get("/analyst/today", async (req, res, next) => {
         [date],
       ),
       analystDataHealth(date),
+      getSlateWeather(date),
     ]);
     const games = gameResult.rows.map((game) => ({
       id: String(game.game_pk),
@@ -243,8 +246,10 @@ router.get("/analyst/today", async (req, res, next) => {
       away: game.away,
       home: game.home,
       park: game.park ?? "NOT FOUND",
-      roof: "NOT FOUND",
-      weather: "NOT FOUND",
+      // game_pk is a bigint: node-postgres returns it as a string, while the
+      // slate weather map is keyed by number, so coerce before the lookup.
+      roof: formatRoofLabel(slateWeather.get(Number(game.game_pk)) ?? null, game.roof_type),
+      weather: formatWeatherSummary(slateWeather.get(Number(game.game_pk)) ?? null),
       awayStarter: {
         name: game.away_starter ?? "TBD",
         hand: game.away_hand || "NOT FOUND",
@@ -288,6 +293,9 @@ router.get("/analyst/today", async (req, res, next) => {
         "Pre-model slate status uses READY, PARTIAL, and BLOCKED only.",
         "No forecast, price, odds, implied probability, EV, or CLV data is used in this workflow.",
         games.length ? "FantasyPros projected matchups, lineups, and starter observations are persisted." : "No FantasyPros projected slate has been ingested for this date.",
+        ...(games.length
+          ? [`${gameResult.rows.filter((game) => slateWeather.has(Number(game.game_pk))).length}/${games.length} games have a stored weather observation (FantasyPros pregame preferred; Open-Meteo is supplemental and never blocks the slate).`]
+          : []),
         health.identityCoverage.blockingProjectedLineupIssues
           ? `${health.identityCoverage.blockingProjectedLineupIssues} projected-lineup identity issue(s) are blocking research eligibility.`
           : "Projected lineup identities have no current blocking issue.",
@@ -446,12 +454,14 @@ router.get("/analyst/batter-pitcher", async (req, res, next) => {
 router.get("/analyst/game-lab", async (req, res, next) => {
   try {
     const date = requestedDate(req.query.date);
+    const slateWeatherPromise = getSlateWeather(date);
     const games = await pool.query<{
       game_pk: number; venue_id: number | null; start_time_utc: string | null; away: string; home: string; park: string | null;
+      roof_type: string | null;
       away_starter: string | null; home_starter: string | null; away_hand: string | null; home_hand: string | null;
       away_state: string | null; home_state: string | null; posted_lineup_teams: number; projected_lineup_teams: number;
     }>(
-       `SELECT g.game_pk, g.venue_id, g.start_time_utc, away.abbreviation AS away, home.abbreviation AS home, v.name AS park,
+       `SELECT g.game_pk, g.venue_id, g.start_time_utc, away.abbreviation AS away, home.abbreviation AS home, v.name AS park, v.roof_type,
         away_start.full_name AS away_starter, home_start.full_name AS home_starter, away_start.throws AS away_hand, home_start.throws AS home_hand,
         away_start.starter_state AS away_state, home_start.starter_state AS home_state,
         COALESCE(lineups.posted_lineup_teams, 0) AS posted_lineup_teams, COALESCE(lineups.projected_lineup_teams, 0) AS projected_lineup_teams
@@ -466,9 +476,13 @@ router.get("/analyst/game-lab", async (req, res, next) => {
        WHERE g.game_date = $1 ORDER BY g.start_time_utc NULLS LAST`,
       [date],
     );
+    const slateWeather = await slateWeatherPromise;
     const responseGames = games.rows.map((game) => ({
       id: String(game.game_pk), time: displayTime(game.start_time_utc), away: game.away, home: game.home,
-      park: game.park ?? "NOT FOUND", roof: "NOT FOUND", weather: "NOT FOUND",
+      park: game.park ?? "NOT FOUND",
+      // game_pk is a bigint returned as a string; the weather map is keyed by number.
+      roof: formatRoofLabel(slateWeather.get(Number(game.game_pk)) ?? null, game.roof_type),
+      weather: formatWeatherSummary(slateWeather.get(Number(game.game_pk)) ?? null),
       awayStarter: { name: game.away_starter ?? "TBD", hand: game.away_hand ?? "NOT FOUND", state: game.away_state ?? "TBD", note: "" },
       homeStarter: { name: game.home_starter ?? "TBD", hand: game.home_hand ?? "NOT FOUND", state: game.home_state ?? "TBD", note: "" },
       lineupState: game.projected_lineup_teams === 2
@@ -481,7 +495,7 @@ router.get("/analyst/game-lab", async (req, res, next) => {
           : "FantasyPros projected lineups drive pregame research"
         : "Research context only — no projected lineup coverage",
     }));
-    const selectedIndex = req.query.gameId ? games.rows.findIndex((game) => game.game_pk === Number(req.query.gameId)) : (games.rows.length ? 0 : -1);
+    const selectedIndex = req.query.gameId ? games.rows.findIndex((game) => Number(game.game_pk) === Number(req.query.gameId)) : (games.rows.length ? 0 : -1);
     const selected = selectedIndex >= 0 ? responseGames[selectedIndex] : null;
     const selectedDb = selectedIndex >= 0 ? games.rows[selectedIndex] : null;
     const fallbackParkFactors = [

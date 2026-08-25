@@ -836,7 +836,10 @@ export async function ingestMlbOfficial(requestedDate: string) {
       await pool.query(
         `INSERT INTO games (game_pk, game_date, start_time_utc, away_team_id, home_team_id, venue_id, game_status, game_type, doubleheader_code)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (game_pk) DO UPDATE SET start_time_utc = EXCLUDED.start_time_utc, game_status = EXCLUDED.game_status,
+         ON CONFLICT (game_pk) DO UPDATE SET
+           start_time_utc = COALESCE(EXCLUDED.start_time_utc, games.start_time_utc),
+           venue_id = COALESCE(EXCLUDED.venue_id, games.venue_id),
+           game_status = EXCLUDED.game_status,
            game_type = EXCLUDED.game_type, doubleheader_code = EXCLUDED.doubleheader_code, updated_at = now()`,
         [
           gamePk,

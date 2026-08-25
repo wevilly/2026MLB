@@ -6,6 +6,14 @@ import test from "node:test";
 const root = process.cwd();
 const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf8"));
 const readText = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
+// Task 5.2 split routes/analyst.ts into domain modules under routes/analyst/.
+// Route-content assertions must read the whole surface, not the mount barrel.
+const readAnalystRoutes = () => [
+  "artifacts/api-server/src/routes/analyst.ts",
+  ...fs.readdirSync(path.join(root, "artifacts/api-server/src/routes/analyst"))
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => `artifacts/api-server/src/routes/analyst/${name}`),
+].map(readText).join("\n");
 
 function allFiles(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -84,8 +92,12 @@ test("research-only H+R+RBI cannot enter feature snapshots or settle as Total Ba
   const dailyBoard = readText("artifacts/api-server/src/services/daily-market-board.ts");
   assert.ok(featureStore.includes("market <> 'HITS_RUNS_RBI_2_PLUS'"));
   assert.ok(!featureStore.includes("HITS_RUNS_RBI_2_PLUS: \"TB\""));
-  assert.ok(dailyBoard.includes("mrc.market <> 'HITS_RUNS_RBI_2_PLUS'"));
-  assert.ok(dailyBoard.includes("market = 'HITS_RUNS_RBI_2_PLUS'"));
+  // The daily board now carries H+R+RBI as its own explicit market; it must
+  // map it through HRRBI_DB_MARKET, never alias it onto Total Bases.
+  assert.ok(dailyBoard.includes('market === "H_R_RBI" ? HRRBI_DB_MARKET : MARKET_TO_DB[market]'));
+  assert.ok(dailyBoard.includes('row.market === HRRBI_DB_MARKET ? "H_R_RBI" : DB_TO_MARKET[row.market]'));
+  const settlement = readText("artifacts/api-server/src/services/settlement.ts");
+  assert.ok(settlement.includes("AND market <> 'HITS_RUNS_RBI_2_PLUS'"), "H+R+RBI must not settle as Total Bases");
 });
 
 test("MLB fixtures retain official identity, lineup order, and settlement facts", () => {
@@ -102,7 +114,7 @@ test("MLB fixtures retain official identity, lineup order, and settlement facts"
 
 test("four-market schema remains explicit and pre-model XBH remains unmodeled", () => {
   const schema = readText("lib/db/src/schema/foundation.ts");
-  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  const routes = readAnalystRoutes();
   for (const market of ["TOTAL_BASES_2_PLUS", "EXTRA_BASE_HIT", "BATTER_WALK", "HOME_RUN"]) {
     assert.ok(schema.includes(`"${market}"`));
   }
@@ -128,7 +140,7 @@ test("FantasyPros secrets and authorization headers are absent from client and f
 test("FantasyPros projected-player eligibility keeps identity and quarantine safeguards", () => {
   const schema = readText("lib/db/src/schema/foundation.ts");
   const service = readText("artifacts/api-server/src/services/data-foundation.ts");
-  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  const routes = readAnalystRoutes();
   for (const state of ["MLB_ACTIVE", "MLB_40_MAN", "MLB_IL", "MLB_OPTIONED", "MINOR_LEAGUE", "FREE_AGENT", "HISTORICAL", "RETIRED", "UNKNOWN"]) {
     assert.ok(schema.includes(`"${state}"`), `missing eligibility state ${state}`);
   }
@@ -144,7 +156,7 @@ test("FantasyPros projected-player eligibility keeps identity and quarantine saf
 
 test("official starters and posted lineups establish canonical current-player coverage", () => {
   const service = readText("artifacts/api-server/src/services/data-foundation.ts");
-  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  const routes = readAnalystRoutes();
   assert.ok(service.includes('evidence: { officialStarter: true'));
   assert.ok(service.includes('status: "MLB_ACTIVE"'));
   assert.ok(service.includes('persistOfficialTeamRoster'));
@@ -175,7 +187,7 @@ test("aliases, FantasyPros game mapping, and snapshot equality remain auditable"
 });
 
 test("projection reads are scoped to the current effective date", () => {
-  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  const routes = readAnalystRoutes();
   assert.ok(routes.includes('const date = requestedDate(req.query.date);'));
   assert.ok(routes.includes("WHERE effective_date = $1"), "Projection Center must not fall back to a historical snapshot");
   assert.ok(!routes.includes("ORDER BY f.team_abbreviation, f.source_player_id LIMIT 500"), "Latest Projection Center must include every current eligible player, not a truncated component subset");
@@ -192,7 +204,8 @@ test("Phase 2A research foundation keeps raw evidence, canonical joins, and sepa
     assert.ok(schema.includes(label), `missing research status ${label}`);
   }
   assert.ok(service.includes("canonical_identity_or_current_eligibility_not_confirmed"));
-  assert.ok(service.includes("Identity uncertainty is quarantined from research views and is not counted as an ingest rejection."));
+  assert.ok(service.includes("identityReviewRequired: quarantined, actualRejected: rejected"),
+    "identity quarantine must be reported as review work, not counted as an ingest rejection");
   assert.ok(service.includes("contentChecksum"));
   assert.ok(service.includes("unchanged_from_prior"));
   assert.ok(service.includes("pe.eligible_today_research ELSE pe.eligible_pitcher_research"), "research evidence must pass the Phase 1C role-specific eligibility gate");
@@ -219,7 +232,7 @@ test("Phase 2A preserves XBH semantics, source provenance, and does not introduc
 test("Phase 2A correction keeps operational shells, explicit opponent splits, and source-backed park ingestion", () => {
   const schema = readText("lib/db/src/schema/foundation.ts");
   const service = readText("artifacts/api-server/src/services/research-foundation.ts");
-  const routes = readText("artifacts/api-server/src/routes/analyst.ts");
+  const routes = readAnalystRoutes();
   const apiSpec = readText("lib/api-spec/openapi.yaml");
   assert.ok(schema.includes('pitcherSide: text("pitcher_side")'), "hitter research features must retain opposing pitcher side");
   assert.ok(service.includes("min=0"), "Statcast leaderboard qualification must not define the operational player universe");
@@ -229,7 +242,7 @@ test("Phase 2A correction keeps operational shells, explicit opponent splits, an
   assert.ok(service.includes("f.batter_side"), "pitcher split panels must read the stored batter-side dimension");
   assert.ok(service.includes("DISTINCT ON (s.source_id, opponent_side)"), "profile reads must retain the ordinary, vs-L, and vs-R snapshot per source");
   assert.ok(service.includes('ingestStatcastHandednessFallback'), "Statcast Search must remain an independently callable fallback source");
-  assert.ok(service.includes('source.status === "FAILED"'), "refresh notes must disclose source-specific failures");
+  assert.ok(service.includes('status: failure ? "FAILED"'), "each research source result must disclose its own failure status");
   assert.ok(apiSpec.includes("ResearchIngestSource"), "research-only source failure fields must not alter the shared MLB/FantasyPros ingest response contract");
   assert.ok(service.includes("statcast-park-factors"), "Park ingest must use canonical Statcast Park Factors route");
   assert.ok(service.includes('"index_1b"'), "Park ingest must retain Baseball Savant's source component field names");
@@ -244,7 +257,7 @@ test("Phase 2A correction keeps operational shells, explicit opponent splits, an
   assert.ok(!service.includes("0::int AS missing_handedness_splits"), "split health must be calculated, not a literal placeholder");
   assert.ok(service.includes("COALESCE(p.primary_position, '') <> 'P'"), "hitter shells must exclude official pitcher positions");
   assert.ok(!service.includes("WITH current_date AS"), "research health must not use a reserved PostgreSQL identifier as a CTE name");
-  assert.ok(routes.includes('makeBadge("PARK_FACTORS", "Statcast Park Factors", true)'), "Data Health must surface the actual park source run");
+  assert.ok(routes.includes('makeBadge("BALLPARK_PAL", "Ballpark Pal daily research", true)'), "Data Health must surface the daily research source run");
   assert.ok(routes.includes('research.parkVenueCoverageGaps === 0'), "Phase 2A readiness must reject partial Savant park coverage for current-game venues");
   assert.ok(service.includes('park_snapshot_quality'), "park acceptance must validate all raw components for the latest Park Factors side snapshots");
   assert.ok(service.includes('FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE'), "Phase 2A acceptance must require full official eligible hitter and pitcher coverage");
@@ -252,5 +265,18 @@ test("Phase 2A correction keeps operational shells, explicit opponent splits, an
   assert.ok(service.includes("ir.job_name = 'statcast_search_handedness_fallback'"), "split target selection must require the dedicated Statcast Search fallback run");
   assert.ok(service.includes("ir.effective_date = $1 AND ir.status = 'SUCCESS'"), "historical split snapshots must not satisfy a current-day fallback target");
   assert.ok(service.includes("handedness_ingest_status"), "research health must expose the dedicated split-ingest status");
-  assert.ok(routes.includes('makeRunBadge("Statcast Search splits"'), "Data Health must surface the Statcast Search split run independently from the generic leaderboard ingest");
+  assert.ok(routes.includes("API-backed daily research has no supported handedness/pitch-level feed."),
+    "the retired Statcast Search split badge must be replaced by an explicit retirement disclosure, not silently dropped");
+});
+test("official schedule upsert backfills venue and start time on existing game rows", () => {
+  const service = readText("artifacts/api-server/src/services/data-foundation.ts");
+  // FantasyPros creates game rows with a NULL venue before the official
+  // schedule lands. The official upsert must therefore set venue_id on
+  // conflict, or every such game keeps a NULL venue forever and Open-Meteo
+  // venue forecasts stay disabled (diagnostic B-04).
+  assert.match(
+    service,
+    /ON CONFLICT \(game_pk\) DO UPDATE SET\s+start_time_utc = COALESCE\(EXCLUDED\.start_time_utc, games\.start_time_utc\),\s+venue_id = COALESCE\(EXCLUDED\.venue_id, games\.venue_id\)/,
+    "the official games upsert must backfill venue_id and never erase a stored start time with NULL",
+  );
 });

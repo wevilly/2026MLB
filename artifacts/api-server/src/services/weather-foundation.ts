@@ -148,10 +148,61 @@ export type GameWeather = {
   roofState: string;
   weatherNeutral: boolean;
   environment: WeatherEnvironment;
+  sourceId: string;
   sourceFreshness: string | null;
   retrievedAt: string | null;
   forecastForUtc: string | null;
 };
+
+/** Human-readable provenance for a stored observation's source_id. */
+export function weatherSourceLabel(sourceId: string): string {
+  if (sourceId === FANTASYPROS_WEATHER_SOURCE) return "FantasyPros";
+  if (sourceId === WEATHER_SOURCE) return "Open-Meteo";
+  return sourceId;
+}
+
+/**
+ * Roof label for a game card. Prefers the stored observation's roof state;
+ * falls back to the venue's roof type; says "Roof unknown" only when neither
+ * exists. Never the bare string "NOT FOUND".
+ */
+export function formatRoofLabel(weather: GameWeather | null, venueRoofType: string | null): string {
+  const roofState = weather?.roofState?.toUpperCase();
+  if (roofState === "CLOSED") return "Roof closed";
+  if (roofState === "OPEN") return "Roof open";
+  if (roofState === "NONE") return "Open air";
+  const roofType = venueRoofType?.toUpperCase();
+  if (roofType === "DOME") return "Dome";
+  if (roofType === "RETRACTABLE") return "Retractable roof";
+  if (roofType === "OPEN") return "Open air";
+  return "Roof unknown";
+}
+
+/**
+ * One-line weather summary for a game card, sourced from the stored preferred
+ * observation. An "unavailable" wording is used only when the database truly
+ * has no usable observation for the game; a dome is neutral, not missing.
+ */
+export function formatWeatherSummary(weather: GameWeather | null): string {
+  if (!weather) return "No stored weather observation";
+  if (weather.weatherNeutral) {
+    return `Roof ${weather.roofState.toLowerCase()} · weather neutral · ${weatherSourceLabel(weather.sourceId)}`;
+  }
+  const parts: string[] = [];
+  if (weather.temperatureF !== null) parts.push(`${Math.round(weather.temperatureF)}°F`);
+  if (weather.windSpeedMph !== null) {
+    const speed = `${Math.round(weather.windSpeedMph)} mph`;
+    switch (weather.windComponent) {
+      case "OUT": parts.push(`wind out ${speed}`); break;
+      case "IN": parts.push(`wind in ${speed}`); break;
+      case "CROSS": parts.push(`crosswind ${speed}`); break;
+      case "CALM": parts.push("calm wind"); break;
+      default: parts.push(`wind ${speed}`);
+    }
+  }
+  if (!parts.length) return `Observation stored without usable temperature or wind · ${weatherSourceLabel(weather.sourceId)}`;
+  return `${parts.join(" · ")} · ${weatherSourceLabel(weather.sourceId)}`;
+}
 
 export type WeatherAdjustment = {
   adjustment: number;
@@ -780,12 +831,12 @@ export async function getGameWeather(gamePk: number): Promise<GameWeather | null
     game_pk: string; venue_id: number | null; temperature_f: string | null;
     wind_speed_mph: string | null; wind_direction_degrees: number | null;
     wind_out_component_mph: string | null; wind_component: string | null;
-    roof_state: string | null; weather_neutral: boolean;
+    roof_state: string | null; weather_neutral: boolean; source_id: string;
     source_freshness: string | null; retrieved_at: string; forecast_for_utc: string | null;
   }>(
     `SELECT game_pk::text AS game_pk, venue_id, temperature_f::text, wind_speed_mph::text,
             wind_direction_degrees, wind_out_component_mph::text, wind_component,
-            roof_state, weather_neutral, source_freshness::text, retrieved_at::text,
+            roof_state, weather_neutral, source_id, source_freshness::text, retrieved_at::text,
             forecast_for_utc::text
        FROM game_weather_observations
       WHERE game_pk = $1
@@ -807,6 +858,7 @@ export async function getGameWeather(gamePk: number): Promise<GameWeather | null
     roofState: row.roof_state ?? "UNKNOWN",
     weatherNeutral: row.weather_neutral,
     environment: row.weather_neutral ? "CLOSED_ROOF" : "OPEN_AIR",
+    sourceId: row.source_id,
     sourceFreshness: row.source_freshness,
     retrievedAt: row.retrieved_at,
     forecastForUtc: row.forecast_for_utc,
@@ -836,23 +888,31 @@ export async function getGameWeatherHistory(gamePk: number) {
   }));
 }
 
-/** Weather for every game on a slate, keyed by gamePk. One query, not one per game. */
+/**
+ * Weather for every game on a slate, keyed by gamePk. One query, not one per
+ * game. Uses the same source precedence as getGameWeather — the FantasyPros
+ * pregame observation first when one exists, then the newest supplemental
+ * observation — so slate scoring and single-game display cannot diverge in
+ * provenance after an Open-Meteo retry.
+ */
 export async function getSlateWeather(slateDate: string): Promise<Map<number, GameWeather>> {
   const result = await pool.query<{
     game_pk: string; venue_id: number | null; temperature_f: string | null;
     wind_speed_mph: string | null; wind_direction_degrees: number | null;
     wind_out_component_mph: string | null; wind_component: string | null;
-    roof_state: string | null; weather_neutral: boolean;
+    roof_state: string | null; weather_neutral: boolean; source_id: string;
     source_freshness: string | null; retrieved_at: string; forecast_for_utc: string | null;
   }>(
     `SELECT DISTINCT ON (game_pk)
             game_pk::text AS game_pk, venue_id, temperature_f::text, wind_speed_mph::text,
             wind_direction_degrees, wind_out_component_mph::text, wind_component,
-            roof_state, weather_neutral, source_freshness::text, retrieved_at::text,
+            roof_state, weather_neutral, source_id, source_freshness::text, retrieved_at::text,
             forecast_for_utc::text
        FROM game_weather_observations
       WHERE slate_date = $1
-      ORDER BY game_pk, retrieved_at DESC`,
+      ORDER BY game_pk,
+               CASE source_id WHEN '${FANTASYPROS_WEATHER_SOURCE}' THEN 0 ELSE 1 END,
+               retrieved_at DESC`,
     [slateDate],
   );
   const weather = new Map<number, GameWeather>();
@@ -868,6 +928,7 @@ export async function getSlateWeather(slateDate: string): Promise<Map<number, Ga
       roofState: row.roof_state ?? "UNKNOWN",
       weatherNeutral: row.weather_neutral,
       environment: row.weather_neutral ? "CLOSED_ROOF" : "OPEN_AIR",
+      sourceId: row.source_id,
       sourceFreshness: row.source_freshness,
       retrievedAt: row.retrieved_at,
       forecastForUtc: row.forecast_for_utc,
