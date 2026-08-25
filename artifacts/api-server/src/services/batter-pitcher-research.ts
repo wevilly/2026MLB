@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
+import { PREGAME_LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter } from "./lineup-sources";
 
 const STATCAST_SOURCE = "STATCAST";
 const RETROSHEET_SOURCE = "RETROSHEET";
 const CAREER_START = "2008-01-01";
 const MIN_CONTEXT_PA = 25;
 const MAX_RANK_ADJUSTMENT = 0.25;
+const PREGAME_LINEUP_FILTER = lineupSourceFilter(PREGAME_LINEUP_SOURCE_PRECEDENCE);
 
 type StatcastRow = Record<string, string>;
 export type BvpMarket = "TB" | "XBH" | "WALK" | "HR";
@@ -268,14 +270,15 @@ export async function refreshBatterPitcherPair(batterId: number, pitcherId: numb
 
 export async function refreshBatterPitcherSlate(effectiveDate: string) {
   const pairs = await pool.query<{ batter_id: number; pitcher_id: number }>(
-    `WITH latest_lineup AS (
+    `WITH accepted AS (
+       SELECT * FROM unnest($2::text[], $3::text[]) AS source_state(source_id, state)
+     ), latest_lineup AS (
        SELECT DISTINCT ON (ls.game_pk, ls.team_id) ls.lineup_snapshot_id, ls.game_pk, ls.team_id
        FROM lineup_snapshots ls JOIN games g ON g.game_pk = ls.game_pk
+       JOIN accepted a ON a.source_id = ls.source_id AND a.state = ls.state::text
        WHERE g.game_date = $1
-         AND ls.source_id = 'FANTASYPROS'
-         AND ls.state IN ('CONFIRMED', 'PROJECTED')
        ORDER BY ls.game_pk, ls.team_id,
-         CASE WHEN ls.state = 'CONFIRMED' THEN 1 ELSE 2 END,
+         array_position($2::text[], ls.source_id),
          ls.observed_at DESC
      ), latest_starter AS (
        SELECT DISTINCT ON (s.game_pk, s.team_id) s.game_pk, s.team_id, s.player_id
@@ -287,7 +290,7 @@ export async function refreshBatterPitcherSlate(effectiveDate: string) {
      JOIN games g ON g.game_pk = ll.game_pk
      JOIN latest_starter opponent ON opponent.game_pk = g.game_pk AND opponent.team_id <> ll.team_id
      WHERE le.player_id IS NOT NULL`,
-    [effectiveDate],
+    [effectiveDate, PREGAME_LINEUP_FILTER.sourceIds, PREGAME_LINEUP_FILTER.states],
   );
   const results: Array<{ batterId: number; pitcherId: number; status: string }> = [];
   for (let index = 0; index < pairs.rows.length; index += 4) {

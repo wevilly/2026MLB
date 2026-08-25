@@ -14,6 +14,7 @@
 
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
+import { PREGAME_LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter } from "./lineup-sources";
 // The prohibited-betting vocabulary is shared with bettor-intelligence, which
 // audit S3 found was applying no such check at all. See betting-content-guard.
 import { prohibitedBettingTerm } from "./betting-content-guard";
@@ -49,6 +50,7 @@ const FEATURE_VECTOR_KEYS = new Set([
   "pitcherFeatures",
   "parkFeatures",
 ]);
+const PREGAME_LINEUP_FILTER = lineupSourceFilter(PREGAME_LINEUP_SOURCE_PRECEDENCE);
 
 const REQUIRED_FEATURE_VECTOR_KEYS = [
   "market",
@@ -370,19 +372,24 @@ async function buildFeatureVector(
   // overwrite the newest values for the same feature key.
   //
   // Three-step CTE:
-  //   batter_team       — derive batter's team from lineup (works for ordinary
-  //                       batters who are never in the starters table)
+  //   batter_team       — derive the batter's team from the same projected-only
+  //                       lineup policy that produced pregame research rows
   //   opposing_starter  — confirmed/probable starter from the opposing team
   //   latest_pitcher_snapshot — single most-recently-retrieved snapshot for that
   //                       pitcher at or before the slate date
   const pitcherRes = await pool.query<{
     metric_key: string; value: string | null; batter_side: string | null; family: string;
   }>(
-    `WITH batter_team AS (
+    `WITH accepted AS (
+       SELECT * FROM unnest($4::text[], $5::text[]) AS source_state(source_id, state)
+     ),
+     batter_team AS (
        SELECT ls.team_id
        FROM lineup_entries le
        JOIN lineup_snapshots ls ON ls.lineup_snapshot_id = le.lineup_snapshot_id
+       JOIN accepted a ON a.source_id = ls.source_id AND a.state = ls.state::text
        WHERE le.player_id = $1 AND ls.game_pk = $2
+       ORDER BY array_position($4::text[], ls.source_id), ls.observed_at DESC
        LIMIT 1
      ),
      opposing_starter AS (
@@ -406,7 +413,7 @@ async function buildFeatureVector(
      FROM pitcher_research_features f
      JOIN latest_pitcher_snapshot lps ON lps.research_snapshot_id = f.research_snapshot_id
      ORDER BY f.family, f.metric_key, f.batter_side NULLS LAST`,
-    [playerId, gamePk, slateDate],
+    [playerId, gamePk, slateDate, PREGAME_LINEUP_FILTER.sourceIds, PREGAME_LINEUP_FILTER.states],
   );
 
   const pitcherFeatures: JsonObject = {};

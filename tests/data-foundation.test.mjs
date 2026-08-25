@@ -53,27 +53,30 @@ test("official and FantasyPros lineup snapshot deduplication binds every checksu
   assert.ok(service.includes('persistFantasyProsLineups(ingestRunId, effectiveDate, currentLineups.payload, "CONFIRMED")'));
 });
 
-test("Round Robin pregame lineage uses FantasyPros confirmed then projected snapshots only", () => {
-  const route = readText("artifacts/api-server/src/routes/analyst.ts");
+test("Round Robin pregame lineage uses projected FantasyPros snapshots only", () => {
+  const route = readText("artifacts/api-server/src/routes/analyst/research.ts");
   const comparator = readText("artifacts/api-server/src/services/round-robin-comparison.ts");
   assert.ok(route.includes("AND ls.source_id = 'FANTASYPROS'"));
-  assert.ok(route.includes("AND ls.state IN ('CONFIRMED', 'PROJECTED')"));
-  assert.ok(route.includes("WHEN ls.state = 'CONFIRMED' THEN 1"));
-  assert.ok(route.includes("ELSE 2"));
+  assert.ok(route.includes("AND ls.state = 'PROJECTED'"));
+  assert.ok(!route.includes("AND ls.state IN ('CONFIRMED', 'PROJECTED')"));
   assert.ok(route.includes("Missing selected lineup snapshot for one or both teams"));
   assert.ok(!comparator.includes('candidate.lineupState === "PROJECTED" && candidate.selectionBlockReason === "INCOMPLETE_EVIDENCE"'));
   assert.ok(comparator.includes('context.lineupSource?.split(",").includes("MISSING")'));
 });
 
-test("pregame research never falls back to MLB, unsupported sources, or UPDATED snapshots", () => {
+test("pregame research reads the shared FantasyPros projected lineup policy", () => {
   for (const engine of ["tb-engine", "xbh-engine", "walk-engine", "hr-engine"]) {
     const service = readText(`artifacts/api-server/src/services/${engine}.ts`);
-    const selector = service.match(/WITH best_lineup AS \([\s\S]*?\n\s*\)\n\s*SELECT/)?.[0] ?? "";
-    assert.ok(selector.includes("source_id = 'FANTASYPROS'"), `${engine} must select FantasyPros lineups only`);
-    assert.ok(selector.includes("state IN ('CONFIRMED', 'PROJECTED')"), `${engine} must allow only FantasyPros projected and confirmed lineups`);
-    assert.ok(!selector.includes("MLB_OFFICIAL"), `${engine} must not select MLB postgame/settlement lineups`);
+    assert.ok(service.includes("querySlateLineupPlayers"), `${engine} must use the shared projected-lineup reader`);
     assert.ok(!service.includes("WHEN 'UPDATED'"), `${engine} must not rank UPDATED snapshots`);
   }
+  const sourcePolicy = readText("artifacts/api-server/src/services/lineup-sources.ts");
+  const pregameStart = sourcePolicy.indexOf("export const PREGAME_LINEUP_SOURCE_PRECEDENCE");
+  const auditStart = sourcePolicy.indexOf("export const OFFICIAL_LINEUP_AUDIT_SOURCE");
+  const pregameDefinition = sourcePolicy.slice(pregameStart, auditStart);
+  assert.ok(pregameDefinition.includes('sourceId: "FANTASYPROS"'));
+  assert.ok(pregameDefinition.includes('states: ["PROJECTED"]'));
+  assert.ok(!pregameDefinition.includes('sourceId: "MLB_OFFICIAL"'));
 });
 
 test("research-only H+R+RBI cannot enter feature snapshots or settle as Total Bases", () => {

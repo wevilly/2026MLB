@@ -393,6 +393,40 @@ describe("Phase 4A – Historical Pregame Feature Store", async () => {
     assert.ok(dbCount.rows[0].cnt > 0, "Snapshots must be in the DB");
   });
 
+  test("F1a: feature-store pitcher context stays on the projected lineup after later cards arrive", async () => {
+    await ensureSource("MLB_OFFICIAL", "MLB Official");
+
+    for (const [sourceId, state] of [["FANTASYPROS", "CONFIRMED"], ["MLB_OFFICIAL", "POSTED"]]) {
+      const snapshot = await pool.query(
+        `INSERT INTO lineup_snapshots (game_pk, team_id, state, source_id, observed_at, raw)
+         VALUES ($1, $2, $3, $4, now() + interval '1 hour', '{}')
+         RETURNING lineup_snapshot_id`,
+        [GAME.One, T.Away1, state, sourceId],
+      );
+      await pool.query(
+        `INSERT INTO lineup_entries (lineup_snapshot_id, batting_order, player_id)
+         VALUES ($1, 1, $2)`,
+        [snapshot.rows[0].lineup_snapshot_id, P.Alpha],
+      );
+    }
+
+    const pregameTeam = await pool.query(
+      `WITH accepted AS (
+         SELECT * FROM unnest($3::text[], $4::text[]) AS source_state(source_id, state)
+       )
+       SELECT ls.team_id
+       FROM lineup_entries le
+       JOIN lineup_snapshots ls ON ls.lineup_snapshot_id = le.lineup_snapshot_id
+       JOIN accepted a ON a.source_id = ls.source_id AND a.state = ls.state::text
+       WHERE le.player_id = $1 AND ls.game_pk = $2
+       ORDER BY array_position($3::text[], ls.source_id), ls.observed_at DESC
+       LIMIT 1`,
+      [P.Alpha, GAME.One, ["FANTASYPROS"], ["PROJECTED"]],
+    );
+
+    assert.equal(pregameTeam.rows[0]?.team_id, T.Home1, "later confirmed or posted cards must not replace the projected batter team");
+  });
+
   // ──────────────────────────────────────────────────────────────────────────
   test("F2: Snapshot row is immutable — UPDATE blocked by DB trigger; correction_of self-FK and CHECK constraint enforced at DB layer", async () => {
     // Get one snapshot we just wrote

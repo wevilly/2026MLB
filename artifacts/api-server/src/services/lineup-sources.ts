@@ -1,21 +1,22 @@
 import { pool } from "@workspace/db";
 
 /**
- * Lineup source precedence and cross-source conflict detection.
+ * Pregame lineup selection and official-lineup audit separation.
  *
  * Every consumer used to filter source_id = 'FANTASYPROS' inside its own SQL.
  * There was no second source and no cross-check, so if the FantasyPros feed was
  * missing or wrong for a game, the engines produced no candidates for that game
  * at all, silently.
  *
- * A second source already exists and was simply never read here: data-foundation
- * writes POSTED lineup snapshots from the MLB Stats API game feed. That is also
- * why RoundRobinCandidate.lineupState declared POSTED with nothing producing it.
+ * MLB also writes POSTED lineup snapshots from the game feed. Those official
+ * cards are valuable historical and settlement evidence, but usually arrive
+ * shortly before first pitch. They must not replace the projected slate that
+ * drives pregame research or make an earlier research run wait on a late card.
  *
- * Precedence is documented rather than implied, and precedence alone never
- * resolves a disagreement: where two sources disagree about whether a player is
- * in a lineup, the disagreement is recorded and surfaced as a blocking evidence
- * gap on the affected candidates.
+ * The pregame reader deliberately accepts only the projected-lineup authority.
+ * Official cards can be compared in dedicated audit views after they arrive,
+ * without becoming a competing candidate input or a false missing-evidence
+ * condition for the pregame board.
  *
  * The selection and conflict rules are pure and separately testable; the one
  * query that reads the snapshots lives here too, so all four market engines
@@ -31,26 +32,36 @@ export type LineupSourceRule = {
 };
 
 /**
- * Ordered from most to least authoritative.
+ * The only input to a pregame research run.
  *
- * MLB_OFFICIAL POSTED is the lineup the club actually submitted, read from the
- * game feed. FANTASYPROS CONFIRMED is a reported lineup; PROJECTED is a
- * forecast. A forecast never outranks a submitted card.
+ * The projected endpoint is available materially earlier than a club's final
+ * card and is the product's declared pregame lineup authority. Do not add
+ * MLB_OFFICIAL POSTED here: it is an audit/settlement source, not a replacement
+ * for the research input selected before first pitch.
  */
-export const LINEUP_SOURCE_PRECEDENCE: readonly LineupSourceRule[] = [
-  {
-    sourceId: "MLB_OFFICIAL",
-    states: ["POSTED"],
-    rationale: "The lineup card the club submitted, read from the MLB Stats API game feed.",
-  },
+export const PREGAME_LINEUP_SOURCE_PRECEDENCE: readonly LineupSourceRule[] = [
   {
     sourceId: "FANTASYPROS",
-    states: ["CONFIRMED", "PROJECTED"],
-    rationale: "Reported and projected lineups, available earlier than the submitted card.",
+    states: ["PROJECTED"],
+    rationale: "The projected FantasyPros lineup is the declared input for pregame research.",
   },
 ];
 
-/** State ordering within a source: a submitted card beats a report beats a forecast. */
+/**
+ * @deprecated Prefer PREGAME_LINEUP_SOURCE_PRECEDENCE to make the policy
+ * explicit at new call sites. Retained while supporting route modules use the
+ * shared default reader.
+ */
+export const LINEUP_SOURCE_PRECEDENCE = PREGAME_LINEUP_SOURCE_PRECEDENCE;
+
+/** Official cards remain available for audit and settlement, never pregame selection. */
+export const OFFICIAL_LINEUP_AUDIT_SOURCE: readonly LineupSourceRule[] = [{
+  sourceId: "MLB_OFFICIAL",
+  states: ["POSTED"],
+  rationale: "The club-submitted lineup card, retained as late official confirmation and historical lineage.",
+}];
+
+/** State ordering for explicitly requested comparison views. */
 export const LINEUP_STATE_RANK: Record<string, number> = {
   POSTED: 1,
   CONFIRMED: 2,
@@ -67,7 +78,7 @@ export type LineupSourceFilter = { sourceIds: string[]; states: string[] };
  * literal inside the SQL.
  */
 export function lineupSourceFilter(
-  sources: readonly LineupSourceRule[] = LINEUP_SOURCE_PRECEDENCE,
+  sources: readonly LineupSourceRule[] = PREGAME_LINEUP_SOURCE_PRECEDENCE,
 ): LineupSourceFilter {
   const sourceIds: string[] = [];
   const states: string[] = [];
@@ -82,7 +93,7 @@ export function lineupSourceFilter(
 
 export function lineupSourceRank(
   sourceId: string,
-  sources: readonly LineupSourceRule[] = LINEUP_SOURCE_PRECEDENCE,
+  sources: readonly LineupSourceRule[] = PREGAME_LINEUP_SOURCE_PRECEDENCE,
 ): number {
   const index = sources.findIndex((rule) => rule.sourceId === sourceId);
   return index < 0 ? Number.MAX_SAFE_INTEGER : index;
@@ -123,8 +134,8 @@ const teamKey = (gamePk: number, teamId: number) => `${gamePk}:${teamId}`;
 const playerKey = (gamePk: number, playerId: number) => `${gamePk}:${playerId}`;
 
 /**
- * Chooses one lineup per (game, team) by source precedence and reports every
- * player the sources disagree about.
+ * Chooses one approved lineup per (game, team) and reports disagreements only
+ * among the approved sources supplied by the caller.
  *
  * A conflict is not resolved by precedence. The winning source still supplies
  * the roster, because something has to, but every disputed player is returned
@@ -134,10 +145,13 @@ const playerKey = (gamePk: number, playerId: number) => `${gamePk}:${playerId}`;
  */
 export function resolveLineups(
   rows: LineupEntryRow[],
-  sources: readonly LineupSourceRule[] = LINEUP_SOURCE_PRECEDENCE,
+  sources: readonly LineupSourceRule[] = PREGAME_LINEUP_SOURCE_PRECEDENCE,
 ): ResolvedLineups {
+  const acceptedRows = rows.filter((row) => sources.some((source) =>
+    source.sourceId === row.sourceId && source.states.includes(row.lineupState),
+  ));
   const bySourceAndTeam = new Map<string, Map<string, LineupEntryRow[]>>();
-  for (const row of rows) {
+  for (const row of acceptedRows) {
     const team = teamKey(row.gamePk, row.teamId);
     if (!bySourceAndTeam.has(team)) bySourceAndTeam.set(team, new Map());
     const bySource = bySourceAndTeam.get(team)!;
@@ -226,15 +240,15 @@ export type SlateLineupPlayer = {
 };
 
 /**
- * Reads the slate's lineups from every configured source, picks one per team by
- * documented precedence, and reports every player the sources disagree about.
+ * Reads the slate's configured pregame lineups, picks the latest approved
+ * snapshot for each team, and reports disagreements only inside that policy.
  *
  * Shared by all four per-candidate market engines. Each one previously carried
  * its own copy of this query with source_id = 'FANTASYPROS' written into it.
  */
 export async function querySlateLineupPlayers(
   gamePks: number[],
-  sources: readonly LineupSourceRule[] = LINEUP_SOURCE_PRECEDENCE,
+  sources: readonly LineupSourceRule[] = PREGAME_LINEUP_SOURCE_PRECEDENCE,
 ): Promise<{ players: SlateLineupPlayer[]; resolved: ResolvedLineups }> {
   if (gamePks.length === 0) {
     return { players: [], resolved: resolveLineups([], sources) };

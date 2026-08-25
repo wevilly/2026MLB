@@ -84,7 +84,7 @@ import { ingestFantasyPros, ingestMlbOfficial } from "../../services/data-founda
 import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFallback, researchHealth } from "../../services/research-foundation";
 import { getBatterPitcherEvidence, refreshBatterPitcherSlate, type BvpMarket } from "../../services/batter-pitcher-research";
 import { compareRoundRobinGame, type RoundRobinBoardId, type RoundRobinCandidate } from "../../services/round-robin-comparison";
-import { LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter } from "../../services/lineup-sources";
+import { PREGAME_LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter } from "../../services/lineup-sources";
 import { ROUND_ROBIN_MARKETS, RR_DB_TO_MARKET, RR_MARKET_TO_DB } from "../../services/market-codes";
 import { getBullpenRoom, refreshBullpen } from "../../services/bullpen-foundation";
 import { runTBEngine } from "../../services/tb-engine";
@@ -167,11 +167,10 @@ import {
 } from "../../services/ai-workflows";
 
 /**
- * Accepted (source, state) pairs for the Round Robin lineup read, in precedence
- * order. array_position over sourceIds gives the query the same ordering the
- * shared resolver applies.
+ * Accepted projected-lineup pairs for the Round Robin pregame read. Official
+ * posted cards remain audit context and cannot replace these research inputs.
  */
-export const ROUND_ROBIN_LINEUP_FILTER = lineupSourceFilter(LINEUP_SOURCE_PRECEDENCE);
+export const ROUND_ROBIN_LINEUP_FILTER = lineupSourceFilter(PREGAME_LINEUP_SOURCE_PRECEDENCE);
 
 export const fantasyProsConfigured = Boolean(process.env.FANTASYPROS_API_KEY);
 

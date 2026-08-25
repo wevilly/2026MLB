@@ -225,8 +225,8 @@ router.get("/analyst/today", async (req, res, next) => {
            WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY s.observed_at DESC LIMIT 1
          ) home_start ON true
           LEFT JOIN LATERAL (
-            SELECT COUNT(DISTINCT team_id) FILTER (WHERE state = 'POSTED')::int AS posted_lineup_teams,
-                   COUNT(DISTINCT team_id) FILTER (WHERE state = 'PROJECTED')::int AS projected_lineup_teams
+            SELECT COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'MLB_OFFICIAL' AND state = 'POSTED')::int AS posted_lineup_teams,
+                   COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'FANTASYPROS' AND state = 'PROJECTED')::int AS projected_lineup_teams
             FROM lineup_snapshots WHERE game_pk = g.game_pk
           ) lineups ON true
          WHERE g.game_date = $1 ORDER BY g.start_time_utc NULLS LAST`,
@@ -244,17 +244,25 @@ router.get("/analyst/today", async (req, res, next) => {
       weather: "NOT FOUND",
       awayStarter: { name: game.away_starter ?? "TBD", hand: game.away_hand || "NOT FOUND", state: game.away_state ?? "TBD", note: "" },
       homeStarter: { name: game.home_starter ?? "TBD", hand: game.home_hand || "NOT FOUND", state: game.home_state ?? "TBD", note: "" },
-      lineupState: game.posted_lineup_teams === 2 ? "POSTED" : game.projected_lineup_teams > 0 ? "PROJECTED" : "UNKNOWN",
-      state: health.readiness.usable && game.projected_lineup_teams === 2 && game.away_state !== "TBD" && game.home_state !== "TBD"
-        ? "READY"
+      lineupState: game.projected_lineup_teams === 2
+        ? game.posted_lineup_teams === 2 ? "PROJECTED · MLB POSTED" : "PROJECTED"
+        : "UNKNOWN",
+      // A game's lineup readiness is independent from broader board gates such
+      // as reference-rank materialization. A projected lineup and starters can
+      // support pregame research before MLB posts its late official card, even
+      // while another research requirement leaves the overall board PARTIAL.
+      state: game.projected_lineup_teams === 2 && game.away_state !== "TBD" && game.home_state !== "TBD"
+        ? health.readiness.usable ? "READY" : "PARTIAL"
         : health.readiness.status === "BLOCKED" || health.readiness.status === "AUDIT_ONLY" ? "BLOCKED" : "PARTIAL",
       flag: !health.readiness.usable
         ? health.readiness.reason
         : game.projected_lineup_teams === 2
-        ? "FantasyPros projected lineups persisted"
+        ? game.posted_lineup_teams === 2
+          ? "FantasyPros projected lineups drive research · MLB posted cards retained for audit"
+          : "FantasyPros projected lineups drive pregame research"
         : game.projected_lineup_teams > 0
           ? "FantasyPros lineup evidence is incomplete"
-          : "No lineup evidence found",
+          : "No projected lineup evidence found",
     }));
     const today = {
       date: new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" }).format(new Date(`${date}T12:00:00Z`)),
@@ -428,7 +436,10 @@ router.get("/analyst/game-lab", async (req, res, next) => {
        LEFT JOIN venues v ON v.venue_id = g.venue_id
        LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY s.observed_at DESC LIMIT 1) away_start ON true
        LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY s.observed_at DESC LIMIT 1) home_start ON true
-       LEFT JOIN LATERAL (SELECT COUNT(DISTINCT team_id) FILTER (WHERE state = 'POSTED')::int AS posted_lineup_teams, COUNT(DISTINCT team_id) FILTER (WHERE state = 'PROJECTED')::int AS projected_lineup_teams FROM lineup_snapshots WHERE game_pk = g.game_pk) lineups ON true
+       LEFT JOIN LATERAL (SELECT
+         COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'MLB_OFFICIAL' AND state = 'POSTED')::int AS posted_lineup_teams,
+         COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'FANTASYPROS' AND state = 'PROJECTED')::int AS projected_lineup_teams
+         FROM lineup_snapshots WHERE game_pk = g.game_pk) lineups ON true
        WHERE g.game_date = $1 ORDER BY g.start_time_utc NULLS LAST`,
       [date],
     );
@@ -437,9 +448,15 @@ router.get("/analyst/game-lab", async (req, res, next) => {
       park: game.park ?? "NOT FOUND", roof: "NOT FOUND", weather: "NOT FOUND",
       awayStarter: { name: game.away_starter ?? "TBD", hand: game.away_hand ?? "NOT FOUND", state: game.away_state ?? "TBD", note: "" },
       homeStarter: { name: game.home_starter ?? "TBD", hand: game.home_hand ?? "NOT FOUND", state: game.home_state ?? "TBD", note: "" },
-      lineupState: game.posted_lineup_teams === 2 ? "POSTED" : game.projected_lineup_teams ? "PROJECTED" : "UNKNOWN",
-      state: game.posted_lineup_teams === 2 && game.away_state === "CONFIRMED" && game.home_state === "CONFIRMED" ? "READY" : "PARTIAL" as const,
-      flag: game.projected_lineup_teams === 2 ? "FantasyPros projected lineups persisted" : "Research context only — no matchup score",
+      lineupState: game.projected_lineup_teams === 2
+        ? game.posted_lineup_teams === 2 ? "PROJECTED · MLB POSTED" : "PROJECTED"
+        : "UNKNOWN",
+      state: game.projected_lineup_teams === 2 && game.away_state === "CONFIRMED" && game.home_state === "CONFIRMED" ? "READY" : "PARTIAL" as const,
+      flag: game.projected_lineup_teams === 2
+        ? game.posted_lineup_teams === 2
+          ? "FantasyPros projected lineups drive research · MLB posted cards retained for audit"
+          : "FantasyPros projected lineups drive pregame research"
+        : "Research context only — no projected lineup coverage",
     }));
     const selectedIndex = req.query.gameId ? games.rows.findIndex((game) => game.game_pk === Number(req.query.gameId)) : (games.rows.length ? 0 : -1);
     const selected = selectedIndex >= 0 ? responseGames[selectedIndex] : null;
@@ -563,10 +580,9 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
          SELECT * FROM unnest($2::text[], $3::text[]) AS s(source_id, state)
        ),
        latest_lineup AS (
-         -- One lineup per team, chosen by the documented source precedence in
-         -- lineup-sources.ts rather than by a source name written into this
-         -- query. A submitted MLB card outranks a FantasyPros report, which
-         -- outranks a projection.
+         -- One projected lineup per team, selected through the documented
+         -- pregame policy in lineup-sources.ts. Official MLB cards are
+         -- retained separately for audit and settlement context.
          SELECT DISTINCT ON (ls.game_pk, ls.team_id)
             ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state, ls.source_id
          FROM lineup_snapshots ls
@@ -682,12 +698,8 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
          JOIN games g ON g.game_pk = ls.game_pk
          WHERE g.game_date = $1
            AND ls.source_id = 'FANTASYPROS'
-           AND ls.state IN ('CONFIRMED', 'PROJECTED')
+           AND ls.state = 'PROJECTED'
          ORDER BY ls.game_pk, ls.team_id,
-           CASE
-             WHEN ls.state = 'CONFIRMED' THEN 1
-             ELSE 2
-           END,
            ls.observed_at DESC
        ),
        lineup_hitter_counts AS (

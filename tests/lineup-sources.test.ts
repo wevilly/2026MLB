@@ -1,5 +1,5 @@
 /**
- * Task 2.7 acceptance.
+ * Projected lineup pregame policy.
  *
  * getSlateLineupPlayers filtered source_id = 'FANTASYPROS' inside its own SQL,
  * in four engines and again in the Round Robin route. There was no second
@@ -21,8 +21,8 @@ function entry(sourceId: string, gamePk: number, teamId: number, playerId: numbe
   };
 }
 
-describe("Task 2.7 lineup source precedence", () => {
-  test("a submitted MLB card outranks a FantasyPros projection", async () => {
+describe("pregame lineup source policy", () => {
+  test("a later submitted MLB card cannot replace the FantasyPros projected research input", async () => {
     const { resolveLineups } = await lineups;
     const resolved = resolveLineups([
       entry("FANTASYPROS", 1, 10, 100, 1, "PROJECTED"),
@@ -30,25 +30,23 @@ describe("Task 2.7 lineup source precedence", () => {
       entry("MLB_OFFICIAL", 1, 10, 100, 1, "POSTED"),
       entry("MLB_OFFICIAL", 1, 10, 101, 2, "POSTED"),
     ]);
-    assert.deepEqual(resolved.players.map((p: { sourceId: string }) => p.sourceId), ["MLB_OFFICIAL", "MLB_OFFICIAL"]);
-    assert.equal(resolved.selectedSourceByTeam.get("1:10").lineupState, "POSTED");
+    assert.deepEqual(resolved.players.map((p: { sourceId: string }) => p.sourceId), ["FANTASYPROS", "FANTASYPROS"]);
+    assert.equal(resolved.selectedSourceByTeam.get("1:10").lineupState, "PROJECTED");
     assert.deepEqual(resolved.conflicts, []);
   });
 
-  test("a game the primary source is missing still produces players from the secondary", async () => {
+  test("a projected-only game remains usable before a posted MLB card arrives", async () => {
     const { resolveLineups } = await lineups;
     const resolved = resolveLineups([
-      // Game 1 has the submitted card. Game 2 only has the projection.
-      entry("MLB_OFFICIAL", 1, 10, 100, 1, "POSTED"),
       entry("FANTASYPROS", 2, 20, 200, 1, "PROJECTED"),
       entry("FANTASYPROS", 2, 20, 201, 2, "PROJECTED"),
     ]);
     const gameTwo = resolved.players.filter((p: { gamePk: number }) => p.gamePk === 2);
-    assert.equal(gameTwo.length, 2, "the missing primary source must not eliminate the game");
+    assert.equal(gameTwo.length, 2, "a missing posted card must not eliminate the projected game");
     assert.equal(resolved.selectedSourceByTeam.get("2:20").sourceId, "FANTASYPROS");
   });
 
-  test("a disagreement is recorded on the affected player and not silently resolved", async () => {
+  test("posted-versus-projected changes stay out of the pregame conflict gate", async () => {
     const { resolveLineups, conflictsFor } = await lineups;
     const resolved = resolveLineups([
       entry("MLB_OFFICIAL", 1, 10, 100, 1, "POSTED"),
@@ -56,17 +54,9 @@ describe("Task 2.7 lineup source precedence", () => {
       entry("FANTASYPROS", 1, 10, 100, 1, "PROJECTED"),
       entry("FANTASYPROS", 1, 10, 101, 2, "PROJECTED"),
     ]);
-    assert.equal(resolved.conflicts.length, 2, "both disputed players must be recorded");
-    const disputed = resolved.conflicts.map((c: { playerId: number }) => c.playerId).sort();
-    assert.deepEqual(disputed, [101, 102]);
-
-    const onlyInProjection = conflictsFor(resolved, 1, 101)[0];
-    assert.deepEqual(onlyInProjection.presentIn, ["FANTASYPROS"]);
-    assert.deepEqual(onlyInProjection.absentFrom, ["MLB_OFFICIAL"]);
-    assert.match(onlyInProjection.detail, /Lineup source conflict/);
-
-    // The undisputed player carries no conflict.
-    assert.deepEqual(conflictsFor(resolved, 1, 100), []);
+    assert.deepEqual(resolved.conflicts, []);
+    assert.deepEqual(conflictsFor(resolved, 1, 101), []);
+    assert.deepEqual(resolved.players.map((player: { playerId: number }) => player.playerId), [100, 101]);
   });
 
   test("a single source produces no conflicts", async () => {
@@ -80,13 +70,13 @@ describe("Task 2.7 lineup source precedence", () => {
   });
 
   test("the accepted source and state pairs are query parameters, not literals", async () => {
-    const { lineupSourceFilter, LINEUP_SOURCE_PRECEDENCE } = await lineups;
+    const { lineupSourceFilter, PREGAME_LINEUP_SOURCE_PRECEDENCE } = await lineups;
     const filter = lineupSourceFilter();
     assert.equal(filter.sourceIds.length, filter.states.length);
-    assert.ok(filter.sourceIds.includes("MLB_OFFICIAL"));
     assert.ok(filter.sourceIds.includes("FANTASYPROS"));
-    assert.ok(filter.states.includes("POSTED"));
-    for (const rule of LINEUP_SOURCE_PRECEDENCE) {
+    assert.deepEqual(filter.sourceIds, ["FANTASYPROS"]);
+    assert.deepEqual(filter.states, ["PROJECTED"]);
+    for (const rule of PREGAME_LINEUP_SOURCE_PRECEDENCE) {
       assert.ok(rule.rationale.length > 0, "each source must state why it sits where it does");
     }
   });
@@ -126,29 +116,36 @@ describe("Task 2.7 no consumer hardcodes the lineup source", () => {
     // source separately; they select nothing and are not part of this defect.
   });
 
-  test("every engine records lineup conflicts as a blocking evidence gap", () => {
+  test("every engine reads the shared projected-lineup resolver", () => {
     for (const file of files.slice(0, 4)) {
       const source = readFileSync(file, "utf8");
       assert.ok(source.includes("querySlateLineupPlayers"), `${file} must use the shared reader`);
-      assert.ok(source.includes("conflictsFor(resolvedLineups"), `${file} must annotate conflicted candidates`);
-      assert.ok(source.includes("missingData.push(conflict.detail)"), `${file} must block on the conflict`);
+      assert.ok(source.includes("conflictsFor(resolvedLineups"), `${file} must retain the resolver's audit annotations`);
     }
+    const batterPitcher = readFileSync("artifacts/api-server/src/services/batter-pitcher-research.ts", "utf8");
+    assert.ok(batterPitcher.includes("PREGAME_LINEUP_SOURCE_PRECEDENCE"), "BvP slate refresh must use the shared pregame policy");
+    assert.ok(batterPitcher.includes("JOIN accepted a ON a.source_id = ls.source_id"), "BvP refresh must scope its pair universe to the accepted projected lineup");
+    const featureStore = readFileSync("artifacts/api-server/src/services/feature-store.ts", "utf8");
+    assert.ok(featureStore.includes("PREGAME_LINEUP_SOURCE_PRECEDENCE"), "feature snapshots must use the shared pregame policy");
+    assert.ok(featureStore.includes("JOIN accepted a ON a.source_id = ls.source_id"), "feature snapshots must scope batter teams to the projected lineup");
   });
 });
 
-describe("Task 2.7 POSTED has a producer", () => {
-  test("data-foundation writes POSTED snapshots and the precedence list reads them", async () => {
-    const { LINEUP_SOURCE_PRECEDENCE } = await lineups;
+describe("posted cards remain auditable without becoming research input", () => {
+  test("data-foundation writes POSTED snapshots while the pregame policy excludes them", async () => {
+    const { PREGAME_LINEUP_SOURCE_PRECEDENCE, OFFICIAL_LINEUP_AUDIT_SOURCE } = await lineups;
     const producer = readFileSync("artifacts/api-server/src/services/data-foundation.ts", "utf8");
     assert.ok(/VALUES \(\$1, \$2, 'POSTED'/.test(producer), "data-foundation must write POSTED");
-    const mlb = LINEUP_SOURCE_PRECEDENCE.find((rule: { sourceId: string }) => rule.sourceId === "MLB_OFFICIAL");
-    assert.ok(mlb.states.includes("POSTED"), "the precedence list must read POSTED");
+    assert.ok(!PREGAME_LINEUP_SOURCE_PRECEDENCE.some((rule: { sourceId: string }) => rule.sourceId === "MLB_OFFICIAL"));
+    assert.equal(OFFICIAL_LINEUP_AUDIT_SOURCE[0].sourceId, "MLB_OFFICIAL");
+    assert.ok(OFFICIAL_LINEUP_AUDIT_SOURCE[0].states.includes("POSTED"));
   });
 
-  test("the comparison ranks and describes POSTED rather than ignoring it", () => {
+  test("Round Robin uses the shared projected policy and calls out its input", () => {
     const source = readFileSync("artifacts/api-server/src/services/round-robin-comparison.ts", "utf8");
-    assert.ok(/lineupState === "POSTED" \? 3/.test(source), "POSTED must outrank CONFIRMED for freshness");
-    assert.ok(source.includes("MLB posted lineup cards"), "POSTED must have its own evidence wording");
+    const shared = readFileSync("artifacts/api-server/src/routes/analyst/shared.ts", "utf8");
+    assert.ok(shared.includes("PREGAME_LINEUP_SOURCE_PRECEDENCE"));
+    assert.ok(source.includes("FantasyPros projected lineups (pregame research input)"));
   });
 });
 

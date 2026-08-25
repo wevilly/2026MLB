@@ -63,16 +63,16 @@ test("RR4 can select home when its XBH and walk evidence is stronger", () => {
   assert.equal(result.selectedConstruction?.constructionLabel, "Same-team XBH + Walk");
 });
 
-test("confirmed FantasyPros lineups break an otherwise exact projected-lineup tie", () => {
+test("a later lineup state cannot outrank a projected-lineup pregame comparison", () => {
   const result = compareRoundRobinGame("RR2", 1, "AWAY", "HOME", [
     candidate({ candidateId: "away-tb", side: "AWAY", playerId: 1, market: "TB", lineupState: "CONFIRMED" }),
     candidate({ candidateId: "away-walk", side: "AWAY", playerId: 2, market: "WALK", lineupState: "CONFIRMED" }),
     candidate({ candidateId: "home-tb", side: "HOME", team: "HOME", playerId: 3, market: "TB", lineupState: "PROJECTED" }),
     candidate({ candidateId: "home-walk", side: "HOME", team: "HOME", playerId: 4, market: "WALK", lineupState: "PROJECTED" }),
   ]);
-  assert.equal(result.selectedSide, "AWAY");
-  assert.match(result.away.bestConstruction?.evidenceSummary ?? "", /FantasyPros confirmed lineups/);
-  assert.match(result.home.bestConstruction?.evidenceSummary ?? "", /FantasyPros projected lineups/);
+  assert.equal(result.selectedSide, "HOME");
+  assert.match(result.away.bestConstruction?.evidenceSummary ?? "", /mixed pregame lineup states \(CONFIRMED\)/);
+  assert.match(result.home.bestConstruction?.evidenceSummary ?? "", /FantasyPros projected lineups \(pregame research input\)/);
 });
 
 test("RR1 rejects a cross-team TB pair when it is the only available construction", () => {
