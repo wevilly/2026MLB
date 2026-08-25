@@ -356,6 +356,9 @@ export interface ResearchSearchResult {
 export interface ResearchLab {
   sourceStatus: string;
   searchResults: ResearchSearchResult[];
+  /** @minimum 1 */
+  searchResultLimit: number;
+  searchResultsTruncated: boolean;
   profile: ResearchProfile | null;
   notices: string[];
 }
@@ -2031,6 +2034,10 @@ export interface DailyBoardGameSummary {
 
 export interface ErrorResponse {
   error: string;
+  /** @nullable */
+  code?: string | null;
+  /** @nullable */
+  requestId?: string | null;
 }
 
 export interface BettorSourceInput {
@@ -2839,7 +2846,13 @@ limit?: number;
 };
 
 export type GetAnalystPlayerLabParams = {
+/**
+ * @minimum 1
+ */
 playerId?: number;
+/**
+ * @maxLength 120
+ */
 search?: string;
 window?: GetAnalystPlayerLabWindow;
 date?: string;
@@ -2858,7 +2871,13 @@ export const GetAnalystPlayerLabWindow = {
 } as const;
 
 export type GetAnalystPitcherLabParams = {
+/**
+ * @minimum 1
+ */
 playerId?: number;
+/**
+ * @maxLength 120
+ */
 search?: string;
 window?: GetAnalystPitcherLabWindow;
 date?: string;

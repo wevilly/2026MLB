@@ -229,11 +229,11 @@ paths:
         - name: playerId
           in: query
           required: false
-          schema: { type: integer }
+          schema: { type: integer, minimum: 1 }
         - name: search
           in: query
           required: false
-          schema: { type: string }
+          schema: { type: string, maxLength: 120 }
         - name: window
           in: query
           required: false
@@ -249,6 +249,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResearchLab"
+        "400":
+          description: Invalid player search request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Research service failure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /analyst/pitcher-lab:
     get:
       operationId: getAnalystPitcherLab
@@ -258,11 +268,11 @@ paths:
         - name: playerId
           in: query
           required: false
-          schema: { type: integer }
+          schema: { type: integer, minimum: 1 }
         - name: search
           in: query
           required: false
-          schema: { type: string }
+          schema: { type: string, maxLength: 120 }
         - name: window
           in: query
           required: false
@@ -278,6 +288,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResearchLab"
+        "400":
+          description: Invalid pitcher search request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          description: Research service failure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
   /analyst/batter-pitcher:
     get:
       operationId: getAnalystBatterPitcher
@@ -1923,9 +1943,11 @@ components:
       properties:
         sourceStatus: { type: string }
         searchResults: { type: array, items: { $ref: "#/components/schemas/ResearchSearchResult" } }
+        searchResultLimit: { type: integer, minimum: 1 }
+        searchResultsTruncated: { type: boolean }
         profile: { anyOf: [{ $ref: "#/components/schemas/ResearchProfile" }, { type: "null" }] }
         notices: { type: array, items: { type: string } }
-      required: [sourceStatus, searchResults, profile, notices]
+      required: [sourceStatus, searchResults, searchResultLimit, searchResultsTruncated, profile, notices]
     BatterPitcherMetrics:
       type: object
       properties:
@@ -3008,6 +3030,8 @@ components:
       additionalProperties: false
       properties:
         error: { type: string }
+        code: { type: ["string", "null"] }
+        requestId: { type: ["string", "null"] }
       required: [error]
     BettorSourceInput:
       type: object

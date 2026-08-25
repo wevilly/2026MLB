@@ -8,7 +8,13 @@
 import type { GetAnalystPitcherLabWindow } from './getAnalystPitcherLabWindow';
 
 export type GetAnalystPitcherLabParams = {
+/**
+ * @minimum 1
+ */
 playerId?: number;
+/**
+ * @maxLength 120
+ */
 search?: string;
 window?: GetAnalystPitcherLabWindow;
 date?: Date;

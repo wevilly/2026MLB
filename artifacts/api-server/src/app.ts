@@ -6,6 +6,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 import { startOrchestrationScheduler } from "./services/orchestration";
 import { invalidateCache } from "./services/cache";
+import { AnalystRequestValidationError } from "./routes/analyst/shared";
 
 const app: Express = express();
 const isProduction = process.env.NODE_ENV === "production";
@@ -94,8 +95,13 @@ app.use((req, res, next) => {
 
 app.use("/api", router);
 app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (error instanceof AnalystRequestValidationError) {
+    req.log.warn({ code: error.code, requestId: req.id }, "invalid analyst request");
+    res.status(400).json({ error: error.message, code: error.code, requestId: String(req.id) });
+    return;
+  }
   req.log.error({ err: error, requestId: req.id }, "unhandled request error");
-  res.status(500).json({ error: "Internal server error", requestId: req.id });
+  res.status(500).json({ error: "Internal server error", code: "INTERNAL_ERROR", requestId: String(req.id) });
 });
 
 startOrchestrationScheduler();

@@ -11,6 +11,9 @@ import type { ResearchSearchResult } from './researchSearchResult';
 export interface ResearchLab {
   sourceStatus: string;
   searchResults: ResearchSearchResult[];
+  /** @minimum 1 */
+  searchResultLimit: number;
+  searchResultsTruncated: boolean;
   profile: ResearchProfile | null;
   notices: string[];
 }

@@ -8,7 +8,13 @@
 import type { GetAnalystPlayerLabWindow } from './getAnalystPlayerLabWindow';
 
 export type GetAnalystPlayerLabParams = {
+/**
+ * @minimum 1
+ */
 playerId?: number;
+/**
+ * @maxLength 120
+ */
 search?: string;
 window?: GetAnalystPlayerLabWindow;
 date?: Date;

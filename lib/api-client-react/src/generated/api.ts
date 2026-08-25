@@ -1270,7 +1270,7 @@ export const getGetAnalystPlayerLabQueryKey = (params?: GetAnalystPlayerLabParam
     }
 
 
-export const getGetAnalystPlayerLabQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError = ErrorType<unknown>>(params?: GetAnalystPlayerLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetAnalystPlayerLabQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError = ErrorType<ErrorResponse>>(params?: GetAnalystPlayerLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -1289,14 +1289,14 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetAnalystPlayerLabQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystPlayerLab>>>
-export type GetAnalystPlayerLabQueryError = ErrorType<unknown>
+export type GetAnalystPlayerLabQueryError = ErrorType<ErrorResponse>
 
 
 /**
  * @summary Get canonical hitter research profile
  */
 
-export function useGetAnalystPlayerLab<TData = Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError = ErrorType<unknown>>(
+export function useGetAnalystPlayerLab<TData = Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError = ErrorType<ErrorResponse>>(
  params?: GetAnalystPlayerLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPlayerLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
@@ -1354,7 +1354,7 @@ export const getGetAnalystPitcherLabQueryKey = (params?: GetAnalystPitcherLabPar
     }
 
 
-export const getGetAnalystPitcherLabQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError = ErrorType<unknown>>(params?: GetAnalystPitcherLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getGetAnalystPitcherLabQueryOptions = <TData = Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError = ErrorType<ErrorResponse>>(params?: GetAnalystPitcherLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -1373,14 +1373,14 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type GetAnalystPitcherLabQueryResult = NonNullable<Awaited<ReturnType<typeof getAnalystPitcherLab>>>
-export type GetAnalystPitcherLabQueryError = ErrorType<unknown>
+export type GetAnalystPitcherLabQueryError = ErrorType<ErrorResponse>
 
 
 /**
  * @summary Get canonical pitcher research profile
  */
 
-export function useGetAnalystPitcherLab<TData = Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError = ErrorType<unknown>>(
+export function useGetAnalystPitcherLab<TData = Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError = ErrorType<ErrorResponse>>(
  params?: GetAnalystPitcherLabParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAnalystPitcherLab>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {

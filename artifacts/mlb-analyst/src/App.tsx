@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore, useGetAnalystDailyMarketBoard, useGetAnalystDailyBoardGameSummary, useRefreshAnalystDailyMarketBoard, useGetAnalystBettorEvaluation, useChatWithAnalystAi, useGetAnalystAiDrafts, useCreateAnalystAiDraft, useApproveAnalystAiDraft, useRejectAnalystAiDraft, useGetAnalystAiSourcingRegister, useDecideAnalystAiSourcingClaim, useGetAnalystAiResearchNotes } from '@workspace/api-client-react';
+import { getGetAnalystPitcherLabQueryKey, getGetAnalystPlayerLabQueryKey, useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore, useGetAnalystDailyMarketBoard, useGetAnalystDailyBoardGameSummary, useRefreshAnalystDailyMarketBoard, useGetAnalystBettorEvaluation, useChatWithAnalystAi, useGetAnalystAiDrafts, useCreateAnalystAiDraft, useApproveAnalystAiDraft, useRejectAnalystAiDraft, useGetAnalystAiSourcingRegister, useDecideAnalystAiSourcingClaim, useGetAnalystAiResearchNotes } from '@workspace/api-client-react';
 import type { AnalystSettings, BackfillFeatureStoreParams, BullpenArm, BullpenRoom, BullpenTeam, CaptureFeatureStoreSlateParams, DataHealth, FeatureStoreCaptureResult, FeatureStoreResult, HealthIssue, HREngineResult, MarketResearchCandidate, PregameFeatureSnapshot, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile, DailyMarketBoard, DailyBoardGameSummary, BettorEvaluation, BettorEvaluationPickMarket } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight, Send, FilePlus, ThumbsDown, ThumbsUp, ExternalLink, ClipboardList, Download, Play, Square } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useSearch, Router as WouterRouter } from 'wouter';
@@ -580,7 +580,7 @@ function FuturePage({ label }: { label: string }) {
 }
 
 
-function LabSearchPanel({ searchInput, setSearchInput, onSearch, results, onSelect, selectedId, placeholder = "Search entities..." }: { searchInput: string, setSearchInput: (s: string) => void, onSearch: (e: React.FormEvent) => void, results?: ResearchSearchResult[], onSelect: (id: number) => void, selectedId?: number, placeholder?: string }) {
+function LabSearchPanel({ searchInput, setSearchInput, onSearch, results, onSelect, selectedId, hasSearch, isLoading, truncated, resultLimit, placeholder = "Search entities..." }: { searchInput: string, setSearchInput: (s: string) => void, onSearch: (e: React.FormEvent) => void, results?: ResearchSearchResult[], onSelect: (id: number) => void, selectedId?: number, hasSearch: boolean, isLoading: boolean, truncated?: boolean, resultLimit?: number, placeholder?: string }) {
   return (
     <Panel className="lab-sidebar">
       <SectionHeading eyebrow="Entity resolution" title="Directory" />
@@ -599,9 +599,12 @@ function LabSearchPanel({ searchInput, setSearchInput, onSearch, results, onSele
             ))}
           </div>
         )}
-        {results && results.length === 0 && (
-          <p className="text-muted-foreground text-xs font-mono">No records matched.</p>
+        {isLoading && hasSearch && <p className="text-muted-foreground text-xs font-mono">Searching official eligibility…</p>}
+        {!isLoading && hasSearch && results && results.length === 0 && (
+          <p className="text-muted-foreground text-xs font-mono">No eligible records matched this name and date.</p>
         )}
+        {!hasSearch && <p className="text-muted-foreground text-xs font-mono">Search a name, then choose an eligible player.</p>}
+        {truncated && <p className="mt-3 text-xs font-mono text-amber-700">Showing the first {resultLimit} matches. Refine the name to narrow the directory.</p>}
       </div>
     </Panel>
   );
@@ -695,48 +698,118 @@ function LabProfile({ profile, window, onWindowChange, windows }: { profile: Res
   );
 }
 
-function PlayerLabPage() {
+const LAB_WINDOWS = ['SEASON', 'CAREER', 'ROLLING_7', 'ROLLING_14', 'ROLLING_30', 'ROLLING_60'] as const;
+type LabWindow = typeof LAB_WINDOWS[number];
+
+function isCalendarDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+}
+
+function useLabUrlState() {
   const [location, setLocation] = useLocation();
   const searchString = useSearch();
   const params = new URLSearchParams(searchString);
-  const playerIdParam = params.get('playerId');
-  const playerId = playerIdParam ? parseInt(playerIdParam, 10) : undefined;
-  const search = params.get('search') || undefined;
-  const windowParam = (params.get('window') || 'SEASON') as any;
-  const dateParam = params.get('date') || undefined;
+  const rawPlayerId = params.get('playerId');
+  const rawSearch = params.get('search');
+  const rawDate = params.get('date');
+  const rawWindow = params.get('window');
+  const playerId = rawPlayerId && /^\d+$/.test(rawPlayerId) && Number(rawPlayerId) > 0 ? Number(rawPlayerId) : undefined;
+  const windowParam: LabWindow = rawWindow && LAB_WINDOWS.includes(rawWindow as LabWindow) ? rawWindow as LabWindow : 'SEASON';
+  const invalidParameter = rawPlayerId && !playerId
+    ? 'Player ID must be a positive whole number.'
+    : rawDate && !isCalendarDate(rawDate)
+      ? 'Date must be a real calendar date in YYYY-MM-DD format.'
+      : rawWindow && !LAB_WINDOWS.includes(rawWindow as LabWindow)
+        ? 'Window must be one of the supported research windows.'
+        : rawSearch && (rawSearch.trim().length > 120 || ['null', 'undefined'].includes(rawSearch.trim().toLowerCase()))
+          ? 'Search text is invalid. Remove null-like values and keep it under 120 characters.'
+          : null;
+  const search = rawSearch?.trim() || undefined;
+  const dateParam = rawDate || undefined;
 
   const [searchInput, setSearchInput] = useState(search || '');
+  useEffect(() => setSearchInput(search || ''), [search]);
 
-  const query = useGetAnalystPlayerLab({ playerId, search, window: windowParam, date: dateParam });
-  const data = query.data;
-  
-  const refresh = useRefreshAnalystResearch();
+  const updateUrl = (update: (next: URLSearchParams) => void) => {
+    const next = new URLSearchParams(searchString);
+    update(next);
+    const query = next.toString();
+    setLocation(query ? `${location}?${query}` : location);
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const newParams = new URLSearchParams(searchString);
-    if (searchInput) newParams.set('search', searchInput);
-    else newParams.delete('search');
-    newParams.delete('playerId');
-    setLocation(`${location}?${newParams.toString()}`);
+    updateUrl((next) => {
+      const value = searchInput.trim();
+      if (value) next.set('search', value);
+      else next.delete('search');
+      next.delete('playerId');
+    });
   };
 
   const handleSelect = (id: number) => {
-    const newParams = new URLSearchParams(searchString);
-    newParams.set('playerId', id.toString());
-    setLocation(`${location}?${newParams.toString()}`);
+    updateUrl((next) => {
+      next.set('playerId', id.toString());
+      next.delete('search');
+    });
   };
 
   const handleWindowChange = (w: string) => {
-    const newParams = new URLSearchParams(searchString);
-    newParams.set('window', w);
-    setLocation(`${location}?${newParams.toString()}`);
+    updateUrl((next) => next.set('window', w));
   };
   const handleDateChange = (date: string) => {
-    const newParams = new URLSearchParams(searchString);
-    if (date) newParams.set('date', date); else newParams.delete('date');
-    setLocation(`${location}?${newParams.toString()}`);
+    updateUrl((next) => {
+      if (date) next.set('date', date);
+      else next.delete('date');
+    });
   };
+  return { playerId, search, windowParam, dateParam, searchInput, setSearchInput, invalidParameter, queryEnabled: !invalidParameter, handleSearch, handleSelect, handleWindowChange, handleDateChange };
+}
+
+function LabStateNotice({ title, detail, status, notices = [], tone = 'neutral', retry }: { title: string; detail: string; status?: string; notices?: string[]; tone?: Tone; retry?: () => void }) {
+  return (
+    <Panel className="h-full min-h-[400px] flex items-center justify-center border-dashed">
+      <div className="query-message max-w-xl" data-testid="lab-state">
+        <div className="query-icon"><StatusDot tone={tone} /></div>
+        <div>
+          <strong>{title}</strong>
+          <p>{detail}</p>
+          {status && <div className="mt-3"><Badge tone={tone}>{status}</Badge></div>}
+          {notices.length > 0 && <ul className="mt-3 space-y-1 text-xs text-muted-foreground">{notices.map((notice) => <li key={notice}>• {notice}</li>)}</ul>}
+        </div>
+        {retry && <button className="button button-quiet ml-auto" onClick={retry}><RefreshCw size={14} /> Retry</button>}
+      </div>
+    </Panel>
+  );
+}
+
+function labErrorDetail(error: unknown) {
+  if (error && typeof error === 'object' && 'data' in error) {
+    const data = (error as { data?: unknown }).data;
+    if (data && typeof data === 'object' && 'error' in data) return String((data as { error: unknown }).error);
+  }
+  return 'The research service could not complete this request. Retry it, then inspect Data Health if the issue persists.';
+}
+
+function PlayerLabPage() {
+  const state = useLabUrlState();
+  const labParams = { playerId: state.playerId, search: state.search, window: state.windowParam, date: state.dateParam };
+  const query = useGetAnalystPlayerLab(
+    labParams,
+    { query: { enabled: state.queryEnabled, queryKey: getGetAnalystPlayerLabQueryKey(labParams) } },
+  );
+  const data = query.data;
+  const refresh = useRefreshAnalystResearch({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getGetAnalystPlayerLabQueryKey() });
+        void queryClient.invalidateQueries({ queryKey: getGetAnalystPitcherLabQueryKey() });
+      },
+    },
+  });
 
   return (
     <div className="page-content rise-in">
@@ -747,8 +820,8 @@ function PlayerLabPage() {
           <p>Canonical hitter research profiles. Provenance-backed evidence, zero synthetic predictions.</p>
         </div>
         <div className="flex items-center gap-2">
-          <input type="date" className="search-input !h-[35px] !w-auto" value={dateParam || data?.profile?.effectiveTo.slice(0, 10) || ''} onChange={(e) => handleDateChange(e.target.value)} data-testid="input-player-lab-date" />
-          <button className="button button-dark" onClick={() => refresh.mutate({})} disabled={refresh.isPending} data-testid="button-refresh-research">
+          <input type="date" className="search-input !h-[35px] !w-auto" value={state.dateParam || data?.profile?.effectiveTo.slice(0, 10) || ''} onChange={(e) => state.handleDateChange(e.target.value)} data-testid="input-player-lab-date" />
+          <button className="button button-dark" onClick={() => refresh.mutate({ params: state.dateParam ? { date: state.dateParam } : undefined })} disabled={refresh.isPending} data-testid="button-refresh-research">
             <RefreshCw size={15} /> {refresh.isPending ? 'Ingesting...' : 'Sync statcast/fangraphs'}
           </button>
         </div>
@@ -756,31 +829,35 @@ function PlayerLabPage() {
 
       <div className="lab-layout">
         <LabSearchPanel 
-          searchInput={searchInput} 
-          setSearchInput={setSearchInput} 
-          onSearch={handleSearch} 
+          searchInput={state.searchInput}
+          setSearchInput={state.setSearchInput}
+          onSearch={state.handleSearch}
           results={data?.searchResults} 
-          onSelect={handleSelect} 
-          selectedId={playerId} 
+          onSelect={state.handleSelect}
+          selectedId={state.playerId}
+          hasSearch={Boolean(state.search)}
+          isLoading={query.isLoading}
+          truncated={data?.searchResultsTruncated}
+          resultLimit={data?.searchResultLimit}
           placeholder="Search hitters..."
         />
         
-        {query.isLoading ? (
+        {state.invalidParameter ? (
+          <div className="flex-1"><LabStateNotice title="Invalid direct link" detail={state.invalidParameter} status="REQUEST NOT SENT" tone="bad" /></div>
+        ) : query.isLoading ? (
           <div className="flex-1"><LoadingPanel rows={10} /></div>
         ) : query.isError ? (
-          <div className="flex-1"><QueryMessage kind="error" onRetry={() => query.refetch()} /></div>
+          <div className="flex-1"><LabStateNotice title="Research request unavailable" detail={labErrorDetail(query.error)} status="SERVICE OR REQUEST ERROR" tone="bad" retry={() => query.refetch()} /></div>
         ) : data?.profile ? (
-          <LabProfile 
+          <div className="flex-1 space-y-4"><LabProfile
             profile={data.profile} 
-            window={windowParam} 
-            onWindowChange={handleWindowChange} 
-            windows={['SEASON', 'CAREER', 'ROLLING_7', 'ROLLING_14', 'ROLLING_30', 'ROLLING_60']}
-          />
+            window={state.windowParam}
+            onWindowChange={state.handleWindowChange}
+            windows={[...LAB_WINDOWS]}
+          /><LabStateNotice title="Source and eligibility context" detail="This profile shows only source-backed evidence available for the requested as-of date and research window." status={data.sourceStatus} notices={data.notices} tone={toneFor(data.sourceStatus)} /></div>
         ) : (
           <div className="flex-1">
-            <Panel className="h-full min-h-[400px] flex items-center justify-center border-dashed">
-              <QueryMessage kind="empty" />
-            </Panel>
+            <LabStateNotice title={data?.sourceStatus === 'SEARCH REQUIRED' ? 'Start with a player name' : 'No profile is available'} detail={data?.notices[0] ?? 'Use the directory to search a player.'} status={data?.sourceStatus} notices={data?.notices.slice(1)} tone={toneFor(data?.sourceStatus)} />
           </div>
         )}
       </div>
@@ -789,47 +866,21 @@ function PlayerLabPage() {
 }
 
 function PitcherLabPage() {
-  const [location, setLocation] = useLocation();
-  const searchString = useSearch();
-  const params = new URLSearchParams(searchString);
-  const playerIdParam = params.get('playerId');
-  const playerId = playerIdParam ? parseInt(playerIdParam, 10) : undefined;
-  const search = params.get('search') || undefined;
-  const windowParam = (params.get('window') || 'SEASON') as any;
-  const dateParam = params.get('date') || undefined;
-
-  const [searchInput, setSearchInput] = useState(search || '');
-
-  const query = useGetAnalystPitcherLab({ playerId, search, window: windowParam, date: dateParam });
+  const state = useLabUrlState();
+  const labParams = { playerId: state.playerId, search: state.search, window: state.windowParam, date: state.dateParam };
+  const query = useGetAnalystPitcherLab(
+    labParams,
+    { query: { enabled: state.queryEnabled, queryKey: getGetAnalystPitcherLabQueryKey(labParams) } },
+  );
   const data = query.data;
-  
-  const refresh = useRefreshAnalystResearch();
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    const newParams = new URLSearchParams(searchString);
-    if (searchInput) newParams.set('search', searchInput);
-    else newParams.delete('search');
-    newParams.delete('playerId');
-    setLocation(`${location}?${newParams.toString()}`);
-  };
-
-  const handleSelect = (id: number) => {
-    const newParams = new URLSearchParams(searchString);
-    newParams.set('playerId', id.toString());
-    setLocation(`${location}?${newParams.toString()}`);
-  };
-
-  const handleWindowChange = (w: string) => {
-    const newParams = new URLSearchParams(searchString);
-    newParams.set('window', w);
-    setLocation(`${location}?${newParams.toString()}`);
-  };
-  const handleDateChange = (date: string) => {
-    const newParams = new URLSearchParams(searchString);
-    if (date) newParams.set('date', date); else newParams.delete('date');
-    setLocation(`${location}?${newParams.toString()}`);
-  };
+  const refresh = useRefreshAnalystResearch({
+    mutation: {
+      onSuccess: () => {
+        void queryClient.invalidateQueries({ queryKey: getGetAnalystPlayerLabQueryKey() });
+        void queryClient.invalidateQueries({ queryKey: getGetAnalystPitcherLabQueryKey() });
+      },
+    },
+  });
 
   return (
     <div className="page-content rise-in">
@@ -840,8 +891,8 @@ function PitcherLabPage() {
           <p>Canonical pitcher research profiles. Provenance-backed evidence, zero synthetic predictions.</p>
         </div>
         <div className="flex items-center gap-2">
-          <input type="date" className="search-input !h-[35px] !w-auto" value={dateParam || data?.profile?.effectiveTo.slice(0, 10) || ''} onChange={(e) => handleDateChange(e.target.value)} data-testid="input-pitcher-lab-date" />
-          <button className="button button-dark" onClick={() => refresh.mutate({})} disabled={refresh.isPending} data-testid="button-refresh-research">
+          <input type="date" className="search-input !h-[35px] !w-auto" value={state.dateParam || data?.profile?.effectiveTo.slice(0, 10) || ''} onChange={(e) => state.handleDateChange(e.target.value)} data-testid="input-pitcher-lab-date" />
+          <button className="button button-dark" onClick={() => refresh.mutate({ params: state.dateParam ? { date: state.dateParam } : undefined })} disabled={refresh.isPending} data-testid="button-refresh-research">
             <RefreshCw size={15} /> {refresh.isPending ? 'Ingesting...' : 'Sync statcast/fangraphs'}
           </button>
         </div>
@@ -849,31 +900,35 @@ function PitcherLabPage() {
 
       <div className="lab-layout">
         <LabSearchPanel 
-          searchInput={searchInput} 
-          setSearchInput={setSearchInput} 
-          onSearch={handleSearch} 
+          searchInput={state.searchInput}
+          setSearchInput={state.setSearchInput}
+          onSearch={state.handleSearch}
           results={data?.searchResults} 
-          onSelect={handleSelect} 
-          selectedId={playerId} 
+          onSelect={state.handleSelect}
+          selectedId={state.playerId}
+          hasSearch={Boolean(state.search)}
+          isLoading={query.isLoading}
+          truncated={data?.searchResultsTruncated}
+          resultLimit={data?.searchResultLimit}
           placeholder="Search pitchers..."
         />
         
-        {query.isLoading ? (
+        {state.invalidParameter ? (
+          <div className="flex-1"><LabStateNotice title="Invalid direct link" detail={state.invalidParameter} status="REQUEST NOT SENT" tone="bad" /></div>
+        ) : query.isLoading ? (
           <div className="flex-1"><LoadingPanel rows={10} /></div>
         ) : query.isError ? (
-          <div className="flex-1"><QueryMessage kind="error" onRetry={() => query.refetch()} /></div>
+          <div className="flex-1"><LabStateNotice title="Research request unavailable" detail={labErrorDetail(query.error)} status="SERVICE OR REQUEST ERROR" tone="bad" retry={() => query.refetch()} /></div>
         ) : data?.profile ? (
-          <LabProfile 
+          <div className="flex-1 space-y-4"><LabProfile
             profile={data.profile} 
-            window={windowParam} 
-            onWindowChange={handleWindowChange} 
-            windows={['SEASON', 'CAREER', 'ROLLING_7', 'ROLLING_14', 'ROLLING_30', 'ROLLING_60']}
-          />
+            window={state.windowParam}
+            onWindowChange={state.handleWindowChange}
+            windows={[...LAB_WINDOWS]}
+          /><LabStateNotice title="Source and eligibility context" detail="This profile shows only source-backed evidence available for the requested as-of date and research window." status={data.sourceStatus} notices={data.notices} tone={toneFor(data.sourceStatus)} /></div>
         ) : (
           <div className="flex-1">
-            <Panel className="h-full min-h-[400px] flex items-center justify-center border-dashed">
-              <QueryMessage kind="empty" />
-            </Panel>
+            <LabStateNotice title={data?.sourceStatus === 'SEARCH REQUIRED' ? 'Start with a pitcher name' : 'No profile is available'} detail={data?.notices[0] ?? 'Use the directory to search a pitcher.'} status={data?.sourceStatus} notices={data?.notices.slice(1)} tone={toneFor(data?.sourceStatus)} />
           </div>
         )}
       </div>

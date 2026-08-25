@@ -188,6 +188,7 @@ import {
   identityCoverage,
   isoString,
   requestedDate,
+  requestedLabSearch,
   requestedPlayerId,
   requestedWindow,
   requiredDate,
@@ -362,7 +363,7 @@ router.get("/analyst/data-health", async (req, res, next) => {
 router.get("/analyst/player-lab", async (req, res, next) => {
   try {
     const playerId = requestedPlayerId(req.query.playerId);
-    const search = String(req.query.search ?? "").trim();
+    const search = requestedLabSearch(req.query.search);
     const window = requestedWindow(req.query.window);
     const date = requestedDate(req.query.date);
     const profile = await readThroughCache(
@@ -379,7 +380,7 @@ router.get("/analyst/player-lab", async (req, res, next) => {
 router.get("/analyst/pitcher-lab", async (req, res, next) => {
   try {
     const playerId = requestedPlayerId(req.query.playerId);
-    const search = String(req.query.search ?? "").trim();
+    const search = requestedLabSearch(req.query.search);
     const window = requestedWindow(req.query.window);
     const date = requestedDate(req.query.date);
     const profile = await readThroughCache(

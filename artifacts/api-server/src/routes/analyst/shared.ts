@@ -197,13 +197,43 @@ export type OperationalReadiness = {
   observedAt: string;
 };
 
+export class AnalystRequestValidationError extends Error {
+  constructor(
+    message: string,
+    readonly code: "INVALID_DATE" | "INVALID_PLAYER_ID" | "INVALID_SEARCH" | "INVALID_WINDOW",
+  ) {
+    super(message);
+    this.name = "AnalystRequestValidationError";
+  }
+}
+
+function invalidQueryValue(value: unknown) {
+  return value === null
+    || Array.isArray(value)
+    || (typeof value === "string" && ["null", "undefined"].includes(value.trim().toLowerCase()));
+}
+
+function isCalendarDate(date: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const [year, month, day] = date.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
+}
+
 export function requestedDate(value: unknown) {
+  if (value !== undefined && invalidQueryValue(value)) {
+    throw new AnalystRequestValidationError("date must use a real YYYY-MM-DD calendar date", "INVALID_DATE");
+  }
   const date = value instanceof Date
     ? value.toISOString().slice(0, 10)
     : typeof value === "string"
       ? value
       : currentEasternDate();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("date must use YYYY-MM-DD");
+  if (!isCalendarDate(date)) {
+    throw new AnalystRequestValidationError("date must use a real YYYY-MM-DD calendar date", "INVALID_DATE");
+  }
   return date;
 }
 
@@ -251,18 +281,38 @@ export function engineResponseDate<T extends { slateDate: Date }>(response: T, s
 }
 
 export function requestedWindow(value: unknown) {
+  if (value !== undefined && invalidQueryValue(value)) {
+    throw new AnalystRequestValidationError("window must be SEASON, CAREER, ROLLING_7, ROLLING_14, ROLLING_30, or ROLLING_60", "INVALID_WINDOW");
+  }
   const window = typeof value === "string" ? value : "SEASON";
   if (!["SEASON", "CAREER", "ROLLING_7", "ROLLING_14", "ROLLING_30", "ROLLING_60"].includes(window)) {
-    throw new Error("window must be SEASON, CAREER, ROLLING_7, ROLLING_14, ROLLING_30, or ROLLING_60");
+    throw new AnalystRequestValidationError("window must be SEASON, CAREER, ROLLING_7, ROLLING_14, ROLLING_30, or ROLLING_60", "INVALID_WINDOW");
   }
   return window as "SEASON" | "CAREER" | "ROLLING_7" | "ROLLING_14" | "ROLLING_30" | "ROLLING_60";
 }
 
 export function requestedPlayerId(value: unknown) {
   if (value === undefined) return null;
+  if (invalidQueryValue(value) || (typeof value !== "string" && typeof value !== "number")) {
+    throw new AnalystRequestValidationError("playerId must be a positive integer", "INVALID_PLAYER_ID");
+  }
   const playerId = Number(value);
-  if (!Number.isSafeInteger(playerId) || playerId <= 0) throw new Error("playerId must be a positive integer");
+  if (!Number.isSafeInteger(playerId) || playerId <= 0) {
+    throw new AnalystRequestValidationError("playerId must be a positive integer", "INVALID_PLAYER_ID");
+  }
   return playerId;
+}
+
+export function requestedLabSearch(value: unknown) {
+  if (value === undefined || value === "") return "";
+  if (invalidQueryValue(value) || typeof value !== "string") {
+    throw new AnalystRequestValidationError("search must be plain text, not a null-like value", "INVALID_SEARCH");
+  }
+  const search = value.trim();
+  if (search.length > 120) {
+    throw new AnalystRequestValidationError("search must contain at most 120 characters", "INVALID_SEARCH");
+  }
+  return search;
 }
 
 export function displayTime(value: string | null) {

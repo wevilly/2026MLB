@@ -409,12 +409,20 @@ export const GetAnalystSettingsResponse = zod.object({
 /**
  * @summary Get canonical hitter research profile
  */
+
+export const getAnalystPlayerLabQuerySearchMax = 120;
+
+
+
 export const GetAnalystPlayerLabQueryParams = zod.object({
-  "playerId": zod.coerce.number().int().optional(),
-  "search": zod.coerce.string().optional(),
+  "playerId": zod.coerce.number().int().min(1).optional(),
+  "search": zod.coerce.string().max(getAnalystPlayerLabQuerySearchMax).optional(),
   "window": zod.enum(['SEASON', 'CAREER', 'ROLLING_7', 'ROLLING_14', 'ROLLING_30', 'ROLLING_60']).optional(),
   "date": zod.date().optional()
 })
+
+
+
 
 export const GetAnalystPlayerLabResponse = zod.object({
   "sourceStatus": zod.string(),
@@ -425,6 +433,8 @@ export const GetAnalystPlayerLabResponse = zod.object({
   "position": zod.string(),
   "role": zod.string()
 })),
+  "searchResultLimit": zod.number().int().min(1),
+  "searchResultsTruncated": zod.boolean(),
   "profile": zod.union([zod.object({
   "identity": zod.object({
   "playerId": zod.number(),
@@ -478,12 +488,20 @@ export const GetAnalystPlayerLabResponse = zod.object({
 /**
  * @summary Get canonical pitcher research profile
  */
+
+export const getAnalystPitcherLabQuerySearchMax = 120;
+
+
+
 export const GetAnalystPitcherLabQueryParams = zod.object({
-  "playerId": zod.coerce.number().int().optional(),
-  "search": zod.coerce.string().optional(),
+  "playerId": zod.coerce.number().int().min(1).optional(),
+  "search": zod.coerce.string().max(getAnalystPitcherLabQuerySearchMax).optional(),
   "window": zod.enum(['SEASON', 'CAREER', 'ROLLING_7', 'ROLLING_14', 'ROLLING_30', 'ROLLING_60']).optional(),
   "date": zod.date().optional()
 })
+
+
+
 
 export const GetAnalystPitcherLabResponse = zod.object({
   "sourceStatus": zod.string(),
@@ -494,6 +512,8 @@ export const GetAnalystPitcherLabResponse = zod.object({
   "position": zod.string(),
   "role": zod.string()
 })),
+  "searchResultLimit": zod.number().int().min(1),
+  "searchResultsTruncated": zod.boolean(),
   "profile": zod.union([zod.object({
   "identity": zod.object({
   "playerId": zod.number(),

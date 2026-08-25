@@ -8,6 +8,7 @@ const PARK_SOURCE = "PARK_FACTORS";
 type JsonObject = Record<string, unknown>;
 type ResearchWindow = "SEASON" | "CAREER" | "ROLLING_7" | "ROLLING_14" | "ROLLING_30" | "ROLLING_60";
 type ResearchRole = "HITTER" | "PITCHER";
+const LAB_SEARCH_RESULT_LIMIT = 100;
 type MetricRow = {
   key: string;
   label: string;
@@ -1003,6 +1004,7 @@ function metricPlaceholder(family: string, key: string, label: string, unit: str
 async function labProfile(role: ResearchRole, playerId: number | null, search: string, researchWindow: ResearchWindow, effectiveDate: string) {
   const table = role === "HITTER" ? "player_research_snapshots" : "pitcher_research_snapshots";
   const featureTable = role === "HITTER" ? "player_research_features" : "pitcher_research_features";
+  const shouldSearch = search.length > 0;
   const profileCount = await pool.query<{ player_id: number; full_name: string; abbreviation: string | null; primary_position: string | null }>(
     `SELECT DISTINCT ON (p.player_id) p.player_id, p.full_name, t.abbreviation, p.primary_position
      FROM players p
@@ -1013,9 +1015,17 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
      LEFT JOIN teams t ON t.team_id = p.current_team_id
      WHERE p.full_name ILIKE $1
        AND CASE WHEN $3 = 'HITTER' THEN COALESCE(p.primary_position, '') <> 'P' ELSE p.primary_position = 'P' END
-     ORDER BY p.player_id, p.full_name LIMIT 100`,
-    [`%${search}%`, effectiveDate, role],
+      ORDER BY p.player_id, p.full_name LIMIT $4`,
+    [shouldSearch ? `%${search}%` : "\uFFFF", effectiveDate, role, LAB_SEARCH_RESULT_LIMIT + 1],
   );
+  const searchResults = profileCount.rows.slice(0, LAB_SEARCH_RESULT_LIMIT).map((row) => ({
+    playerId: row.player_id,
+    name: row.full_name,
+    team: row.abbreviation ?? "NOT FOUND",
+    position: row.primary_position ?? "NOT FOUND",
+    role: role === "HITTER" ? "HITTER" as const : "PITCHER" as const,
+  }));
+  const searchResultsTruncated = profileCount.rows.length > LAB_SEARCH_RESULT_LIMIT;
   // Name collision protection.
   //
   // Resolving a player by name alone silently picked the first row. There are
@@ -1031,13 +1041,9 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
   if (playerId == null && exactNameMatches.length > 1 && collidingClubs.size > 1) {
     return {
       sourceStatus: "AMBIGUOUS PLAYER NAME",
-      searchResults: exactNameMatches.map((row) => ({
-        playerId: row.player_id,
-        name: row.full_name,
-        team: row.abbreviation ?? "NOT FOUND",
-        position: row.primary_position ?? "NOT FOUND",
-        role: role === "HITTER" ? "HITTER" : "PITCHER",
-      })),
+      searchResults,
+      searchResultLimit: LAB_SEARCH_RESULT_LIMIT,
+      searchResultsTruncated,
       profile: null,
       notices: [
         `${exactNameMatches.length} players named "${search.trim()}" are carried by different clubs `
@@ -1046,16 +1052,32 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
     };
   }
 
-  const selectedId = playerId ?? profileCount.rows[0]?.player_id ?? null;
+  const selectedId = playerId;
   if (!selectedId) {
-    const hasRequestedAsOfDate = effectiveDate !== dateOnly(new Date());
     return {
-      sourceStatus: hasRequestedAsOfDate ? "NO SNAPSHOT FOR REQUESTED AS-OF DATE" : "WAITING FOR RESEARCH INGEST",
-      searchResults: [],
+      sourceStatus: shouldSearch
+        ? (searchResults.length ? "SELECT A SEARCH RESULT" : "NO ELIGIBLE MATCHES")
+        : "SEARCH REQUIRED",
+      searchResults,
+      searchResultLimit: LAB_SEARCH_RESULT_LIMIT,
+      searchResultsTruncated,
       profile: null,
-      notices: [hasRequestedAsOfDate
-        ? "No eligible source snapshot exists on or before this as-of date. The view intentionally does not fall forward to newer evidence."
-        : "Run the research ingest to retrieve public Statcast and FanGraphs evidence."],
+      notices: shouldSearch
+        ? (searchResults.length
+          ? ["Select a matching eligible player to inspect the requested research window."]
+          : [`No eligible ${role === "HITTER" ? "hitter" : "pitcher"} matched "${search}" for ${effectiveDate}. Check the exact date, role, and identity-review state.`])
+        : [`Enter a ${role === "HITTER" ? "hitter" : "pitcher"} name to search current official eligibility for ${effectiveDate}.`],
+    };
+  }
+  const selectedEligibility = await canonicalPlayer(selectedId, effectiveDate, role);
+  if (!selectedEligibility) {
+    return {
+      sourceStatus: "PLAYER NOT ELIGIBLE FOR THIS LAB",
+      searchResults,
+      searchResultLimit: LAB_SEARCH_RESULT_LIMIT,
+      searchResultsTruncated,
+      profile: null,
+      notices: [`This player is not an eligible ${role.toLowerCase()} for ${effectiveDate}, or is blocked by identity review or research quarantine. The profile was intentionally not loaded.`],
     };
   }
   const identity = await pool.query<{ player_id: number; full_name: string; abbreviation: string | null; bats: string | null; throws: string | null; primary_position: string | null; status: string | null }>(
@@ -1132,7 +1154,9 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
   const person = identity.rows[0];
   return {
     sourceStatus: snapshotRows.rows.length ? "RESEARCH EVIDENCE AVAILABLE" : "INSUFFICIENT SOURCE COVERAGE",
-    searchResults: profileCount.rows.map((row) => ({ playerId: row.player_id, name: row.full_name, team: row.abbreviation ?? "NOT FOUND", position: row.primary_position ?? "NOT FOUND", role: role === "HITTER" ? "HITTER" : "PITCHER" })),
+    searchResults,
+    searchResultLimit: LAB_SEARCH_RESULT_LIMIT,
+    searchResultsTruncated,
     profile: person ? {
       identity: { playerId: person.player_id, name: person.full_name, team: person.abbreviation ?? "NOT FOUND", bats: person.bats ?? "NOT FOUND", throws: person.throws ?? "NOT FOUND", position: person.primary_position ?? "NOT FOUND", rosterState: person.status ?? "UNKNOWN" },
       window: researchWindow,

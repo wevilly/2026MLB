@@ -204,7 +204,11 @@ router.post("/analyst/refresh/fantasypros", async (req, res, next) => {
 
 router.post("/analyst/refresh/research", async (req, res, next) => {
   try {
-    res.status(201).json(RefreshAnalystResearchResponse.parse(await ingestResearch(requestedDate(req.query.date))));
+    const date = requestedDate(req.query.date);
+    const result = RefreshAnalystResearchResponse.parse(await ingestResearch(date));
+    invalidateCache("player-lab:");
+    invalidateCache("pitcher-lab:");
+    res.status(201).json(result);
   } catch (error) {
     next(error);
   }

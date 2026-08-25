@@ -1,6 +1,7 @@
 type CacheEntry = { expiresAt: number; value: unknown; accessedAt: number };
 const entries = new Map<string, CacheEntry>();
 const pendingLoads = new Map<string, Promise<unknown>>();
+const invalidationGenerations = new Map<string, number>();
 
 export function resolveCacheMaxEntries(value = process.env.API_CACHE_MAX_ENTRIES) {
   const parsed = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : 500;
@@ -34,20 +35,31 @@ export async function readThroughCache<T>(key: string, ttlMs: number, load: () =
   const pending = pendingLoads.get(key);
   if (pending) return pending as Promise<T>;
 
-  const request = load()
+  const requestGeneration = invalidationGenerations.get(key) ?? 0;
+  let request: Promise<T>;
+  request = load()
     .then((value) => {
-      removeExpiredEntries();
-      enforceCapacity();
-      entries.set(key, { value, expiresAt: Date.now() + ttlMs, accessedAt: Date.now() });
+      if ((invalidationGenerations.get(key) ?? 0) === requestGeneration) {
+        removeExpiredEntries();
+        enforceCapacity();
+        entries.set(key, { value, expiresAt: Date.now() + ttlMs, accessedAt: Date.now() });
+      }
       return value;
     })
-    .finally(() => pendingLoads.delete(key));
+    .finally(() => {
+      if (pendingLoads.get(key) === request) pendingLoads.delete(key);
+    });
   pendingLoads.set(key, request);
   return request;
 }
 
 export function invalidateCache(prefix: string) {
   for (const key of entries.keys()) if (key.startsWith(prefix)) entries.delete(key);
+  for (const key of pendingLoads.keys()) {
+    if (!key.startsWith(prefix)) continue;
+    invalidationGenerations.set(key, (invalidationGenerations.get(key) ?? 0) + 1);
+    pendingLoads.delete(key);
+  }
 }
 
 export function cacheStatus() {
