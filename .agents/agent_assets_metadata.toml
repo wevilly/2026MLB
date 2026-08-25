@@ -154,3 +154,17 @@ mtime_ms = 1787663445714
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/8336e860-6dda-4a93-9916-8ee67591c265/ea22d1de-c648-431e-8402-96191cd38e46"
 storage_version_token = "1787663451630888"
 content_type = "text/csv"
+
+[[outputs]]
+id = "v1V62kHV_Gt3XH0Z2QlPk"
+uri = "file://reports/2026-08-25-round-robin-audit.xlsx"
+type = "table"
+title = "2026-08-25 Round Robin Research Audit"
+description = "Excel audit workbook covering 15 games × RR1–RR5, market research totals, explicit no-pair outcomes, source health, and provenance. It contains no odds, prices, probabilities, EV, CLV, or staking fields."
+logical_id = "41d5e2f8-19b3-4f39-aa90-d23378eb50a9"
+content_hash = "sha256:af0cdb45cdbfa386cfdaaf87da36be76b2333282e908b57d705d306a17f4bfa8"
+size = 19977
+mtime_ms = 1787674615029
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/41d5e2f8-19b3-4f39-aa90-d23378eb50a9/cdbfb72a-187b-467b-968c-21b6318737ed"
+storage_version_token = "1787674682427215"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

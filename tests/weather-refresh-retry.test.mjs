@@ -40,6 +40,8 @@ test("weather retry is an approved, isolated, audited selected-date action", asy
   assert.match(weather, /weather result or audit persistence failed/);
   assert.match(weather, /status: "FAILED"/);
   assert.match(weather, /Weather refresh failed:/);
+  assert.match(weather, /fantasyProsFallbackGamePks/);
+  assert.match(weather, /openMeteoRetrievedGamePks/);
   assert.match(shared, /source_id = 'OPEN_METEO' AND job_name = 'weather_refresh' AND effective_date = \$1/);
   assert.match(shared, /weatherRefresh:/);
 

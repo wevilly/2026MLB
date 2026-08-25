@@ -7,6 +7,8 @@ const RETROSHEET_SOURCE = "RETROSHEET";
 const CAREER_START = "2008-01-01";
 const MIN_CONTEXT_PA = 25;
 const MAX_RANK_ADJUSTMENT = 0.25;
+const STATCAST_FETCH_TIMEOUT_MS = 45_000;
+const SLATE_PAIR_BATCH_SIZE = 8;
 const PREGAME_LINEUP_FILTER = lineupSourceFilter(PREGAME_LINEUP_SOURCE_PRECEDENCE);
 
 type StatcastRow = Record<string, string>;
@@ -244,8 +246,14 @@ export async function refreshBatterPitcherPair(batterId: number, pitcherId: numb
   let rowCount = 0; let normalized = 0; let rejected = 0;
   try {
     const [pairResponse, batterResponse] = await Promise.all([
-      fetch(statcastUrl(batterId, pitcherId, effectiveDate), { headers: { accept: "text/csv,text/plain", "user-agent": "MLBAnalystResearch/1.0" } }),
-      fetch(statcastUrl(batterId, null, effectiveDate), { headers: { accept: "text/csv,text/plain", "user-agent": "MLBAnalystResearch/1.0" } }),
+      fetch(statcastUrl(batterId, pitcherId, effectiveDate), {
+        headers: { accept: "text/csv,text/plain", "user-agent": "MLBAnalystResearch/1.0" },
+        signal: AbortSignal.timeout(STATCAST_FETCH_TIMEOUT_MS),
+      }),
+      fetch(statcastUrl(batterId, null, effectiveDate), {
+        headers: { accept: "text/csv,text/plain", "user-agent": "MLBAnalystResearch/1.0" },
+        signal: AbortSignal.timeout(STATCAST_FETCH_TIMEOUT_MS),
+      }),
     ]);
     const [pairPayload, batterPayload] = await Promise.all([pairResponse.text(), batterResponse.text()]);
     if (!pairResponse.ok || !batterResponse.ok) throw new Error(`Statcast BvP request failed (pair ${pairResponse.status}; batter pitch-type ${batterResponse.status}).`);
@@ -293,8 +301,8 @@ export async function refreshBatterPitcherSlate(effectiveDate: string) {
     [effectiveDate, PREGAME_LINEUP_FILTER.sourceIds, PREGAME_LINEUP_FILTER.states],
   );
   const results: Array<{ batterId: number; pitcherId: number; status: string }> = [];
-  for (let index = 0; index < pairs.rows.length; index += 4) {
-    const batch = pairs.rows.slice(index, index + 4);
+  for (let index = 0; index < pairs.rows.length; index += SLATE_PAIR_BATCH_SIZE) {
+    const batch = pairs.rows.slice(index, index + SLATE_PAIR_BATCH_SIZE);
     const batchResults = await Promise.all(batch.map(async (pair) => {
       try { await refreshBatterPitcherPair(pair.batter_id, pair.pitcher_id, effectiveDate); return { batterId: pair.batter_id, pitcherId: pair.pitcher_id, status: "SUCCESS" }; }
       catch { return { batterId: pair.batter_id, pitcherId: pair.pitcher_id, status: "FAILED" }; }

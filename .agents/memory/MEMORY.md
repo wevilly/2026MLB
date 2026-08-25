@@ -13,3 +13,4 @@
 - [Post-merge database hook](post-merge-database-hook.md) — a non-TTY Drizzle conflict can leave the post-merge schema hook partially applied and failed.
 - [FantasyPros weather lineage](fantasypros-weather-lineage.md) — projected-lineup payloads include per-game weather; retain it as the preferred pregame weather source.
 - [Historical profile revision lineage](historical-profile-revision-lineage.md) — context corrections must flow into observation and feature lineage; cursor backfills remain partial until consumed.
+- [Orchestration readiness record](orchestration-readiness-record.md) — manually refreshed market rows never replace a completed orchestration run as the slate’s readiness authority.

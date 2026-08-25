@@ -10,6 +10,7 @@
  *   GET    /analyst/projections
  *   GET    /analyst/data-health
  *   GET    /analyst/player-lab
+ *   GET    /analyst/historical-intelligence/coverage
  *   GET    /analyst/pitcher-lab
  *   GET    /analyst/batter-pitcher
  *   GET    /analyst/game-lab
@@ -236,22 +237,46 @@ router.get("/analyst/today", async (req, res, next) => {
       ),
       analystDataHealth(date),
     ]);
-    const games = gameMetadata.rows.map((game) => compareRoundRobinGame(
-      board as RoundRobinBoardId,
-      Number(game.game_pk),
-      game.away,
-      game.home,
-      byGame.get(Number(game.game_pk)) ?? [],
-      {
-        lineupState: `${game.away_lineup_state ?? "UNKNOWN"},${game.home_lineup_state ?? "UNKNOWN"}`,
-        lineupSource: `${game.away_lineup_source ?? "MISSING"},${game.home_lineup_source ?? "MISSING"}`,
-        starterState: "FANTASYPROS_PROJECTED_CONTEXT",
-        evidenceGaps: [
-          !game.away_lineup_state || !game.home_lineup_state ? "Missing selected lineup snapshot for one or both teams" : null,
-          !operationallyUsable ? (health.readiness.reason ?? "Research readiness is unavailable") : null,
-        ].filter((gap): gap is string => Boolean(gap)),
+    const games = gameResult.rows.map((game) => ({
+      id: String(game.game_pk),
+      time: displayTime(game.start_time_utc),
+      away: game.away,
+      home: game.home,
+      park: game.park ?? "NOT FOUND",
+      roof: "NOT FOUND",
+      weather: "NOT FOUND",
+      awayStarter: {
+        name: game.away_starter ?? "TBD",
+        hand: game.away_hand || "NOT FOUND",
+        state: game.away_state ?? "TBD",
+        note: "",
       },
-    ));
+      homeStarter: {
+        name: game.home_starter ?? "TBD",
+        hand: game.home_hand || "NOT FOUND",
+        state: game.home_state ?? "TBD",
+        note: "",
+      },
+      lineupState: game.projected_lineup_teams === 2
+        ? game.posted_lineup_teams === 2 ? "PROJECTED · MLB POSTED" : "PROJECTED"
+        : "UNKNOWN",
+      state: game.projected_lineup_teams === 2 &&
+        game.away_state !== "TBD" &&
+        game.home_state !== "TBD"
+        ? health.readiness.usable ? "READY" : "PARTIAL"
+        : health.readiness.status === "BLOCKED" || health.readiness.status === "AUDIT_ONLY"
+          ? "BLOCKED"
+          : "PARTIAL",
+      flag: !health.readiness.usable
+        ? health.readiness.reason
+        : game.projected_lineup_teams === 2
+        ? game.posted_lineup_teams === 2
+          ? "FantasyPros projected lineups drive research · MLB posted cards retained for audit"
+          : "FantasyPros projected lineups drive pregame research"
+        : game.projected_lineup_teams > 0
+          ? "FantasyPros lineup evidence is incomplete"
+          : "No projected lineup evidence found",
+    }));
     const today = {
       date: new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" }).format(new Date(`${date}T12:00:00Z`)),
       timezone: "America/New_York",
@@ -292,62 +317,18 @@ router.get("/analyst/projections", async (req, res, next) => {
       projected_stats: Record<string, unknown>;
       raw_row: Record<string, unknown>;
     };
-    const rows = await pool.query<{
-      candidate_id: string; game_pk: number; player_id: number; player_name: string; market: string;
-      research_rank: number | null; research_state: "STRONG" | "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "BLOCKED";
-      primary_mechanism: string | null; opportunity_evidence: Record<string, unknown>; starter_matchup_evidence: Record<string, unknown>;
-      bullpen_path_evidence: Record<string, unknown>; park_evidence: Record<string, unknown>; counter_evidence: Record<string, unknown>;
-       missing_stale_evidence: string | null; identity_resolved: boolean; side: "AWAY" | "HOME"; team: string;
-       lineup_state: "POSTED" | "CONFIRMED" | "PROJECTED"; lineup_source: string;
-    }>(
-      `WITH accepted AS (
-         SELECT * FROM unnest($2::text[], $3::text[]) AS s(source_id, state)
-       ),
-       latest_lineup AS (
-         -- One projected lineup per team, selected through the documented
-         -- pregame policy in lineup-sources.ts. Official MLB cards are
-         -- retained separately for audit and settlement context.
-         SELECT DISTINCT ON (ls.game_pk, ls.team_id)
-            ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state, ls.source_id
-         FROM lineup_snapshots ls
-         JOIN games g ON g.game_pk = ls.game_pk
-         JOIN accepted a ON a.source_id = ls.source_id AND a.state = ls.state::text
-         WHERE g.game_date = $1
-         ORDER BY ls.game_pk, ls.team_id,
-           array_position($2::text[], ls.source_id),
-           CASE ls.state::text
-             WHEN 'POSTED' THEN 1
-             WHEN 'CONFIRMED' THEN 2
-             WHEN 'UPDATED' THEN 3
-             WHEN 'PROJECTED' THEN 4
-             ELSE 9
-           END,
-           ls.observed_at DESC
-       )
-       SELECT mrc.candidate_id, mrc.game_pk::bigint, mrc.player_id, COALESCE(p.full_name, 'Unknown') AS player_name,
-              mrc.market, mrc.research_rank, mrc.research_state, mrc.primary_mechanism,
-              mrc.opportunity_evidence, mrc.starter_matchup_evidence, mrc.bullpen_path_evidence,
-               mrc.park_evidence, mrc.counter_evidence, mrc.missing_stale_evidence, ll.state AS lineup_state, ll.source_id AS lineup_source,
-              CASE WHEN ll.team_id = g.away_team_id THEN 'AWAY' ELSE 'HOME' END AS side,
-              CASE WHEN ll.team_id = g.away_team_id THEN away.abbreviation ELSE home.abbreviation END AS team,
-              NOT EXISTS (
-                SELECT 1 FROM player_eligibility pe
-                WHERE pe.player_id = mrc.player_id
-                  AND pe.source_id = 'FANTASYPROS'
-                  AND pe.effective_date = mrc.slate_date
-                  AND pe.requires_identity_review
-              ) AS identity_resolved
-       FROM market_research_candidates mrc
-       JOIN games g ON g.game_pk = mrc.game_pk
-       JOIN teams away ON away.team_id = g.away_team_id
-       JOIN teams home ON home.team_id = g.home_team_id
-       JOIN latest_lineup ll ON ll.game_pk = mrc.game_pk
-       JOIN lineup_entries le ON le.lineup_snapshot_id = ll.lineup_snapshot_id AND le.player_id = mrc.player_id
-       LEFT JOIN players p ON p.player_id = mrc.player_id
-       WHERE mrc.slate_date = $1
-       ORDER BY mrc.game_pk, side, mrc.research_rank ASC NULLS LAST, player_name`,
-      [date, ROUND_ROBIN_LINEUP_FILTER.sourceIds, ROUND_ROBIN_LINEUP_FILTER.states],
-    );
+    const rows: ProjectionDbRow[] = snapshots.rows.length
+      ? (await pool.query<ProjectionDbRow>(
+       `SELECT f.source_player_id, f.team_abbreviation, f.position, f.projected_stats, f.raw_row
+          FROM fantasypros_projection_rows f
+          JOIN fantasypros_projection_snapshots s ON s.snapshot_id = f.snapshot_id
+          JOIN player_eligibility pe ON pe.source_id = 'FANTASYPROS'
+            AND pe.external_player_id = f.source_player_id AND pe.effective_date = s.effective_date
+          WHERE f.snapshot_id = ANY($1) AND pe.eligible_today_research AND NOT pe.requires_identity_review
+           ORDER BY f.team_abbreviation, f.source_player_id`,
+        [snapshots.rows.map((snapshot) => snapshot.snapshot_id)],
+      )).rows
+      : [];
     const playerFilter = String(req.query.player ?? "").trim().toLowerCase();
     const teamFilter = String(req.query.team ?? "").trim().toLowerCase();
     const roleFilter = String(req.query.role ?? "").trim().toLowerCase();
@@ -403,8 +384,33 @@ router.get("/analyst/data-health", async (req, res, next) => {
 router.get("/analyst/player-lab", async (req, res, next) => {
   try {
     const playerId = requestedPlayerId(req.query.playerId);
+    const search = requestedLabSearch(req.query.search);
+    const window = requestedWindow(req.query.window);
+    const date = requestedDate(req.query.date);
+    const profile = await readThroughCache(
+      `player-lab:${playerId ?? "search"}:${search}:${window}:${date}`,
+      CACHE_POLICY.labs,
+      () => getPlayerLab(playerId, search, window, date),
+    );
+    res.json(GetAnalystPlayerLabResponse.parse(profile));
+  } catch (error) {
+    next(error);
+  }
+});
 
+router.get("/analyst/historical-intelligence/coverage", async (req, res, next) => {
+  try {
+    const playerId = requestedPlayerId(req.query.playerId);
     const coverage = await historicalIntelligenceCoverage(playerId);
+    res.json(GetHistoricalIntelligenceCoverageResponse.parse(coverage));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/analyst/pitcher-lab", async (req, res, next) => {
+  try {
+    const playerId = requestedPlayerId(req.query.playerId);
     const search = requestedLabSearch(req.query.search);
     const window = requestedWindow(req.query.window);
     const date = requestedDate(req.query.date);
@@ -419,19 +425,8 @@ router.get("/analyst/player-lab", async (req, res, next) => {
   }
 });
 
-router.get("/analyst/historical-intelligence/coverage", async (req, res, next) => {
+router.get("/analyst/batter-pitcher", async (req, res, next) => {
   try {
-    const playerId = requestedPlayerId(req.query.playerId);
-
-    const coverage = await historicalIntelligenceCoverage(playerId);
-    const search = requestedLabSearch(req.query.search);
-    const window = requestedWindow(req.query.window);
-    const date = requestedDate(req.query.date);
-    const profile = await readThroughCache(
-      `pitcher-lab:${playerId ?? "search"}:${search}:${window}:${date}`,
-      CACHE_POLICY.labs,
-      () => getPitcherLab(playerId, search, window, date),
-    );
     const batterId = requestedPlayerId(req.query.batterId);
     const pitcherId = requestedPlayerId(req.query.pitcherId);
     if (!batterId || !pitcherId) {
@@ -451,22 +446,26 @@ router.get("/analyst/historical-intelligence/coverage", async (req, res, next) =
 router.get("/analyst/game-lab", async (req, res, next) => {
   try {
     const date = requestedDate(req.query.date);
-    const games = gameMetadata.rows.map((game) => compareRoundRobinGame(
-      board as RoundRobinBoardId,
-      Number(game.game_pk),
-      game.away,
-      game.home,
-      byGame.get(Number(game.game_pk)) ?? [],
-      {
-        lineupState: `${game.away_lineup_state ?? "UNKNOWN"},${game.home_lineup_state ?? "UNKNOWN"}`,
-        lineupSource: `${game.away_lineup_source ?? "MISSING"},${game.home_lineup_source ?? "MISSING"}`,
-        starterState: "FANTASYPROS_PROJECTED_CONTEXT",
-        evidenceGaps: [
-          !game.away_lineup_state || !game.home_lineup_state ? "Missing selected lineup snapshot for one or both teams" : null,
-          !operationallyUsable ? (health.readiness.reason ?? "Research readiness is unavailable") : null,
-        ].filter((gap): gap is string => Boolean(gap)),
-      },
-    ));
+    const games = await pool.query<{
+      game_pk: number; venue_id: number | null; start_time_utc: string | null; away: string; home: string; park: string | null;
+      away_starter: string | null; home_starter: string | null; away_hand: string | null; home_hand: string | null;
+      away_state: string | null; home_state: string | null; posted_lineup_teams: number; projected_lineup_teams: number;
+    }>(
+       `SELECT g.game_pk, g.venue_id, g.start_time_utc, away.abbreviation AS away, home.abbreviation AS home, v.name AS park,
+        away_start.full_name AS away_starter, home_start.full_name AS home_starter, away_start.throws AS away_hand, home_start.throws AS home_hand,
+        away_start.starter_state AS away_state, home_start.starter_state AS home_state,
+        COALESCE(lineups.posted_lineup_teams, 0) AS posted_lineup_teams, COALESCE(lineups.projected_lineup_teams, 0) AS projected_lineup_teams
+       FROM games g JOIN teams away ON away.team_id = g.away_team_id JOIN teams home ON home.team_id = g.home_team_id
+       LEFT JOIN venues v ON v.venue_id = g.venue_id
+       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY s.observed_at DESC LIMIT 1) away_start ON true
+       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY s.observed_at DESC LIMIT 1) home_start ON true
+       LEFT JOIN LATERAL (SELECT
+         COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'MLB_OFFICIAL' AND state = 'POSTED')::int AS posted_lineup_teams,
+         COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'FANTASYPROS' AND state = 'PROJECTED')::int AS projected_lineup_teams
+         FROM lineup_snapshots WHERE game_pk = g.game_pk) lineups ON true
+       WHERE g.game_date = $1 ORDER BY g.start_time_utc NULLS LAST`,
+      [date],
+    );
     const responseGames = games.rows.map((game) => ({
       id: String(game.game_pk), time: displayTime(game.start_time_utc), away: game.away, home: game.home,
       park: game.park ?? "NOT FOUND", roof: "NOT FOUND", weather: "NOT FOUND",
@@ -573,7 +572,7 @@ router.get("/analyst/export/workbook", async (req, res, next) => {
 
 router.get("/analyst/audit-events", async (req, res, next) => {
   try {
-      const parsed = parseInt(gameId, 10);
+    const parsed = req.query.limit == null ? 100 : Number(req.query.limit);
     if (!Number.isFinite(parsed)) throw new Error("limit must be numeric");
     const events = await queryAuditEvents(parsed);
     res.json({ events, total: events.length });
@@ -649,53 +648,63 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
       [date, ROUND_ROBIN_LINEUP_FILTER.sourceIds, ROUND_ROBIN_LINEUP_FILTER.states],
     );
 
-    const candidates = await Promise.all(candidateResult.rows.map(async (row) => {
-      const eligibility = getMarketResearchSelectionEligibility({
+    const candidates = await Promise.all(rows.rows.map(async (row) => {
+      const starterId = typeof row.starter_matchup_evidence?.starterPlayerId === "number"
+        ? row.starter_matchup_evidence.starterPlayerId
+        : null;
+      const starterState = typeof row.starter_matchup_evidence?.starterState === "string"
+        ? row.starter_matchup_evidence.starterState
+        : "UNKNOWN";
+      const baseEligibility = getMarketResearchSelectionEligibility({
         researchState: row.research_state,
         missingStaleEvidence: row.missing_stale_evidence,
         identityResolved: row.identity_resolved,
       });
-
-      const starterId = typeof row.starter_matchup_evidence?.starterPlayerId === "number"
-        ? row.starter_matchup_evidence.starterPlayerId
-        : null;
+      const starterResolved = starterId !== null && !["UNKNOWN", "TBD"].includes(starterState);
+      const selectionBlockReason = !operationallyUsable
+        ? "BLOCKED"
+        : !starterResolved
+        ? "BLOCKED"
+        : baseEligibility.selectionBlockReason;
+      const selectable = operationallyUsable && starterResolved && baseEligibility.selectable;
       const bvpEvidence = starterId && MARKET_DB_TO_SHORTCODE[row.market] !== "H_R_RBI"
         ? await getBatterPitcherEvidence(row.player_id, starterId, date, MARKET_DB_TO_SHORTCODE[row.market] as BvpMarket)
         : null;
+      const evidenceFreshness = row.missing_stale_evidence
+        ? /\bstale\b/i.test(row.missing_stale_evidence) ? "STALE" : "INCOMPLETE"
+        : "CURRENT";
       return {
         candidateId: row.candidate_id,
-        slateDate: row.slate_date,
         gamePk: Number(row.game_pk),
         playerId: row.player_id,
         playerName: row.player_name,
-        market: MARKET_DB_TO_SHORTCODE[row.market] ?? row.market,
+        market: MARKET_DB_TO_SHORTCODE[row.market] as RoundRobinCandidate["market"],
         researchRank: row.research_rank,
         researchState: row.research_state,
-        primaryMechanism: row.primary_mechanism,
-        secondaryMechanism: row.secondary_mechanism,
-        // Defensive sanitization: strip any prohibited keys from JSONB payloads
-        // before they leave the API layer. Engines must also never write them.
-        opportunityEvidence: stripProhibitedKeys(row.opportunity_evidence ?? {}),
-        starterMatchupEvidence: stripProhibitedKeys(row.starter_matchup_evidence ?? {}),
-        bullpenPathEvidence: stripProhibitedKeys(row.bullpen_path_evidence ?? {}),
-        parkEvidence: stripProhibitedKeys(row.park_evidence ?? {}),
-        recentVsSeasonVsCareer: stripProhibitedKeys(row.recent_vs_season_vs_career ?? {}),
-        counterEvidence: stripProhibitedKeys(row.counter_evidence ?? {}),
+        side: row.side,
+        team: row.team,
+        selectable,
+        selectionBlockReason,
+        lineupState: row.lineup_state,
+        starterState,
+        bvpStatus: bvpEvidence?.status ?? "NOT_FOUND",
         bvpEvidence,
-        missingStaleEvidence: row.missing_stale_evidence,
-        identityResolved: row.identity_resolved,
-        selectable: operationallyUsable && eligibility.selectable,
-        selectionBlockReason: !operationallyUsable ? "BLOCKED" : eligibility.selectionBlockReason,
-        operationalState: operationallyUsable && eligibility.selectable ? "USABLE" : "AUDIT_ONLY",
-        auditReason: operationallyUsable && eligibility.selectable
-          ? null
-          : !operationallyUsable ? health.readiness.reason
-            : eligibility.selectionBlockReason
-              ? `Not usable: ${eligibility.selectionBlockReason.replaceAll("_", " ").toLowerCase()}.`
-              : "Not usable under the current-date safety contract.",
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      };
+        arsenalStatus: bvpEvidence?.arsenal.status ?? "NOT_FOUND",
+        evidenceFreshness,
+        evidenceFreshnessDetail: row.missing_stale_evidence,
+        primaryMechanism: row.primary_mechanism,
+        opportunityEvidence: stripProhibitedKeys(row.opportunity_evidence ?? {}) as Record<string, unknown>,
+        starterMatchupEvidence: stripProhibitedKeys(row.starter_matchup_evidence ?? {}) as Record<string, unknown>,
+        bullpenPathEvidence: stripProhibitedKeys(row.bullpen_path_evidence ?? {}) as Record<string, unknown>,
+        parkEvidence: stripProhibitedKeys(row.park_evidence ?? {}) as Record<string, unknown>,
+        counterEvidence: stripProhibitedKeys(row.counter_evidence ?? {}) as Record<string, unknown>,
+        sourceLineage: { lineupSource: row.lineup_source, lineupState: row.lineup_state, starterSource: "FANTASYPROS" },
+        sampleDenominators: {
+          starter: (row.starter_matchup_evidence ?? {}).sampleSize ?? null,
+          bullpen: (row.bullpen_path_evidence ?? {}).sampleSize ?? null,
+          park: (row.park_evidence ?? {}).sampleSize ?? null,
+        },
+      } satisfies RoundRobinCandidate;
     }));
 
     const gameMetadata = await pool.query<{

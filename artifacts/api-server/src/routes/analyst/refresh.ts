@@ -106,6 +106,7 @@ import { runTBEngine } from "../../services/tb-engine";
 import { runXBHEngine } from "../../services/xbh-engine";
 import { runWALKEngine } from "../../services/walk-engine";
 import { runHREngine } from "../../services/hr-engine";
+import { runHRRBIEngine } from "../../services/hrrbi-engine";
 import {
   backfillHistoricalSnapshots,
   captureSlateSnapshots,
@@ -315,6 +316,14 @@ router.post("/analyst/refresh/market-research/hr", async (req, res, next) => {
     } else {
       res.status(201).json(engineResponseDate(RefreshMarketResearchHRResponse.parse(result), date));
     }
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/refresh/market-research/hrrbi", async (req, res, next) => {
+  try {
+    res.status(201).json(await runHRRBIEngine(requestedDate(req.query.date)));
   } catch (error) {
     next(error);
   }

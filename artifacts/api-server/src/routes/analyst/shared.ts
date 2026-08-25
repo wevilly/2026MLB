@@ -425,7 +425,7 @@ export async function identityCoverage(date: string) {
        ORDER BY ls.game_pk, ls.team_id, ls.observed_at DESC
      ),
      latest_projected_lineups AS (
-       SELECT DISTINCT ON (ls.game_pk, ls.team_id) ls.lineup_snapshot_id, ls.raw
+       SELECT DISTINCT ON (ls.game_pk, ls.team_id) ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.raw
        FROM lineup_snapshots ls JOIN games g ON g.game_pk = ls.game_pk
        WHERE g.game_date = $1 AND ls.source_id = 'FANTASYPROS' AND ls.state = 'PROJECTED'
        ORDER BY ls.game_pk, ls.team_id, ls.observed_at DESC
@@ -439,6 +439,27 @@ export async function identityCoverage(date: string) {
          AND pe.external_player_id = f.source_player_id AND pe.effective_date = s.effective_date
        WHERE s.effective_date = $1
        ORDER BY s.snapshot_label, f.source_player_id, s.retrieved_at DESC
+      ),
+      current_projected_lineup_identity_failures AS (
+        SELECT l.game_pk, l.team_id, entry->>'playerId' AS external_player_id
+        FROM latest_projected_lineups l
+        CROSS JOIN LATERAL jsonb_array_elements(
+          CASE WHEN jsonb_typeof(l.raw->'entries') = 'array' THEN l.raw->'entries' ELSE '[]'::jsonb END
+        ) entry
+        WHERE NULLIF(entry->>'playerId', '') IS NULL
+           OR NOT EXISTS (
+             SELECT 1
+             FROM (
+               SELECT player_id FROM player_external_ids
+                WHERE source_id = 'FANTASYPROS' AND external_player_id = entry->>'playerId' AND valid_to IS NULL
+               UNION ALL
+               SELECT player_id FROM player_external_id_aliases
+                WHERE source_id = 'FANTASYPROS' AND external_player_id = entry->>'playerId'
+             ) mapped
+             JOIN player_eligibility pe ON pe.source_id = 'FANTASYPROS'
+               AND pe.external_player_id = entry->>'playerId' AND pe.effective_date = $1
+             WHERE pe.eligible_lineup_projection AND NOT pe.requires_identity_review
+           )
      )
      SELECT
        (SELECT count(*) FILTER (WHERE player_id IS NOT NULL)::int FROM latest_starters) AS official_starters_mapped,
@@ -453,6 +474,9 @@ export async function identityCoverage(date: string) {
        ), 0)::int FROM latest_projected_lineups l) AS projected_lineup_players_total,
        (SELECT count(*) FILTER (WHERE canonical_player_id IS NOT NULL AND eligible_today_research)::int FROM current_projection_rows) AS active_projection_players_mapped,
        (SELECT count(*)::int FROM current_projection_rows) AS active_projection_players_total,
+       -- This remains an audit count for broad FantasyPros projection-component
+       -- review. It is intentionally not a readiness blocker: only players
+       -- present in the current projected lineup can block the slate.
        (SELECT count(*) FILTER (WHERE requires_identity_review)::int FROM current_projection_rows) AS unresolved_active_players,
        (SELECT count(*)::int FROM player_eligibility WHERE source_id = 'FANTASYPROS' AND effective_date = $1 AND quarantined_from_current_research) AS quarantined_rows,
        (SELECT count(*)::int FROM ingest_issues
@@ -462,13 +486,7 @@ export async function identityCoverage(date: string) {
             WHERE source_id = 'FANTASYPROS' AND effective_date = $1
             ORDER BY started_at DESC LIMIT 1
           )) AS team_assignment_conflicts,
-       (SELECT count(*)::int FROM ingest_issues
-        WHERE issue_type = 'PROJECTED_LINEUP_IDENTITY_BLOCKING'
-          AND ingest_run_id = (
-            SELECT ingest_run_id FROM ingest_runs
-            WHERE source_id = 'FANTASYPROS' AND effective_date = $1
-            ORDER BY started_at DESC LIMIT 1
-          )) AS blocking_projected_lineup_issues`,
+        (SELECT count(*)::int FROM current_projected_lineup_identity_failures) AS blocking_projected_lineup_issues`,
     [date],
   );
   const row = result.rows[0];
@@ -558,8 +576,8 @@ export async function analystDataHealth(date: string) {
   const blockingReasons = [
     ...(slate.rows[0]?.games ? [] : [`No FantasyPros matchup records are available for ${date}.`]),
     ...(fantasyProsReferences.rows[0]?.references ? [] : [`No FantasyPros reference ranks were recorded for ${date}.`]),
-    ...(coverage.unresolvedActivePlayers || coverage.blockingProjectedLineupIssues
-      ? [`${coverage.unresolvedActivePlayers + coverage.blockingProjectedLineupIssues} unresolved or blocking identity record(s) remain.`]
+    ...(coverage.blockingProjectedLineupIssues
+      ? [`${coverage.blockingProjectedLineupIssues} current projected-lineup identity record(s) remain unresolved.`]
       : []),
     ...(workflowRun && ["FAILED", "CANCELLED"].includes(workflowRun.overall_status)
       ? [`The latest workflow is ${workflowRun.overall_status.toLowerCase()}${workflowRun.error_message ? `: ${workflowRun.error_message}` : "."}`]
@@ -593,8 +611,8 @@ export async function analystDataHealth(date: string) {
   const readinessIssues = [
     ...(slate.rows[0]?.games ? [] : [{ label: "FANTASYPROS SLATE MISSING", detail: `No FantasyPros matchup records are available for ${date}.`, severity: "CRITICAL" }]),
     ...(fantasyProsReferences.rows[0]?.references ? [] : [{ label: "FANTASYPROS REFERENCES MISSING", detail: `No FantasyPros reference ranks were recorded for ${date}.`, severity: "CRITICAL" }]),
-    ...(coverage.unresolvedActivePlayers || coverage.blockingProjectedLineupIssues
-      ? [{ label: "CURRENT IDENTITY UNRESOLVED", detail: `${coverage.unresolvedActivePlayers + coverage.blockingProjectedLineupIssues} active identity record(s) are unresolved or blocking.`, severity: "CRITICAL" }]
+    ...(coverage.blockingProjectedLineupIssues
+      ? [{ label: "CURRENT PROJECTED LINEUP IDENTITY UNRESOLVED", detail: `${coverage.blockingProjectedLineupIssues} current projected-lineup identity record(s) are unresolved.`, severity: "CRITICAL" }]
       : []),
     ...(workflowRun && ["FAILED", "CANCELLED"].includes(workflowRun.overall_status)
       ? [{ label: "CURRENT WORKFLOW BLOCKED", detail: readiness.reason, severity: "CRITICAL" }]

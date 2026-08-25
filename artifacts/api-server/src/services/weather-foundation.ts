@@ -356,6 +356,21 @@ type WeatherRefreshAudit = {
   requestId?: string | null;
 };
 
+type WeatherRefreshMetadata = {
+  fantasyProsFallbackGamePks: number[];
+  openMeteoRetrievedGamePks: number[];
+};
+
+async function fantasyProsWeatherGamePks(slateDate: string): Promise<Set<number>> {
+  const result = await pool.query<{ game_pk: string }>(
+    `SELECT DISTINCT game_pk::text AS game_pk
+       FROM game_weather_observations
+      WHERE slate_date = $1 AND source_id = $2`,
+    [slateDate, FANTASYPROS_WEATHER_SOURCE],
+  );
+  return new Set(result.rows.map((row) => Number(row.game_pk)).filter(Number.isSafeInteger));
+}
+
 /**
  * Persists the weather already carried on FantasyPros' projected-lineup slate.
  * This is intentionally separate from the Open-Meteo retry path: FantasyPros
@@ -429,10 +444,13 @@ export async function ingestFantasyProsWeatherObservations(
 async function performWeatherRefresh(
   slateDate: string,
   games: SlateGame[],
-): Promise<Omit<WeatherRefreshResult, "ingestRunId">> {
+): Promise<{ result: Omit<WeatherRefreshResult, "ingestRunId">; metadata: WeatherRefreshMetadata }> {
   const failures: WeatherIngestFailure[] = [];
+  const fantasyProsWeatherGames = await fantasyProsWeatherGamePks(slateDate);
   const missingGeography = games.filter(
-    (game) => game.venueId !== null && (game.latitude === null || game.longitude === null || game.orientationDegrees === null),
+    (game) => game.venueId !== null
+      && (game.latitude === null || game.longitude === null)
+      && !fantasyProsWeatherGames.has(game.gamePk),
   );
   if (missingGeography.length) {
     await ingestVenueGeography(
@@ -445,6 +463,8 @@ async function performWeatherRefresh(
   let observationsWritten = 0;
   let domedGames = 0;
   let gamesWithoutGeography = 0;
+  const fantasyProsFallbackGamePks: number[] = [];
+  const openMeteoRetrievedGamePks: number[] = [];
 
   for (const game of hydrated) {
     const roofType = (game.roofType ?? "UNKNOWN").toUpperCase();
@@ -460,6 +480,13 @@ async function performWeatherRefresh(
       continue;
     }
     if (game.latitude === null || game.longitude === null) {
+      if (fantasyProsWeatherGames.has(game.gamePk)) {
+        // Do not clone this source into an Open-Meteo row: the existing
+        // append-only FantasyPros observation remains the pregame fallback and
+        // retains its source lineage.
+        fantasyProsFallbackGamePks.push(game.gamePk);
+        continue;
+      }
       gamesWithoutGeography += 1;
       recordFailure(
         failures,
@@ -483,6 +510,7 @@ async function performWeatherRefresh(
         recordFailure(failures, `forecast:${game.gamePk}`, new Error("Forecast response carried no hourly series."));
         continue;
       }
+      openMeteoRetrievedGamePks.push(game.gamePk);
       const written = await writeObservation(game, slateDate, reading, {
         sourceId: WEATHER_SOURCE,
         roofState: roofType === "RETRACTABLE" ? "OPEN" : "NONE",
@@ -500,7 +528,11 @@ async function performWeatherRefresh(
   }
 
   const fatal = failures.some((failure) => failure.fatal);
-  const emptyDespiteSlate = hydrated.length > 0 && observationsWritten === 0;
+  // An existing preferred FantasyPros observation is usable pregame weather,
+  // even though this Open-Meteo refresh correctly does not write a duplicate.
+  const emptyDespiteSlate = hydrated.length > 0
+    && observationsWritten === 0
+    && fantasyProsFallbackGamePks.length === 0;
   const status: WeatherRefreshResult["status"] = fatal || emptyDespiteSlate
     ? "FAILED"
     : failures.length
@@ -516,14 +548,17 @@ async function performWeatherRefresh(
   if (error) logger.error({ slateDate, status, failures }, "weather refresh did not fully succeed");
 
   return {
-    status,
-    slateDate,
-    gamesFound: hydrated.length,
-    observationsWritten,
-    domedGames,
-    gamesWithoutGeography,
-    failures,
-    ...(error ? { error } : {}),
+    result: {
+      status,
+      slateDate,
+      gamesFound: hydrated.length,
+      observationsWritten,
+      domedGames,
+      gamesWithoutGeography,
+      failures,
+      ...(error ? { error } : {}),
+    },
+    metadata: { fantasyProsFallbackGamePks, openMeteoRetrievedGamePks },
   };
 }
 
@@ -550,6 +585,7 @@ async function finishWeatherRun(
   ingestRunId: string,
   result: Omit<WeatherRefreshResult, "ingestRunId">,
   audit?: WeatherRefreshAudit,
+  metadata: WeatherRefreshMetadata = { fantasyProsFallbackGamePks: [], openMeteoRetrievedGamePks: [] },
 ) {
   const values = [
     ingestRunId,
@@ -562,6 +598,8 @@ async function finishWeatherRun(
     JSON.stringify({
       domedGames: result.domedGames,
       gamesWithoutGeography: result.gamesWithoutGeography,
+      fantasyProsFallbackGamePks: metadata.fantasyProsFallbackGamePks,
+      openMeteoRetrievedGamePks: metadata.openMeteoRetrievedGamePks,
       failures: result.failures,
     }),
   ];
@@ -600,6 +638,8 @@ async function finishWeatherRun(
         observationsWritten: result.observationsWritten,
         domedGames: result.domedGames,
         gamesWithoutGeography: result.gamesWithoutGeography,
+        fantasyProsFallbackGamePks: metadata.fantasyProsFallbackGamePks,
+        openMeteoRetrievedGamePks: metadata.openMeteoRetrievedGamePks,
         failures: result.failures,
         error: result.error ?? null,
       }),
@@ -624,9 +664,10 @@ async function finalizeWeatherRun(
   ingestRunId: string,
   result: Omit<WeatherRefreshResult, "ingestRunId">,
   audit?: WeatherRefreshAudit,
+  metadata?: WeatherRefreshMetadata,
 ) {
   try {
-    await finishWeatherRun(ingestRunId, result, audit);
+    await finishWeatherRun(ingestRunId, result, audit, metadata);
     return result;
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -635,7 +676,7 @@ async function finalizeWeatherRun(
     try {
       // The retry preserves the transaction that writes both the final result
       // and the append-only operator outcome audit event.
-      await finishWeatherRun(ingestRunId, recovered, audit);
+      await finishWeatherRun(ingestRunId, recovered, audit, metadata);
       return recovered;
     } catch (recoveryError) {
       logger.error(
@@ -643,7 +684,7 @@ async function finalizeWeatherRun(
         "weather outcome and audit retry failed; forcing a durable failed run",
       );
       try {
-        await finishWeatherRun(ingestRunId, recovered);
+        await finishWeatherRun(ingestRunId, recovered, undefined, metadata);
       } catch (durabilityError) {
         logger.error(
           { ingestRunId, detail: durabilityError instanceof Error ? durabilityError.message : String(durabilityError) },
@@ -673,8 +714,8 @@ export async function refreshWeather(
   let ingestRunId: string | null = null;
   try {
     ingestRunId = await startWeatherRun(slateDate);
-    const result = await performWeatherRefresh(slateDate, games);
-    return { ...(await finalizeWeatherRun(ingestRunId, result, audit)), ingestRunId };
+    const refresh = await performWeatherRefresh(slateDate, games);
+    return { ...(await finalizeWeatherRun(ingestRunId, refresh.result, audit, refresh.metadata)), ingestRunId };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     logger.error({ slateDate, detail }, "weather refresh failed unexpectedly");
