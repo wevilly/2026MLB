@@ -168,3 +168,17 @@ mtime_ms = 1787674615029
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/41d5e2f8-19b3-4f39-aa90-d23378eb50a9/cdbfb72a-187b-467b-968c-21b6318737ed"
 storage_version_token = "1787674682427215"
 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[[outputs]]
+id = "mEE45Y_iXNOxQy9YbsFFw"
+uri = "file://reports/mlb-analyst-platform-diagnostic-2026-08-25.docx"
+type = "word_document"
+title = "MLB Analyst Platform Diagnostic Report"
+description = "Detailed operational report covering current blockers, weather diagnosis, confirmed bugs, evidence, and a prioritized remediation plan."
+logical_id = "409b8404-1692-497c-be48-e18f69664a16"
+content_hash = "sha256:c51f4603a492ecf759c8020c36915c1bca860a6c2400bcf6058e1e3df55d22f1"
+size = 44516
+mtime_ms = 1787680002755
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/409b8404-1692-497c-be48-e18f69664a16/c39f8372-7961-40bd-8347-441891b5b671"
+storage_version_token = "1787680008576218"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
