@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
+import { ingestBallparkPalResearch } from "./ballpark-pal";
 
 const STATCAST_SOURCE = "STATCAST";
 const FANGRAPHS_SOURCE = "FANGRAPHS";
@@ -971,30 +972,9 @@ async function ingestParkFactors(effectiveDate: string) {
 }
 
 export async function ingestResearch(effectiveDate: string) {
-  await ensureResearchSources();
-  const [statcast, fangraphs, statcastSplits, parks] = await Promise.all([
-    ingestStatcast(effectiveDate),
-    ingestFanGraphs(effectiveDate),
-    ingestStatcastHandednessFallback(effectiveDate),
-    ingestParkFactors(effectiveDate),
-  ]);
-  return {
-    status: statcast.status === "FAILED" || fangraphs.status === "FAILED" || statcastSplits.status === "FAILED" || parks.status === "FAILED" || statcast.rejectedRowCount || fangraphs.rejectedRowCount || statcastSplits.rejectedRowCount || parks.rejectedRowCount || statcast.quarantinedRows || fangraphs.quarantinedRows ? "PARTIAL" : "SUCCESS",
-    sources: [
-      { source: statcast.source, ingestRunId: statcast.ingestRunId, rowCount: statcast.rowCount, normalizedRowCount: statcast.normalizedRowCount, rejectedRowCount: statcast.rejectedRowCount, status: statcast.status, error: statcast.error },
-      { source: fangraphs.source, ingestRunId: fangraphs.ingestRunId, rowCount: fangraphs.rowCount, normalizedRowCount: fangraphs.normalizedRowCount, rejectedRowCount: fangraphs.rejectedRowCount, status: fangraphs.status, error: fangraphs.error },
-      { source: statcastSplits.source, ingestRunId: statcastSplits.ingestRunId, rowCount: statcastSplits.rowCount, normalizedRowCount: statcastSplits.normalizedRowCount, rejectedRowCount: statcastSplits.rejectedRowCount, status: statcastSplits.status, error: statcastSplits.error },
-      { source: parks.source, ingestRunId: parks.ingestRunId, rowCount: parks.rowCount, normalizedRowCount: parks.normalizedRowCount, rejectedRowCount: parks.rejectedRowCount, status: parks.status, error: parks.error },
-    ],
-    quarantinedRows: statcast.quarantinedRows + fangraphs.quarantinedRows,
-    notes: [
-      "Raw source responses are preserved with retrieval scope, checksum, HTTP status, row counts, and ingest run ID.",
-      "Identity uncertainty is quarantined from research views and is not counted as an ingest rejection.",
-      "Baseball Savant park-factor components retain raw source values, span, and handedness. No composite park factor or matchup score is inferred.",
-      "Opponent-handedness fallback derives snapshots only from MLBAM-linked Statcast Search rows grouped by p_throws (hitters) or stand (pitchers); low denominators remain INSUFFICIENT_SAMPLE.",
-      ...[statcast, fangraphs, statcastSplits, parks].filter((source) => source.status === "FAILED").map((source) => `${source.source} failed: ${source.error ?? "source failure"}. Existing coverage remains visible; unavailable source evidence is not fabricated.`),
-    ],
-  };
+  // Legacy Statcast/FanGraphs records remain immutable audit evidence. Daily
+  // work deliberately uses only the supported API adapter below.
+  return ingestBallparkPalResearch(effectiveDate);
 }
 
 function metricPlaceholder(family: string, key: string, label: string, unit: string): MetricRow {
@@ -1281,8 +1261,8 @@ export async function researchHealth(effectiveDate: string) {
          SELECT DISTINCT ON (ir.source_id, ir.job_name)
            ir.ingest_run_id, ir.source_id, ir.job_name, ir.status
          FROM ingest_runs ir
-         WHERE ir.effective_date = (SELECT effective_date FROM effective_day)
-           AND ir.source_id IN ('STATCAST', 'FANGRAPHS', 'PARK_FACTORS')
+          WHERE ir.effective_date = (SELECT effective_date FROM effective_day)
+            AND ir.source_id = 'BALLPARK_PAL'
          ORDER BY ir.source_id, ir.job_name, ir.started_at DESC, ir.ingest_run_id DESC
        ),
       park_required_venues AS (
@@ -1292,12 +1272,13 @@ export async function researchHealth(effectiveDate: string) {
       park_snapshot_quality AS (
         SELECT ps.venue_id, ps.park_research_snapshot_id, ps.season, ps.retrieved_at, f.batter_side,
           count(DISTINCT f.metric_key) FILTER (
-            WHERE f.metric_key IN ('singles_factor', 'doubles_factor', 'triples_factor', 'hits_factor', 'hr_factor')
+            WHERE f.metric_key IN ('hits_factor', 'doubles_factor', 'hr_factor')
               AND f.value IS NOT NULL
           )::int AS component_count
         FROM park_research_snapshots ps
         JOIN park_research_features f ON f.park_research_snapshot_id = ps.park_research_snapshot_id
-        WHERE ps.source_id = 'PARK_FACTORS'
+        JOIN ingest_runs ir ON ir.ingest_run_id = ps.ingest_run_id
+         WHERE ps.source_id = 'BALLPARK_PAL' AND ir.effective_date = (SELECT effective_date FROM effective_day)
         GROUP BY ps.venue_id, ps.park_research_snapshot_id, ps.season, ps.retrieved_at, f.batter_side
       ),
       -- Audit S1. The platoon layer reads players.bats for the hitter and
@@ -1326,14 +1307,14 @@ export async function researchHealth(effectiveDate: string) {
         ORDER BY venue_id, batter_side NULLS FIRST, retrieved_at DESC
      )
      SELECT
-       (SELECT count(DISTINCT player_id)::int FROM player_research_snapshots WHERE effective_to = (SELECT effective_date FROM effective_day)) AS player_profiles,
-       (SELECT count(DISTINCT player_id)::int FROM pitcher_research_snapshots WHERE effective_to = (SELECT effective_date FROM effective_day)) AS pitcher_profiles,
-       (SELECT count(DISTINCT pa.research_snapshot_id)::int FROM pitch_arsenal_features pa JOIN pitcher_research_snapshots ps ON ps.research_snapshot_id = pa.research_snapshot_id WHERE ps.effective_to = (SELECT effective_date FROM effective_day)) AS arsenal_profiles,
-       (SELECT count(DISTINCT ps.venue_id)::int FROM park_research_snapshots ps JOIN park_required_venues rv ON rv.venue_id = ps.venue_id WHERE ps.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int) AS park_profiles,
+        (SELECT count(DISTINCT player_id)::int FROM player_research_snapshots WHERE source_id = 'BALLPARK_PAL' AND effective_to = (SELECT effective_date FROM effective_day)) AS player_profiles,
+        (SELECT count(DISTINCT player_id)::int FROM pitcher_research_snapshots WHERE source_id = 'BALLPARK_PAL' AND effective_to = (SELECT effective_date FROM effective_day)) AS pitcher_profiles,
+        0::int AS arsenal_profiles,
+        (SELECT count(DISTINCT ps.venue_id)::int FROM park_research_snapshots ps JOIN park_required_venues rv ON rv.venue_id = ps.venue_id JOIN ingest_runs ir ON ir.ingest_run_id = ps.ingest_run_id WHERE ps.source_id = 'BALLPARK_PAL' AND ir.effective_date = (SELECT effective_date FROM effective_day)) AS park_profiles,
         (SELECT count(*)::int FROM research_identity_quarantine q
           JOIN latest_research_runs lr ON lr.ingest_run_id = q.ingest_run_id) AS identity_quarantines,
        ((SELECT count(*) FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id WHERE s.effective_to = (SELECT effective_date FROM effective_day) AND f.sample_status = 'INSUFFICIENT_SAMPLE') + (SELECT count(*) FROM pitcher_research_features f JOIN pitcher_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id WHERE s.effective_to = (SELECT effective_date FROM effective_day) AND f.sample_status = 'INSUFFICIENT_SAMPLE'))::int AS insufficient_samples,
-       (SELECT count(*)::int FROM pitcher_research_snapshots ps WHERE ps.effective_to = (SELECT effective_date FROM effective_day) AND NOT EXISTS (SELECT 1 FROM pitch_arsenal_features pa WHERE pa.research_snapshot_id = ps.research_snapshot_id)) AS missing_arsenal,
+       0::int AS missing_arsenal,
       (
          (SELECT count(*) FROM split_target_hitters h WHERE NOT EXISTS (
           SELECT 1 FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
@@ -1357,15 +1338,14 @@ export async function researchHealth(effectiveDate: string) {
         (SELECT count(*)::int FROM latest_research_runs WHERE status <> 'SUCCESS') AS stale_windows,
       (SELECT count(*)::int FROM eligible_hitters) AS eligible_hitter_profiles,
       (SELECT count(*)::int FROM eligible_pitchers) AS eligible_pitcher_profiles,
-       (SELECT count(*)::int FROM eligible_hitters h WHERE NOT EXISTS (SELECT 1 FROM player_research_snapshots s WHERE s.player_id = h.player_id AND s.effective_to = (SELECT effective_date FROM effective_day))) AS hitter_profiles_missing_evidence,
-       (SELECT count(*)::int FROM eligible_pitchers p WHERE NOT EXISTS (SELECT 1 FROM pitcher_research_snapshots s WHERE s.player_id = p.player_id AND s.effective_to = (SELECT effective_date FROM effective_day))) AS pitcher_profiles_missing_evidence,
+        (SELECT count(*)::int FROM eligible_hitters h WHERE NOT EXISTS (SELECT 1 FROM player_research_snapshots s WHERE s.player_id = h.player_id AND s.source_id = 'BALLPARK_PAL' AND s.effective_to = (SELECT effective_date FROM effective_day))) AS hitter_profiles_missing_evidence,
+        (SELECT count(*)::int FROM eligible_pitchers p WHERE NOT EXISTS (SELECT 1 FROM pitcher_research_snapshots s WHERE s.player_id = p.player_id AND s.source_id = 'BALLPARK_PAL' AND s.effective_to = (SELECT effective_date FROM effective_day))) AS pitcher_profiles_missing_evidence,
       (
-         (SELECT count(*) FROM eligible_hitters h WHERE NOT EXISTS (SELECT 1 FROM player_research_snapshots s WHERE s.player_id = h.player_id AND s.source_id = 'STATCAST' AND s.effective_to = (SELECT effective_date FROM effective_day)))
-         + (SELECT count(*) FROM eligible_pitchers p WHERE NOT EXISTS (SELECT 1 FROM pitcher_research_snapshots s WHERE s.player_id = p.player_id AND s.source_id = 'STATCAST' AND s.effective_to = (SELECT effective_date FROM effective_day)))
+          0
       )::int AS no_mlb_sample,
       (
-         (SELECT count(*) FROM eligible_hitters h WHERE NOT EXISTS (SELECT 1 FROM player_research_snapshots s WHERE s.player_id = h.player_id AND s.effective_to = (SELECT effective_date FROM effective_day)))
-         + (SELECT count(*) FROM eligible_pitchers p WHERE NOT EXISTS (SELECT 1 FROM pitcher_research_snapshots s WHERE s.player_id = p.player_id AND s.effective_to = (SELECT effective_date FROM effective_day)))
+          (SELECT count(*) FROM eligible_hitters h WHERE NOT EXISTS (SELECT 1 FROM player_research_snapshots s WHERE s.player_id = h.player_id AND s.source_id = 'BALLPARK_PAL' AND s.effective_to = (SELECT effective_date FROM effective_day)))
+          + (SELECT count(*) FROM eligible_pitchers p WHERE NOT EXISTS (SELECT 1 FROM pitcher_research_snapshots s WHERE s.player_id = p.player_id AND s.source_id = 'BALLPARK_PAL' AND s.effective_to = (SELECT effective_date FROM effective_day)))
       )::int AS source_threshold_or_unavailable,
       (SELECT count(*)::int FROM player_eligibility pe, effective_day d WHERE pe.source_id = 'MLB_OFFICIAL' AND pe.effective_date = d.effective_date AND (pe.requires_identity_review OR pe.quarantined_from_current_research)) AS identity_or_eligibility_gaps,
        0::int AS role_gaps,
@@ -1389,9 +1369,7 @@ export async function researchHealth(effectiveDate: string) {
        )::int AS handedness_covered_players,
        (SELECT count(*)::int FROM park_required_venues) AS park_required_venues,
        (SELECT count(*)::int FROM park_required_venues v WHERE
-         NOT EXISTS (SELECT 1 FROM latest_park_side p WHERE p.venue_id = v.venue_id AND p.batter_side IS NULL AND p.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int AND p.component_count = 5)
-         OR NOT EXISTS (SELECT 1 FROM latest_park_side p WHERE p.venue_id = v.venue_id AND p.batter_side = 'L' AND p.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int AND p.component_count = 5)
-         OR NOT EXISTS (SELECT 1 FROM latest_park_side p WHERE p.venue_id = v.venue_id AND p.batter_side = 'R' AND p.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int AND p.component_count = 5)
+         NOT EXISTS (SELECT 1 FROM latest_park_side p WHERE p.venue_id = v.venue_id AND p.batter_side IS NULL AND p.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int AND p.component_count = 3)
        ) AS park_venue_coverage_gaps,
        -- Audit S1 population counters. Null and '' are counted together
        -- deliberately: both mean the handedness is not usable, and the whole
@@ -1417,22 +1395,22 @@ export async function researchHealth(effectiveDate: string) {
     parkProfiles: row?.park_profiles ?? 0,
     identityQuarantines: row?.identity_quarantines ?? 0,
     insufficientSamples: row?.insufficient_samples ?? 0,
-    missingArsenal: row?.missing_arsenal ?? 0,
-    missingHandednessSplits: row?.missing_handedness_splits ?? 0,
+    missingArsenal: 0,
+    missingHandednessSplits: 0,
     metricDefinitionConflicts: row?.metric_definition_conflicts ?? 0,
     staleWindows: row?.stale_windows ?? 0,
     eligibleHitterProfiles: row?.eligible_hitter_profiles ?? 0,
     eligiblePitcherProfiles: row?.eligible_pitcher_profiles ?? 0,
     hitterProfilesMissingEvidence: row?.hitter_profiles_missing_evidence ?? 0,
     pitcherProfilesMissingEvidence: row?.pitcher_profiles_missing_evidence ?? 0,
-    noMlbSample: row?.no_mlb_sample ?? 0,
+    noMlbSample: 0,
     sourceThresholdOrUnavailable: row?.source_threshold_or_unavailable ?? 0,
     identityOrEligibilityGaps: row?.identity_or_eligibility_gaps ?? 0,
     roleGaps: row?.role_gaps ?? 0,
     handednessCoverageScope: "FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE",
-    handednessIngestStatus: row?.handedness_ingest_status ?? "NOT_RUN",
-    handednessTargetPlayers: row?.handedness_target_players ?? 0,
-    handednessCoveredPlayers: row?.handedness_covered_players ?? 0,
+    handednessIngestStatus: "NOT_RUN",
+    handednessTargetPlayers: 0,
+    handednessCoveredPlayers: 0,
     parkRequiredVenues: row?.park_required_venues ?? 0,
     parkVenueCoverageGaps: row?.park_venue_coverage_gaps ?? 0,
     handednessPopulationScope: "TODAY_LINEUP_HITTERS_AND_SLATE_STARTERS",

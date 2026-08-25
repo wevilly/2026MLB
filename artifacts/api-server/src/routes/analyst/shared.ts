@@ -340,7 +340,7 @@ export async function sourceBadges(effectiveDate: string) {
   }>(
     `SELECT DISTINCT ON (source_id) source_id, status, effective_date, finished_at, row_count, normalized_row_count, rejected_row_count, http_status, duration_ms, error_message
      FROM ingest_runs
-     WHERE source_id IN ('MLB_OFFICIAL', 'FANTASYPROS', 'STATCAST', 'FANGRAPHS', 'PARK_FACTORS', 'OPEN_METEO')
+      WHERE source_id IN ('MLB_OFFICIAL', 'FANTASYPROS', 'BALLPARK_PAL', 'OPEN_METEO')
        AND effective_date <= $1
      ORDER BY source_id, effective_date DESC, started_at DESC`,
     [effectiveDate],
@@ -381,24 +381,11 @@ export async function sourceBadges(effectiveDate: string) {
       isCurrentDate,
     };
   };
-  const splitRun = await pool.query<{
-    status: string; effective_date: Date; finished_at: string | null; row_count: number | null; normalized_row_count: number | null;
-    rejected_row_count: number | null; http_status: number | null; duration_ms: number | null; error_message: string | null;
-  }>(
-    `SELECT status, effective_date, finished_at, row_count, normalized_row_count, rejected_row_count, http_status, duration_ms, error_message
-     FROM ingest_runs WHERE source_id = 'STATCAST' AND job_name = 'statcast_search_handedness_fallback'
-       AND effective_date <= $1
-     ORDER BY effective_date DESC, started_at DESC LIMIT 1`,
-    [effectiveDate],
-  );
   const makeBadge = (sourceId: string, name: string, configured: boolean) => makeRunBadge(name, bySource.get(sourceId), configured);
   return [
     makeBadge("MLB_OFFICIAL", "MLB Official", true),
     makeBadge("FANTASYPROS", "FantasyPros", fantasyProsConfigured),
-    makeBadge("STATCAST", "Baseball Savant / Statcast", true),
-    makeRunBadge("Statcast Search splits", splitRun.rows[0]),
-    makeBadge("FANGRAPHS", "FanGraphs", true),
-    makeBadge("PARK_FACTORS", "Statcast Park Factors", true),
+    makeBadge("BALLPARK_PAL", "Ballpark Pal daily research", true),
     makeBadge("OPEN_METEO", "Weather", true),
   ];
 }
@@ -560,10 +547,10 @@ export async function analystDataHealth(date: string) {
   const currentDate = currentEasternDate();
   const fantasyProsSource = sources.find((source) => source.name === "FantasyPros");
   const baselineReady = Boolean(slate.rows[0]?.games) && Boolean(fantasyProsReferences.rows[0]?.references);
-  const phaseTwoReady = research.handednessCoverageScope === "FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE"
-    && research.handednessIngestStatus === "SUCCESS"
-    && research.missingHandednessSplits === 0
-    && research.handednessTargetPlayers === research.handednessCoveredPlayers
+  // API-backed daily research has no supported handedness/pitch-level feed.
+  // Those retired-source capabilities are explicitly unavailable, not missing
+  // prerequisites for a fresh daily Ballpark Pal source run.
+  const phaseTwoReady = research.staleWindows === 0
     && research.parkRequiredVenues > 0
     && research.parkVenueCoverageGaps === 0
     && research.hitterProfilesMissingEvidence === 0

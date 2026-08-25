@@ -224,33 +224,21 @@ router.post("/analyst/refresh/research", async (req, res, next) => {
 });
 
 router.post("/analyst/refresh/research/splits-full", async (req, res, next) => {
-  try {
-    res.status(202).json(await ingestStatcastHandednessFallback(requestedDate(req.query.date), "FULL_UNIVERSE", 24));
-  } catch (error) {
-    next(error);
-  }
+  void req;
+  void next;
+  res.status(410).json({
+    error: "Live Statcast split refresh is retired. Handedness split evidence remains unavailable in the daily API-backed model; existing Statcast records are legacy audit evidence only.",
+    code: "RETIRED_LIVE_SOURCE",
+  });
 });
 
 router.post("/analyst/refresh/historical-intelligence", async (req, res, next) => {
-  try {
-    const from = typeof req.query.from === "string" ? req.query.from : "2024-03-01";
-    const to = typeof req.query.to === "string" ? req.query.to : currentEasternDate();
-    const rawLimit = typeof req.query.limit === "string" ? Number(req.query.limit) : 1000;
-    const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
-    const result = await materializeHistoricalIntelligence({ from, to, limit: rawLimit, cursor });
-    invalidateCache("player-lab:");
-    invalidateCache("pitcher-lab:");
-    // Validate the contract without serializing Zod's date coercions as
-    // midnight timestamps. These fields are date-only operational bounds.
-    RefreshHistoricalIntelligenceResponse.parse(result);
-    res.status(202).json(result);
-  } catch (error) {
-    if (error instanceof HistoricalIntelligenceValidationError) {
-      res.status(400).json({ error: error.message });
-      return;
-    }
-    next(error);
-  }
+  void req;
+  void next;
+  res.status(410).json({
+    error: "Historical live Statcast refresh is retired. Existing historical observations are read-only legacy audit evidence and are never used as active daily-source data.",
+    code: "RETIRED_LIVE_SOURCE",
+  });
 });
 
 router.post("/analyst/refresh/batter-pitcher", async (req, res, next) => {

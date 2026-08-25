@@ -240,76 +240,22 @@ async function snapshotBatterPitchTypes(batterId: number, rows: StatcastRow[], e
 }
 
 export async function refreshBatterPitcherPair(batterId: number, pitcherId: number, effectiveDate: string) {
-  await ensureSources();
-  await requireCanonicalPair(batterId, pitcherId);
-  const runId = await startRun(effectiveDate);
-  let rowCount = 0; let normalized = 0; let rejected = 0;
-  try {
-    const [pairResponse, batterResponse] = await Promise.all([
-      fetch(statcastUrl(batterId, pitcherId, effectiveDate), {
-        headers: { accept: "text/csv,text/plain", "user-agent": "MLBAnalystResearch/1.0" },
-        signal: AbortSignal.timeout(STATCAST_FETCH_TIMEOUT_MS),
-      }),
-      fetch(statcastUrl(batterId, null, effectiveDate), {
-        headers: { accept: "text/csv,text/plain", "user-agent": "MLBAnalystResearch/1.0" },
-        signal: AbortSignal.timeout(STATCAST_FETCH_TIMEOUT_MS),
-      }),
-    ]);
-    const [pairPayload, batterPayload] = await Promise.all([pairResponse.text(), batterResponse.text()]);
-    if (!pairResponse.ok || !batterResponse.ok) throw new Error(`Statcast BvP request failed (pair ${pairResponse.status}; batter pitch-type ${batterResponse.status}).`);
-    const pairRows = parseCsv(pairPayload);
-    const batterRows = parseCsv(batterPayload);
-    rowCount = pairRows.length + batterRows.length;
-    const [pairRaw, batterRaw] = await Promise.all([
-      storeRaw(runId, effectiveDate, pairPayload, statcastUrl(batterId, pitcherId, effectiveDate), "statcast_batter_pitcher_pair_csv"),
-      storeRaw(runId, effectiveDate, batterPayload, statcastUrl(batterId, null, effectiveDate), "statcast_batter_pitch_type_csv"),
-    ]);
-    normalized = await persistEvents(pairRows, batterId, pitcherId, pairRaw);
-    await snapshotPair(batterId, pitcherId, effectiveDate, runId, pairRaw);
-    await snapshotBatterPitchTypes(batterId, batterRows, effectiveDate, runId, batterRaw);
-    await finishRun(runId, "SUCCESS", rowCount, normalized, rejected, null);
-    return { ingestRunId: runId, status: "SUCCESS" as const, rowCount, normalizedRowCount: normalized, rejectedRowCount: rejected };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await finishRun(runId, "FAILED", rowCount, normalized, rejected + 1, message);
-    throw error;
-  }
+  void batterId;
+  void pitcherId;
+  void effectiveDate;
+  throw new Error("Live Statcast batter-versus-pitcher refresh is retired. Archived Statcast events remain read-only legacy audit evidence; the API-backed daily model reports pair-level and pitch-arsenal evidence as unavailable.");
 }
 
 export async function refreshBatterPitcherSlate(effectiveDate: string) {
-  const pairs = await pool.query<{ batter_id: number; pitcher_id: number }>(
-    `WITH accepted AS (
-       SELECT * FROM unnest($2::text[], $3::text[]) AS source_state(source_id, state)
-     ), latest_lineup AS (
-       SELECT DISTINCT ON (ls.game_pk, ls.team_id) ls.lineup_snapshot_id, ls.game_pk, ls.team_id
-       FROM lineup_snapshots ls JOIN games g ON g.game_pk = ls.game_pk
-       JOIN accepted a ON a.source_id = ls.source_id AND a.state = ls.state::text
-       WHERE g.game_date = $1
-       ORDER BY ls.game_pk, ls.team_id,
-         array_position($2::text[], ls.source_id),
-         ls.observed_at DESC
-     ), latest_starter AS (
-       SELECT DISTINCT ON (s.game_pk, s.team_id) s.game_pk, s.team_id, s.player_id
-       FROM starters s JOIN games g ON g.game_pk = s.game_pk
-       WHERE g.game_date = $1 AND s.player_id IS NOT NULL ORDER BY s.game_pk, s.team_id, s.observed_at DESC
-     )
-     SELECT DISTINCT le.player_id AS batter_id, opponent.player_id AS pitcher_id
-     FROM latest_lineup ll JOIN lineup_entries le ON le.lineup_snapshot_id = ll.lineup_snapshot_id
-     JOIN games g ON g.game_pk = ll.game_pk
-     JOIN latest_starter opponent ON opponent.game_pk = g.game_pk AND opponent.team_id <> ll.team_id
-     WHERE le.player_id IS NOT NULL`,
-    [effectiveDate, PREGAME_LINEUP_FILTER.sourceIds, PREGAME_LINEUP_FILTER.states],
-  );
-  const results: Array<{ batterId: number; pitcherId: number; status: string }> = [];
-  for (let index = 0; index < pairs.rows.length; index += SLATE_PAIR_BATCH_SIZE) {
-    const batch = pairs.rows.slice(index, index + SLATE_PAIR_BATCH_SIZE);
-    const batchResults = await Promise.all(batch.map(async (pair) => {
-      try { await refreshBatterPitcherPair(pair.batter_id, pair.pitcher_id, effectiveDate); return { batterId: pair.batter_id, pitcherId: pair.pitcher_id, status: "SUCCESS" }; }
-      catch { return { batterId: pair.batter_id, pitcherId: pair.pitcher_id, status: "FAILED" }; }
-    }));
-    results.push(...batchResults);
-  }
-  return { effectiveDate, pairsRequested: pairs.rows.length, pairsRefreshed: results.filter((result) => result.status === "SUCCESS").length, failures: results.filter((result) => result.status === "FAILED").length, results };
+  return {
+    effectiveDate,
+    pairsRequested: 0,
+    pairsRefreshed: 0,
+    failures: 0,
+    results: [],
+    status: "SUCCESS" as const,
+    note: "Live Statcast BvP refresh retired; pair and arsenal fields are unavailable under the API-backed daily source contract.",
+  };
 }
 
 function numeric(value: string | number | null) { return value === null ? null : Number(value); }
@@ -350,6 +296,27 @@ async function arsenalEvidence(batterId: number, pitcherId: number, effectiveDat
 }
 
 export async function getBatterPitcherEvidence(batterId: number, pitcherId: number, effectiveDate: string, market: BvpMarket): Promise<BvpEvidence> {
+  // Never use archived Statcast rows to influence a current API-backed slate.
+  // The retained records remain queryable as legacy audit evidence elsewhere.
+  return {
+    status: "NOT_FOUND",
+    source: "Ballpark Pal daily source contract",
+    coverageStatus: "PAIR_LEVEL_AND_PITCH_ARSENAL_UNAVAILABLE",
+    batterId,
+    pitcherId,
+    effectiveTo: effectiveDate,
+    sampleBand: "ANECDOTE",
+    pa: 0,
+    metrics: { avg: null, slg: null, xslg: null, xbh: 0, homeRuns: 0, walks: 0, hardHitPercent: null, barrelPercent: null },
+    ageDays: 0,
+    decayWeight: 0,
+    shrinkageWeight: 0,
+    marketSignal: 0,
+    rankAdjustment: 0,
+    arsenal: { status: "NOT_FOUND", summary: "Pitch-level arsenal evidence is not provided by the active daily API source.", weightedXslg: null, pitchTypes: 0 },
+    note: `No live BvP request is made for ${market}; archived Statcast evidence is not applied to current daily ranks.`,
+  };
+  /*
   const snapshotResult = await pool.query<{
     effective_to: string; sample_band: BvpEvidence["sampleBand"]; pa: number; avg: string | null; slg: string | null; xslg: string | null; xbh: number; home_runs: number; walks: number; hard_hit_percent: string | null; barrel_percent: string | null; age_days: number; decay_weight: string; shrinkage_weight: string;
   }>(
@@ -384,4 +351,5 @@ export async function getBatterPitcherEvidence(batterId: number, pitcherId: numb
     ageDays, decayWeight: age, shrinkageWeight: shrinkage, marketSignal: rawSignal, rankAdjustment: adjustment, arsenal,
     note: smallSample ? `${snapshot.sample_band.replaceAll("_", " ")} (${snapshot.pa} PA): visible as context only; no ranking effect.` : `${snapshot.sample_band.replaceAll("_", " ")} (${snapshot.pa} PA): bounded secondary context; current skill and arsenal retain precedence.`,
   };
+  */
 }

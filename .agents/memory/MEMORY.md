@@ -1,5 +1,5 @@
 - [FantasyPros lineup state](fantasypros-lineup-state.md) — non-projected lineup responses can contain scheduled games with no hitters; only MLB can establish posted lineups.
-- [Research fallback acceptance](research-fallback-acceptance.md) — FanGraphs may be unavailable without blocking Phase 2A when verified Statcast split coverage and raw Savant park evidence are complete.
+- [Daily research source contract](research-fallback-acceptance.md) — Ballpark Pal daily averages and park multipliers are active; retired Statcast/FanGraphs remain legacy-only audit evidence.
 - [Model artifact lifecycle](model-artifact-lifecycle.md) — artifacts use create-only storage generations and hashes; Phase 5A must keep ACTIVE unreachable until Phase 5B adds controlled activation.
 - [Bettor source-text retention](bettor-source-text-retention.md) — long source rationales are stored only as structured non-verbatim summaries, never silently truncated excerpts.
 - [Bettor evaluation eligibility](bettor-evaluation-eligibility.md) — ambiguous doubleheader and post-first-pitch picks remain auditable but are ineligible for performance scoring.

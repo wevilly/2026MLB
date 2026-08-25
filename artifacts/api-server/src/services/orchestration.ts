@@ -2,7 +2,6 @@ import { pool } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { ingestFantasyPros, ingestMlbOfficial } from "./data-foundation";
 import { ingestResearch, researchHealth } from "./research-foundation";
-import { refreshBatterPitcherSlate } from "./batter-pitcher-research";
 import { refreshBullpen } from "./bullpen-foundation";
 import { refreshWeather } from "./weather-foundation";
 import { runTBEngine } from "./tb-engine";
@@ -285,7 +284,11 @@ async function executeRun(runId: string, slateDate: string) {
     // Weather must land before the engines: they read the slate's observations
     // and score a bounded weather term from them.
     await runStep(runId, steps, "weather_refresh", () => refreshWeather(slateDate), true, scheduledGames);
-    await runStep(runId, steps, "slate_matchup_refresh", () => refreshBatterPitcherSlate(slateDate), true, scheduledGames);
+    await runStep(runId, steps, "slate_matchup_refresh", async () => ({
+      status: "SUCCESS",
+      candidatesProcessed: scheduledGames,
+      note: "No live batter-versus-pitcher scrape is run. Pair-level and pitch-arsenal evidence is explicitly unavailable in the API-backed daily model.",
+    }), true, scheduledGames);
     await runStep(runId, steps, "tb_engine", () => runTBEngine(slateDate), true, scheduledGames);
     await runStep(runId, steps, "xbh_engine", () => runXBHEngine(slateDate), true, scheduledGames);
     await runStep(runId, steps, "walk_engine", () => runWALKEngine(slateDate), true, scheduledGames);

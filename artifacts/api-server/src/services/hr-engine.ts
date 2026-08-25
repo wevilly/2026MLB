@@ -241,7 +241,7 @@ async function getStarter(gamePk: number, teamId: number): Promise<StarterInfo> 
     : { playerId: null, throws: null, starterState: "UNKNOWN" };
 }
 
-async function getHitterFeatures(playerId: number): Promise<FeatureMap> {
+async function getHitterFeatures(playerId: number, gamePk: number): Promise<FeatureMap> {
   const result = await pool.query<{
     metric_key: string; value: string | null; pitcher_side: string | null;
   }>(
@@ -249,9 +249,9 @@ async function getHitterFeatures(playerId: number): Promise<FeatureMap> {
        f.metric_key, f.value::text, f.pitcher_side
      FROM player_research_features f
      JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
-     WHERE s.player_id = $1 AND s.research_window = 'SEASON'
+       WHERE s.player_id = $1 AND s.source_id = 'BALLPARK_PAL' AND s.research_window = 'SEASON' AND (s.provenance->>'gamePk')::bigint = $2
      ORDER BY f.metric_key, f.pitcher_side, s.retrieved_at DESC`,
-    [playerId],
+    [playerId, gamePk],
   );
   const map: FeatureMap = new Map();
   for (const row of result.rows) {
@@ -261,7 +261,7 @@ async function getHitterFeatures(playerId: number): Promise<FeatureMap> {
   return map;
 }
 
-async function getPitcherFeatures(playerId: number): Promise<FeatureMap> {
+async function getPitcherFeatures(playerId: number, gamePk: number): Promise<FeatureMap> {
   const result = await pool.query<{
     metric_key: string; value: string | null; batter_side: string | null;
   }>(
@@ -269,9 +269,9 @@ async function getPitcherFeatures(playerId: number): Promise<FeatureMap> {
        f.metric_key, f.value::text, f.batter_side
      FROM pitcher_research_features f
      JOIN pitcher_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id
-     WHERE s.player_id = $1 AND s.research_window = 'SEASON'
+       WHERE s.player_id = $1 AND s.source_id = 'BALLPARK_PAL' AND s.research_window = 'SEASON' AND (s.provenance->>'gamePk')::bigint = $2
      ORDER BY f.metric_key, f.batter_side, s.retrieved_at DESC`,
-    [playerId],
+    [playerId, gamePk],
   );
   const map: FeatureMap = new Map();
   for (const row of result.rows) {
@@ -281,7 +281,7 @@ async function getPitcherFeatures(playerId: number): Promise<FeatureMap> {
   return map;
 }
 
-async function getParkFeatures(venueId: number): Promise<FeatureMap> {
+async function getParkFeatures(venueId: number, gamePk: number): Promise<FeatureMap> {
   const result = await pool.query<{
     metric_key: string; value: string | null; batter_side: string | null;
   }>(
@@ -289,9 +289,9 @@ async function getParkFeatures(venueId: number): Promise<FeatureMap> {
        f.metric_key, f.value::text, f.batter_side
      FROM park_research_features f
      JOIN park_research_snapshots s ON s.park_research_snapshot_id = f.park_research_snapshot_id
-     WHERE s.venue_id = $1
+       WHERE s.venue_id = $1 AND s.source_id = 'BALLPARK_PAL' AND (s.provenance->>'gamePk')::bigint = $2
      ORDER BY f.metric_key, f.batter_side, s.season DESC, s.retrieved_at DESC`,
-    [venueId],
+    [venueId, gamePk],
   );
   const map: FeatureMap = new Map();
   for (const row of result.rows) {
@@ -397,6 +397,7 @@ function hitterHasPowerSignal(hitter: FeatureMap): boolean {
   const fbPct      = n(hitter, "fb_percent");
   const iso        = n(hitter, "iso");
   const hardHitPct = n(hitter, "hard_hit_percent");
+  const projectedHomeRuns = n(hitter, "home_runs");
 
   if (barrelPa !== null && barrelPa >= POWER_SIGNAL_BARREL_PA)  return true;
   if (avgEv !== null    && avgEv >= POWER_SIGNAL_AVG_EV)        return true;
@@ -569,6 +570,7 @@ function computeEvidenceScore(
   const fbPct      = n(hitter, "fb_percent");
   const iso        = n(hitter, "iso");
   const hardHitPct = n(hitter, "hard_hit_percent");
+  const projectedHomeRuns = n(hitter, "home_runs");
 
   const pitcherBarrelPct  = n(pitcher, pk("barrel_percent",   side)) ?? n(pitcher, "barrel_percent");
   const pitcherXSLGAllow  = n(pitcher, pk("xslg_allowed",     side)) ?? n(pitcher, "xslg_allowed");
@@ -576,6 +578,16 @@ function computeEvidenceScore(
   const hrFactor = n(park, "hr_factor");
 
   let score = 0;
+
+  // The active daily provider supplies simulated game-average home runs. It is
+  // primary HR evidence; Statcast contact metrics below remain optional legacy
+  // context and are not synthesized when unavailable.
+  if (projectedHomeRuns !== null) {
+    if (projectedHomeRuns >= 0.45) score += 6;
+    else if (projectedHomeRuns >= 0.30) score += 4;
+    else if (projectedHomeRuns >= 0.18) score += 2;
+    else if (projectedHomeRuns < 0.08) score -= 1;
+  }
 
   // Batting order (HR opportunity)
   if (battingOrder !== null) {
@@ -1076,9 +1088,9 @@ export async function runHREngine(slateDate: string): Promise<HREngineResult> {
 
     // Per-game caches to avoid redundant DB queries
     const starterCache = new Map<string, StarterInfo>();
-    const hitterCache  = new Map<number, FeatureMap>();
-    const pitcherCache = new Map<number, FeatureMap>();
-    const parkCache    = new Map<number, FeatureMap>();
+    const hitterCache  = new Map<string, FeatureMap>();
+    const pitcherCache = new Map<string, FeatureMap>();
+    const parkCache    = new Map<string, FeatureMap>();
     const bullpenCache = new Map<string, BullpenHRSummary>();
     // One query for the whole slate rather than one per candidate.
     const slateWeather = await getSlateWeather(slateDate);
@@ -1092,24 +1104,27 @@ export async function runHREngine(slateDate: string): Promise<HREngineResult> {
       }
       const starter = starterCache.get(starterKey)!;
 
-      if (!hitterCache.has(player.playerId)) {
-        hitterCache.set(player.playerId, await getHitterFeatures(player.playerId));
+      const hitterKey = `${player.gamePk}:${player.playerId}`;
+      if (!hitterCache.has(hitterKey)) {
+        hitterCache.set(hitterKey, await getHitterFeatures(player.playerId, player.gamePk));
       }
-      const hitterFeatures = hitterCache.get(player.playerId)!;
+      const hitterFeatures = hitterCache.get(hitterKey)!;
 
       const pitcherFeatures: FeatureMap = new Map();
       if (starter.playerId !== null) {
-        if (!pitcherCache.has(starter.playerId)) {
-          pitcherCache.set(starter.playerId, await getPitcherFeatures(starter.playerId));
+        const pitcherKey = `${player.gamePk}:${starter.playerId}`;
+        if (!pitcherCache.has(pitcherKey)) {
+          pitcherCache.set(pitcherKey, await getPitcherFeatures(starter.playerId, player.gamePk));
         }
-        pitcherCache.get(starter.playerId)!.forEach((v, k) => pitcherFeatures.set(k, v));
+        pitcherCache.get(pitcherKey)!.forEach((v, k) => pitcherFeatures.set(k, v));
       }
 
-      if (player.venueId !== null && !parkCache.has(player.venueId)) {
-        parkCache.set(player.venueId, await getParkFeatures(player.venueId));
+      const parkKey = `${player.gamePk}:${player.venueId ?? "none"}`;
+      if (player.venueId !== null && !parkCache.has(parkKey)) {
+        parkCache.set(parkKey, await getParkFeatures(player.venueId, player.gamePk));
       }
       const parkFeatures = player.venueId !== null
-        ? (parkCache.get(player.venueId) ?? new Map<string, N>())
+        ? (parkCache.get(parkKey) ?? new Map<string, N>())
         : new Map<string, N>();
 
       const bullpenKey = `${player.oppTeamId}:${slateDate}`;
