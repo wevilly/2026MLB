@@ -126,3 +126,17 @@ mtime_ms = 1787421450734
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/06e45796-ca8e-4c22-88a9-1a583049d7d4/b10b7c7b-3a42-4645-b074-363ad24851ce"
 storage_version_token = "1787421461703917"
 content_type = "application/vnd.ms-excel"
+
+[[outputs]]
+id = "EcOVfXLTqm9kLj1qGymqQ"
+uri = "file://reports/MLB_Analyst_Search_Failure_Risk_Report.docx"
+type = "word_document"
+title = "MLB Analyst Search Failure Risk Report"
+description = "Evidence-based Word report covering website startup, player search, API, database, data freshness, deployment, and operator troubleshooting risks."
+logical_id = "7950497c-e316-4326-931a-d046ac8a20ed"
+content_hash = "sha256:bc286a2d42becf339f3a8c58d3c28bf10efc1f68b75242f87c9a1e736db5aa76"
+size = 49888
+mtime_ms = 1787619364672
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/7950497c-e316-4326-931a-d046ac8a20ed/fa7eed7d-338e-44cf-a142-ce99a47e41fc"
+storage_version_token = "1787619384679550"
+content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
