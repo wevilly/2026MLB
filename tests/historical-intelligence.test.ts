@@ -65,7 +65,13 @@ test("historical materialization is bounded, canonical-ID-only, and outside dail
   assert.match(service, /input\.target/);
   assert.match(service, /b\.batter_id = \$6/);
   const app = read("artifacts/api-server/src/app.ts");
-  assert.match(app, /startHistoricalIntelligenceBackfillWorker\(\)/);
+  // The live Statcast historical backfill is retired under the API-backed
+  // daily source contract (the refresh route returns a retirement notice), so
+  // the server must NOT start the background worker any more. The worker code
+  // is retained above as legacy audit machinery, never scheduled.
+  assert.doesNotMatch(app, /startHistoricalIntelligenceBackfillWorker\(\)/);
+  const refreshRoutes = read("artifacts/api-server/src/routes/analyst/refresh.ts");
+  assert.match(refreshRoutes, /Historical live Statcast refresh is retired/);
   const analystUi = read("artifacts/mlb-analyst/src/App.tsx");
   assert.doesNotMatch(analystUi, /button-materialize-history/);
   const foundation = read("artifacts/api-server/src/services/research-foundation.ts");

@@ -69,10 +69,12 @@ POST    /analyst/refresh/bullpen
 POST    /analyst/refresh/fantasypros
 POST    /analyst/refresh/historical-intelligence
 POST    /analyst/refresh/market-research/hr
+POST    /analyst/refresh/market-research/hrrbi
 POST    /analyst/refresh/market-research/tb
 POST    /analyst/refresh/market-research/walk
 POST    /analyst/refresh/market-research/xbh
 POST    /analyst/refresh/mlb
+POST    /analyst/refresh/mlb-schedule
 POST    /analyst/refresh/research
 POST    /analyst/refresh/research/splits-full
 POST    /analyst/refresh/weather

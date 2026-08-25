@@ -124,7 +124,12 @@ describe("Task 2.7 no consumer hardcodes the lineup source", () => {
     }
     const batterPitcher = readFileSync("artifacts/api-server/src/services/batter-pitcher-research.ts", "utf8");
     assert.ok(batterPitcher.includes("PREGAME_LINEUP_SOURCE_PRECEDENCE"), "BvP slate refresh must use the shared pregame policy");
-    assert.ok(batterPitcher.includes("JOIN accepted a ON a.source_id = ls.source_id"), "BvP refresh must scope its pair universe to the accepted projected lineup");
+    // The live BvP pair scrape is retired: its slate refresh runs no lineup
+    // query at all, so there is no pair universe to scope. What must hold
+    // instead is that the retirement is explicit and no official-source
+    // lineup selection is inlined.
+    assert.ok(batterPitcher.includes("Live Statcast BvP refresh retired"), "a queryless BvP refresh must disclose why");
+    assert.ok(!batterPitcher.includes("MLB_OFFICIAL"), "BvP must not inline official lineup selection");
     const featureStore = readFileSync("artifacts/api-server/src/services/feature-store.ts", "utf8");
     assert.ok(featureStore.includes("PREGAME_LINEUP_SOURCE_PRECEDENCE"), "feature snapshots must use the shared pregame policy");
     assert.ok(featureStore.includes("JOIN accepted a ON a.source_id = ls.source_id"), "feature snapshots must scope batter teams to the projected lineup");

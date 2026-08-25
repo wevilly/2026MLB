@@ -85,10 +85,16 @@ describe("Task 1.5 the promotion gate", () => {
 });
 
 describe("Task 1.5 promotion is not reachable from the pipeline", () => {
-  test("orchestration trains and validates but never promotes", () => {
+  test("orchestration never touches the model lifecycle", () => {
+    // Model training moved out of the daily pipeline entirely: it is an
+    // operator-triggered route action now. The Task 1.5 invariant is unchanged
+    // and stronger — the pipeline touches no model lifecycle step at all, so
+    // promotion in particular is never reachable from it.
     const source = readFileSync("artifacts/api-server/src/services/orchestration.ts", "utf8");
-    assert.ok(source.includes("model_training"), "the pipeline must train and validate");
+    assert.ok(!source.includes("trainMarketModel"), "the pipeline must not train models");
     assert.ok(!source.includes("promoteModelVersion"), "the pipeline must never promote");
+    const modelRoutes = readFileSync("artifacts/api-server/src/routes/analyst/models.ts", "utf8");
+    assert.ok(modelRoutes.includes("trainMarketModel("), "training must remain an operator route action");
   });
 
   test("ACTIVE is written in exactly one production code path", () => {

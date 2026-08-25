@@ -763,6 +763,96 @@ async function persistFantasyProsLineups(
   return { snapshots, unresolvedEntries };
 }
 
+/**
+ * Schedule-metadata-only official refresh, safe to run pregame on the current
+ * slate date. Persists games, venues, start times, doubleheader codes and
+ * probable starters. It deliberately ingests NO lineups, NO rosters and NO
+ * settlement facts, so the postgame-only policy on the full ingestMlbOfficial
+ * path is preserved. This is what keeps venue geometry and start times fresh
+ * for weather and doubleheader reconciliation on the active slate.
+ */
+export async function refreshMlbSchedule(requestedDate: string) {
+  const effectiveDate = parseDate(requestedDate);
+  const startedAt = Date.now();
+  await ensureSources();
+  const ingestRunId = await startRun(MLB_SOURCE, "mlb-official-schedule-pregame", effectiveDate);
+  try {
+    const url = new URL(MLB_SCHEDULE_URL);
+    url.searchParams.set("sportId", "1");
+    url.searchParams.set("date", effectiveDate);
+    url.searchParams.set("hydrate", "team,venue,probablePitcher");
+    const response = await fetch(url);
+    const payload = await response.json() as JsonObject;
+    if (!response.ok) throw new Error(`MLB Stats API returned HTTP ${response.status}`);
+    await storeRawPayload(ingestRunId, MLB_SOURCE, "schedule", effectiveDate, payload);
+    const games = asArray(payload.dates).flatMap((day) => asArray(day.games));
+    let normalized = 0;
+    let rejected = 0;
+    for (const game of games) {
+      const gamePk = Number(game.gamePk);
+      const teams = asObject(game.teams);
+      const away = asObject(asObject(teams.away).team);
+      const home = asObject(asObject(teams.home).team);
+      const venue = asObject(game.venue);
+      const awayId = Number(away.id);
+      const homeId = Number(home.id);
+      if (!Number.isFinite(gamePk) || !Number.isFinite(awayId) || !Number.isFinite(homeId)) {
+        rejected += 1;
+        continue;
+      }
+      await upsertTeam(away);
+      await upsertTeam(home);
+      if (Number.isFinite(Number(venue.id))) {
+        await pool.query(
+          `INSERT INTO venues (venue_id, name, metadata) VALUES ($1, $2, $3)
+           ON CONFLICT (venue_id) DO UPDATE SET name = EXCLUDED.name, metadata = EXCLUDED.metadata`,
+          [Number(venue.id), String(venue.name ?? "Unknown venue"), venue],
+        );
+      }
+      await pool.query(
+        `INSERT INTO games (game_pk, game_date, start_time_utc, away_team_id, home_team_id, venue_id, game_status, game_type, doubleheader_code)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (game_pk) DO UPDATE SET
+           start_time_utc = COALESCE(EXCLUDED.start_time_utc, games.start_time_utc),
+           venue_id = COALESCE(EXCLUDED.venue_id, games.venue_id),
+           game_status = EXCLUDED.game_status,
+           game_type = EXCLUDED.game_type,
+           doubleheader_code = EXCLUDED.doubleheader_code,
+           updated_at = now()`,
+        [
+          gamePk,
+          effectiveDate,
+          game.gameDate ? new Date(String(game.gameDate)).toISOString() : null,
+          awayId,
+          homeId,
+          Number.isFinite(Number(venue.id)) ? Number(venue.id) : null,
+          String(asObject(game.status).detailedState ?? "UNKNOWN"),
+          String(game.gameType ?? ""),
+          String(game.doubleHeader ?? ""),
+        ],
+      );
+      const awayProbable = asObject(asObject(teams.away).probablePitcher);
+      const homeProbable = asObject(asObject(teams.home).probablePitcher);
+      if (Object.keys(awayProbable).length) await upsertStarter(awayProbable, awayId, gamePk, "PROBABLE", awayProbable, effectiveDate);
+      if (Object.keys(homeProbable).length) await upsertStarter(homeProbable, homeId, gamePk, "PROBABLE", homeProbable, effectiveDate);
+      normalized += 1;
+    }
+    await finishRun(ingestRunId, rejected ? "PARTIAL" : "SUCCESS", {
+      rowCount: games.length,
+      normalizedRowCount: normalized,
+      rejectedRowCount: rejected,
+      httpStatus: response.status,
+      metadata: { endpoint: url.toString(), scheduleOnly: true },
+    }, startedAt);
+    return { source: "MLB Official (schedule only)", ingestRunId, rowCount: games.length, normalizedRowCount: normalized, rejectedRowCount: rejected };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown MLB schedule failure";
+    await recordIssue(MLB_SOURCE, ingestRunId, "SOURCE_FAILURE", "BLOCKING", detail);
+    await finishRun(ingestRunId, "FAILED", { rowCount: 0, normalizedRowCount: 0, rejectedRowCount: 0, errorMessage: detail }, startedAt);
+    throw error;
+  }
+}
+
 export async function ingestMlbOfficial(requestedDate: string) {
   const effectiveDate = parseDate(requestedDate);
   const startedAt = Date.now();

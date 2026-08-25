@@ -91,7 +91,7 @@ import {
   getMarketResearchSelectionEligibility,
 } from "@workspace/api-zod";
 import { pool } from "@workspace/db";
-import { ingestFantasyPros, ingestMlbOfficial } from "../../services/data-foundation";
+import { ingestFantasyPros, ingestMlbOfficial, refreshMlbSchedule } from "../../services/data-foundation";
 import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFallback, researchHealth } from "../../services/research-foundation";
 import {
   HistoricalIntelligenceValidationError,
@@ -198,6 +198,17 @@ router.post("/analyst/refresh/mlb", async (req, res, next) => {
       return;
     }
     res.status(201).json(await ingestMlbOfficial(date));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Schedule-metadata-only official refresh. Unlike /analyst/refresh/mlb it has
+// no same-day guard: it carries no lineups and no settlement facts, only the
+// games/venues/start-time spine that pregame research and weather need.
+router.post("/analyst/refresh/mlb-schedule", async (req, res, next) => {
+  try {
+    res.status(201).json(await refreshMlbSchedule(requestedDate(req.query.date)));
   } catch (error) {
     next(error);
   }
