@@ -10,7 +10,7 @@
 import { build } from "../../artifacts/api-server/node_modules/esbuild/lib/main.js";
 
 const STUBS: Record<string, string> = {
-  db: "export const pool = { query() { throw new Error('no database in this test'); }, "
+  db: "export const pool = { query(...args) { const query = globalThis.__workspaceTestPoolQuery; if (typeof query !== 'function') throw new Error('no database in this test'); return query(...args); }, "
     + "connect() { throw new Error('no database in this test'); } };\nexport const db = {};\n",
   logger: "export const logger = { error() {}, warn() {}, info() {}, debug() {} };\nexport default logger;\n",
   storage: "export async function verifyModelArtifact() { throw new Error('no storage in this test'); }\n"

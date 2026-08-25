@@ -35,7 +35,7 @@
     "test:model-math": "node --test tests/model-math.test.ts",
     "test:model-inference-parity": "node --test tests/model-inference-parity.test.ts",
     "test:round-robin": "node --test tests/round-robin-comparison.test.ts",
-    "test:unit": "node --test tests/test-suite-coverage.test.ts tests/ai-untrusted-content.test.ts tests/handedness-integrity.test.ts tests/batter-pitcher-research.test.mjs tests/task-50-operations-recovery.test.mjs tests/model-math.test.ts tests/model-inference-parity.test.ts tests/model-promotion.test.ts tests/tb-engine-metric-resolver.test.ts tests/tb-engine-write-path.test.ts tests/lineup-sources.test.ts tests/settlement-policy.test.ts tests/bullpen-freshness.test.ts tests/park-weather.test.ts tests/analyst-routes.test.ts tests/analyst-query-validation.test.ts tests/round-robin-comparison.test.ts",
+    "test:unit": "node --test tests/test-suite-coverage.test.ts tests/ai-untrusted-content.test.ts tests/handedness-integrity.test.ts tests/batter-pitcher-research.test.mjs tests/task-50-operations-recovery.test.mjs tests/model-math.test.ts tests/model-inference-parity.test.ts tests/model-promotion.test.ts tests/tb-engine-metric-resolver.test.ts tests/tb-engine-write-path.test.ts tests/lineup-sources.test.ts tests/settlement-policy.test.ts tests/bullpen-freshness.test.ts tests/park-weather.test.ts tests/analyst-routes.test.ts tests/analyst-query-validation.test.ts tests/research-health-stability.test.ts tests/round-robin-comparison.test.ts",
     "test:model-promotion": "node --test tests/model-promotion.test.ts",
     "test:tb-engine-metric-resolver": "node --test tests/tb-engine-metric-resolver.test.ts",
     "test:tb-engine-write-path": "node --test tests/tb-engine-write-path.test.ts",

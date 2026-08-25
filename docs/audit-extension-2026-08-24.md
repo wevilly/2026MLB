@@ -34,8 +34,11 @@ it was already atomic.
 The N+1 batching from task 2.6 was applied to tb-engine only, as the plan
 scoped it. **Scheduled:** the same batching for walk, xbh and hr. Each still
 issues one candidate insert plus roughly six evidence-block inserts per
-candidate. Severity MEDIUM, same reasoning as 2.6: a slow refresh close to
-first pitch is a refresh that misses the freeze window.
+candidate. Measured engine durations are approximately 175 to 228 seconds
+each; five engines can therefore consume roughly 15 to 20 minutes against a
+freeze cutoff only 90 minutes before first pitch. Severity **HIGH operational
+risk**, not a performance nicety: a slow refresh can miss the freeze window
+and leave the slate without a timely frozen snapshot.
 
 ### 1.2 Task 2.7, hardcoded lineup source — WAS PRESENT, FIXED
 
@@ -554,7 +557,7 @@ operations as the database grows.
 | S7 | SELECTION: hr-engine and walk-engine split-versus-unsplit divergence | MEDIUM | task 2.5 |
 | S8 | SELECTION: hr-engine park uses the raw unsplit HR factor | MEDIUM | task 4.1 |
 | S9 | Expected plate appearances in walk, xbh and hr engines | MEDIUM | task 4.3 |
-| S10 | N+1 batching for walk, xbh, hr, research-foundation, bettor-intelligence | MEDIUM | tasks 2.6, 5.3 |
+| S10 | N+1 batching for walk, xbh, hr, research-foundation, bettor-intelligence | HIGH operational risk | tasks 2.6, 5.3 |
 | S11 | feature-store: distinguish a null metric from an uncollected one | HIGH | task 1.6 |
 | S12 | `PLATOON_SIDE_UNRESOLVED` disclosure on the candidate | HIGH | new |
 | S13 | feature-store snapshot identity versus provenance, stated | MEDIUM | new |

@@ -1226,6 +1226,18 @@ export async function researchHealth(effectiveDate: string) {
           AND effective_date = (SELECT effective_date FROM effective_day)
         ORDER BY started_at DESC LIMIT 1
       ),
+       -- Health reflects the current attempt for each research source/job,
+       -- not every retry ever made on the slate date. Quarantine evidence
+       -- remains append-only for audit; this scope prevents a safe retry from
+       -- doubling the live warning count.
+       latest_research_runs AS (
+         SELECT DISTINCT ON (ir.source_id, ir.job_name)
+           ir.ingest_run_id, ir.source_id, ir.job_name, ir.status
+         FROM ingest_runs ir
+         WHERE ir.effective_date = (SELECT effective_date FROM effective_day)
+           AND ir.source_id IN ('STATCAST', 'FANGRAPHS', 'PARK_FACTORS')
+         ORDER BY ir.source_id, ir.job_name, ir.started_at DESC, ir.ingest_run_id DESC
+       ),
       park_required_venues AS (
         SELECT DISTINCT venue_id FROM games
         WHERE game_date = (SELECT effective_date FROM effective_day) AND venue_id IS NOT NULL
@@ -1271,7 +1283,8 @@ export async function researchHealth(effectiveDate: string) {
        (SELECT count(DISTINCT player_id)::int FROM pitcher_research_snapshots WHERE effective_to = (SELECT effective_date FROM effective_day)) AS pitcher_profiles,
        (SELECT count(DISTINCT pa.research_snapshot_id)::int FROM pitch_arsenal_features pa JOIN pitcher_research_snapshots ps ON ps.research_snapshot_id = pa.research_snapshot_id WHERE ps.effective_to = (SELECT effective_date FROM effective_day)) AS arsenal_profiles,
        (SELECT count(DISTINCT ps.venue_id)::int FROM park_research_snapshots ps JOIN park_required_venues rv ON rv.venue_id = ps.venue_id WHERE ps.season = EXTRACT(YEAR FROM (SELECT effective_date FROM effective_day))::int) AS park_profiles,
-       (SELECT count(*)::int FROM research_identity_quarantine q JOIN ingest_runs ir ON ir.ingest_run_id = q.ingest_run_id WHERE ir.effective_date = (SELECT effective_date FROM effective_day)) AS identity_quarantines,
+        (SELECT count(*)::int FROM research_identity_quarantine q
+          JOIN latest_research_runs lr ON lr.ingest_run_id = q.ingest_run_id) AS identity_quarantines,
        ((SELECT count(*) FROM player_research_features f JOIN player_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id WHERE s.effective_to = (SELECT effective_date FROM effective_day) AND f.sample_status = 'INSUFFICIENT_SAMPLE') + (SELECT count(*) FROM pitcher_research_features f JOIN pitcher_research_snapshots s ON s.research_snapshot_id = f.research_snapshot_id WHERE s.effective_to = (SELECT effective_date FROM effective_day) AND f.sample_status = 'INSUFFICIENT_SAMPLE'))::int AS insufficient_samples,
        (SELECT count(*)::int FROM pitcher_research_snapshots ps WHERE ps.effective_to = (SELECT effective_date FROM effective_day) AND NOT EXISTS (SELECT 1 FROM pitch_arsenal_features pa WHERE pa.research_snapshot_id = ps.research_snapshot_id)) AS missing_arsenal,
       (
@@ -1291,8 +1304,10 @@ export async function researchHealth(effectiveDate: string) {
            WHERE s.player_id = p.player_id AND s.source_id = 'STATCAST' AND s.research_window = 'SEASON' AND s.effective_to = (SELECT effective_date FROM effective_day) AND s.ingest_run_id IN (SELECT ingest_run_id FROM current_successful_split_runs) AND f.batter_side = 'R' AND f.transformation = 'DERIVED_FROM_STATCAST'
         ))
       )::int AS missing_handedness_splits,
-      (SELECT count(*)::int FROM ingest_issues WHERE issue_type = 'METRIC_DEFINITION_CONFLICT' AND resolved_at IS NULL) AS metric_definition_conflicts,
-       (SELECT count(*)::int FROM ingest_runs WHERE source_id IN ('STATCAST', 'FANGRAPHS', 'PARK_FACTORS') AND effective_date = (SELECT effective_date FROM effective_day) AND status <> 'SUCCESS') AS stale_windows,
+       (SELECT count(*)::int FROM ingest_issues ii
+          JOIN latest_research_runs lr ON lr.ingest_run_id = ii.ingest_run_id
+          WHERE ii.issue_type = 'METRIC_DEFINITION_CONFLICT' AND ii.resolved_at IS NULL) AS metric_definition_conflicts,
+        (SELECT count(*)::int FROM latest_research_runs WHERE status <> 'SUCCESS') AS stale_windows,
       (SELECT count(*)::int FROM eligible_hitters) AS eligible_hitter_profiles,
       (SELECT count(*)::int FROM eligible_pitchers) AS eligible_pitcher_profiles,
        (SELECT count(*)::int FROM eligible_hitters h WHERE NOT EXISTS (SELECT 1 FROM player_research_snapshots s WHERE s.player_id = h.player_id AND s.effective_to = (SELECT effective_date FROM effective_day))) AS hitter_profiles_missing_evidence,

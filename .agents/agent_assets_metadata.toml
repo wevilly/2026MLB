@@ -140,3 +140,17 @@ mtime_ms = 1787619364672
 storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/7950497c-e316-4326-931a-d046ac8a20ed/fa7eed7d-338e-44cf-a142-ce99a47e41fc"
 storage_version_token = "1787619384679550"
 content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+[[outputs]]
+id = "aivBTRGedpFS3QYt34vcX"
+uri = "file://reports/2026-08-25-fantasypros-unresolved-identities.csv"
+type = "table"
+title = "FantasyPros unresolved identities — Aug 25"
+description = "127 distinct FantasyPros external player IDs retained for review; no identities were resolved."
+logical_id = "8336e860-6dda-4a93-9916-8ee67591c265"
+content_hash = "sha256:328459cb7d6ba44cbeae9334c43c2ee4fd7eb5d7739d501a844f0ddda32fe3a0"
+size = 8891
+mtime_ms = 1787663445714
+storage_uri = "gcs://replit-rams-assets-riker/rams/assets/repl:b9c6430e-d211-4b56-9adf-ff447f8d48ff/8336e860-6dda-4a93-9916-8ee67591c265/ea22d1de-c648-431e-8402-96191cd38e46"
+storage_version_token = "1787663451630888"
+content_type = "text/csv"
