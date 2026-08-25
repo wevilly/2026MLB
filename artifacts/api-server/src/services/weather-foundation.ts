@@ -19,6 +19,7 @@ import { pool } from "@workspace/db";
 import { logger } from "../lib/logger";
 
 export const WEATHER_SOURCE = "OPEN_METEO";
+const WEATHER_SOURCE_TYPE = "WEATHER";
 const WEATHER_BASE = "https://api.open-meteo.com/v1/forecast";
 const MLB_VENUE_BASE = "https://statsapi.mlb.com/api/v1/venues";
 
@@ -225,7 +226,7 @@ export function weatherAdjustment(market: WeatherMarket, weather: GameWeather | 
 async function ensureWeatherSource(): Promise<void> {
   await pool.query(
     `INSERT INTO source_registry (source_id, name, source_type, base_url, expected_freshness_minutes, notes)
-     VALUES ($1, 'Open-Meteo Forecast', 'DERIVED', $2, 180,
+     VALUES ($1, 'Open-Meteo Forecast', '${WEATHER_SOURCE_TYPE}', $2, 180,
              'Per-game forecast. Forecast data changes; observations are append-only.')
      ON CONFLICT (source_id) DO UPDATE SET
        name = EXCLUDED.name, base_url = EXCLUDED.base_url,

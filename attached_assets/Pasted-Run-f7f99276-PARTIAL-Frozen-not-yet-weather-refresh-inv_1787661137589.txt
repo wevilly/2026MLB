@@ -1,0 +1,58 @@
+Run f7f99276 PARTIAL
+Frozen: not yet · weather_refresh: invalid input value for enum source_type: "DERIVED"
+
+fantasypros ingest
+SUCCESS
+{"source":"FantasyPros","ingestRunId":"3ab87733-4c59-4f0f-a6b2-b262d974d8fb","rowCount":891,"normalizedRowCount":891,"rejectedRowCount":127}
+
+fantasypros baseline
+SUCCESS
+{"slateDate":"2026-08-25","gamesProcessed":15,"candidatesWritten":1044,"skippedMissingProjectionFields":261,"notes":["FantasyPros baseline rankings are available before optional Statcast, park, and bullpen enrichment.","H+R+RBI is emitted only when FantasyPros provides hits, runs, and RBI projection fields."]}
+
+research refresh
+WARNING
+{"status":"PARTIAL","sources":[{"source":"Baseball Savant / Statcast","ingestRunId":"386cbc5d-ab54-4b95-b29c-242b91e54d51","rowCount":1415,"normalizedRowCount":1415,"rejectedRowCount":0,"status":"PARTIAL","error":null},{"source":"FanGraphs","ingestRunId":"d8942cbf-80e8-4f2a-8a8f-800e670b9844","rowCount":300,"normalizedRowCount":300,"rejectedRowCount":0,"status":"FAILED","error":"FanGraphs hitter split 1 request returned HTTP 500"},{"source":"Baseball Savant / Statcast Search splits","ingestRu...
+
+bullpen refresh
+WARNING
+{"status":"SUCCESS","gamesProcessed":40,"appearancesNormalized":262,"appearancesRejected":0,"teamsComputed":30,"expectedGames":50,"failures":[]}
+
+weather refresh
+FAILED
+invalid input value for enum source_type: "DERIVED"
+
+tb engine
+WARNING
+{"market":"TB","slateDate":"2026-08-25","gamesProcessed":15,"candidatesProcessed":261,"candidatesWritten":261,"blockedCandidates":18,"strongCandidates":100,"positiveCandidates":66,"neutralCandidates":50,"negativeCandidates":27,"processingMs":91699,"notes":["Wrote 261 candidate(s) and 2014 evidence block(s) in one transaction."],"error":null}
+
+xbh engine
+WARNING
+{"market":"XBH","slateDate":"2026-08-25","gamesProcessed":15,"candidatesProcessed":261,"candidatesWritten":261,"blockedCandidates":18,"strongCandidates":14,"positiveCandidates":70,"neutralCandidates":112,"negativeCandidates":47,"processingMs":193899,"notes":[],"error":null}
+
+walk engine
+WARNING
+{"market":"WALK","slateDate":"2026-08-25","gamesProcessed":15,"candidatesProcessed":261,"candidatesWritten":261,"blockedCandidates":18,"strongCandidates":32,"positiveCandidates":85,"neutralCandidates":104,"negativeCandidates":22,"processingMs":212399,"notes":[],"error":null}
+
+hr engine
+WARNING
+{"market":"HR","slateDate":"2026-08-25","gamesProcessed":15,"candidatesProcessed":261,"candidatesWritten":261,"blockedCandidates":18,"strongCandidates":22,"positiveCandidates":97,"neutralCandidates":111,"negativeCandidates":13,"processingMs":228375,"notes":[],"error":null}
+
+hrrbi engine
+WARNING
+{"market":"H_R_RBI","slateDate":"2026-08-25","candidatesWritten":261,"notes":["H+R+RBI ordinal evidence is sourced from current season contact and lineup opportunity context; recent streaks are not used."]}
+
+market board
+WARNING
+{"slateDate":"2026-08-25","market":null,"candidatesFound":972,"modeledRows":0,"researchOnlyRows":972,"boardRowsOrphaned":0,"candidatesMissingBoardRow":0} | produced 0 with 15 scheduled game(s) on this slate
+
+model training
+WARNING
+{"markets":[{"market":"TB","training":"ERROR","error":"No official settled training rows are available for TB."},{"market":"XBH","training":"ERROR","error":"No official settled training rows are available for XBH."},{"market":"WALK","training":"ERROR","error":"No official settled training rows are available for WALK."},{"market":"HR","training":"ERROR","error":"No official settled training rows are available for HR."}],"promoted":false,"note":"Promotion is operator-initiated and is never perf...
+
+health check
+WARNING
+1717 research or identity health warning(s)
+
+feature snapshot freeze
+CANCELLED
+Freeze blocked by health gate

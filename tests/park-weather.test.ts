@@ -217,6 +217,13 @@ describe("Task 4.2 a dome is neutral, not missing", () => {
     assert.ok(source.includes('if (roofType === "DOME")'), "a dome must be handled explicitly");
     assert.ok(source.includes("weatherNeutral: true"), "a dome must be recorded as neutral");
   });
+
+  test("the weather provider is registered with the database weather source type", () => {
+    const source = readFileSync("artifacts/api-server/src/services/weather-foundation.ts", "utf8");
+    assert.ok(source.includes('const WEATHER_SOURCE_TYPE = "WEATHER"'), "the source type must match the source_registry enum");
+    assert.ok(source.includes("'${WEATHER_SOURCE_TYPE}'"), "weather registration must use the declared weather source type");
+    assert.ok(!source.includes("'DERIVED'"), "DERIVED is not a valid source_registry source type");
+  });
 });
 
 describe("Task 4.2 coefficients differ by market and extremes are flags", () => {
