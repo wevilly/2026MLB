@@ -836,6 +836,81 @@ export const RefreshFullUniverseStatcastSplitsResponse = zod.object({
 
 
 /**
+ * This background-safe operation writes immutable game-context and player-event
+ * records from already retained canonical-ID source observations, then derives
+ * denominator-aware hitter profile features. It never runs in the daily slate
+ * critical path and does not claim coverage for games the configured sources
+ * have not retained.
+ * @summary Materialize bounded historical player intelligence from retained source events
+ */
+export const refreshHistoricalIntelligenceQueryLimitDefault = 1000;
+export const refreshHistoricalIntelligenceQueryLimitMax = 5000;
+
+
+
+export const RefreshHistoricalIntelligenceQueryParams = zod.object({
+  "from": zod.date().optional(),
+  "to": zod.date().optional(),
+  "limit": zod.coerce.number().int().min(1).max(refreshHistoricalIntelligenceQueryLimitMax).default(refreshHistoricalIntelligenceQueryLimitDefault),
+  "cursor": zod.coerce.string().optional().describe('Opaque cursor from a prior partial materialization response.')
+})
+
+export const refreshHistoricalIntelligenceResponseSourceRowsMin = 0;
+
+export const refreshHistoricalIntelligenceResponseContextsWrittenMin = 0;
+
+export const refreshHistoricalIntelligenceResponseObservationsWrittenMin = 0;
+
+export const refreshHistoricalIntelligenceResponseFeaturesWrittenMin = 0;
+
+
+
+export const RefreshHistoricalIntelligenceResponse = zod.object({
+  "runId": zod.string().uuid(),
+  "status": zod.enum(['READY', 'PARTIAL', 'NOT_FOUND', 'BLOCKED']),
+  "requestedFrom": zod.coerce.date(),
+  "requestedTo": zod.coerce.date(),
+  "nextCursor": zod.string().nullable(),
+  "sourceRows": zod.number().int().min(refreshHistoricalIntelligenceResponseSourceRowsMin),
+  "contextsWritten": zod.number().int().min(refreshHistoricalIntelligenceResponseContextsWrittenMin),
+  "observationsWritten": zod.number().int().min(refreshHistoricalIntelligenceResponseObservationsWrittenMin),
+  "featuresWritten": zod.number().int().min(refreshHistoricalIntelligenceResponseFeaturesWrittenMin),
+  "notes": zod.array(zod.string())
+}).describe('Bounded background materialization status. Coverage is limited to retained canonical-ID source events.')
+
+
+/**
+ * @summary Get retained historical player-intelligence coverage
+ */
+
+
+
+export const GetHistoricalIntelligenceCoverageQueryParams = zod.object({
+  "playerId": zod.coerce.number().int().min(1).optional()
+})
+
+export const getHistoricalIntelligenceCoverageResponseEventCountMin = 0;
+
+export const getHistoricalIntelligenceCoverageResponseContextCountMin = 0;
+
+export const getHistoricalIntelligenceCoverageResponseDerivedFeatureCountMin = 0;
+
+
+
+export const GetHistoricalIntelligenceCoverageResponse = zod.object({
+  "status": zod.enum(['READY', 'PARTIAL', 'NOT_FOUND', 'BLOCKED']),
+  "playerId": zod.number().int().nullable(),
+  "firstObservationDate": zod.coerce.date().nullable(),
+  "latestObservationDate": zod.coerce.date().nullable(),
+  "eventCount": zod.number().int().min(getHistoricalIntelligenceCoverageResponseEventCountMin),
+  "contextCount": zod.number().int().min(getHistoricalIntelligenceCoverageResponseContextCountMin),
+  "derivedFeatureCount": zod.number().int().min(getHistoricalIntelligenceCoverageResponseDerivedFeatureCountMin),
+  "latestDerivedAt": zod.coerce.date().nullable(),
+  "notes": zod.array(zod.string())
+})
+
+
+/**
  * Returns the market research candidate board for one or all markets on the given date.
  * The board is populated by the Phase 3A–3D market engines; it is empty until at least
  * one engine has completed a research pass.

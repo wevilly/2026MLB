@@ -12,3 +12,4 @@
 - [FantasyPros baseline enrichment](fantasypros-baseline-enrichment.md) — retain projected baseline rank and provenance when optional research adds its own ordinal evidence.
 - [Post-merge database hook](post-merge-database-hook.md) — a non-TTY Drizzle conflict can leave the post-merge schema hook partially applied and failed.
 - [FantasyPros weather lineage](fantasypros-weather-lineage.md) — projected-lineup payloads include per-game weather; retain it as the preferred pregame weather source.
+- [Historical profile revision lineage](historical-profile-revision-lineage.md) — context corrections must flow into observation and feature lineage; cursor backfills remain partial until consumed.

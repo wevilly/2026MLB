@@ -344,6 +344,66 @@ export interface ResearchIngestSource {
   error: string | null;
 }
 
+export type HistoricalIntelligenceRefreshStatus = typeof HistoricalIntelligenceRefreshStatus[keyof typeof HistoricalIntelligenceRefreshStatus];
+
+
+export const HistoricalIntelligenceRefreshStatus = {
+  READY: 'READY',
+  PARTIAL: 'PARTIAL',
+  NOT_FOUND: 'NOT_FOUND',
+  BLOCKED: 'BLOCKED',
+} as const;
+
+/**
+ * Bounded background materialization status. Coverage is limited to retained canonical-ID source events.
+ */
+export interface HistoricalIntelligenceRefresh {
+  runId: string;
+  status: HistoricalIntelligenceRefreshStatus;
+  requestedFrom: string;
+  requestedTo: string;
+  /** @nullable */
+  nextCursor: string | null;
+  /** @minimum 0 */
+  sourceRows: number;
+  /** @minimum 0 */
+  contextsWritten: number;
+  /** @minimum 0 */
+  observationsWritten: number;
+  /** @minimum 0 */
+  featuresWritten: number;
+  notes: string[];
+}
+
+export type HistoricalIntelligenceCoverageStatus = typeof HistoricalIntelligenceCoverageStatus[keyof typeof HistoricalIntelligenceCoverageStatus];
+
+
+export const HistoricalIntelligenceCoverageStatus = {
+  READY: 'READY',
+  PARTIAL: 'PARTIAL',
+  NOT_FOUND: 'NOT_FOUND',
+  BLOCKED: 'BLOCKED',
+} as const;
+
+export interface HistoricalIntelligenceCoverage {
+  status: HistoricalIntelligenceCoverageStatus;
+  /** @nullable */
+  playerId: number | null;
+  /** @nullable */
+  firstObservationDate: string | null;
+  /** @nullable */
+  latestObservationDate: string | null;
+  /** @minimum 0 */
+  eventCount: number;
+  /** @minimum 0 */
+  contextCount: number;
+  /** @minimum 0 */
+  derivedFeatureCount: number;
+  /** @nullable */
+  latestDerivedAt: string | null;
+  notes: string[];
+}
+
 export type ResearchMetricTransformation = typeof ResearchMetricTransformation[keyof typeof ResearchMetricTransformation];
 
 
@@ -3001,6 +3061,27 @@ date?: string;
 
 export type RefreshFullUniverseStatcastSplitsParams = {
 date?: string;
+};
+
+export type RefreshHistoricalIntelligenceParams = {
+from?: string;
+to?: string;
+/**
+ * @minimum 1
+ * @maximum 5000
+ */
+limit?: number;
+/**
+ * Opaque cursor from a prior partial materialization response.
+ */
+cursor?: string;
+};
+
+export type GetHistoricalIntelligenceCoverageParams = {
+/**
+ * @minimum 1
+ */
+playerId?: number;
 };
 
 export type GetAnalystMarketResearchParams = {

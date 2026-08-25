@@ -1070,7 +1070,17 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
     };
   }
   const selectedEligibility = await canonicalPlayer(selectedId, effectiveDate, role);
-  if (!selectedEligibility) {
+  const historicalProfile = await pool.query<{ available: boolean }>(
+    `SELECT EXISTS(
+      SELECT 1 FROM player_intelligence_features
+      WHERE player_id = $1
+        AND dimensions->>'participantRole' = $2
+        AND effective_to <= $3
+    ) AS available`,
+    [selectedId, role, effectiveDate],
+  );
+  const historicalOnly = !selectedEligibility && historicalProfile.rows[0]?.available;
+  if (!selectedEligibility && !historicalOnly) {
     return {
       sourceStatus: "PLAYER NOT ELIGIBLE FOR THIS LAB",
       searchResults,
@@ -1126,6 +1136,34 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
       retrievedAt: isoValue(row.retrieved_at),
     } satisfies MetricRow,
   }));
+  const intelligence = await pool.query<{
+    metric_key: string; metric_label: string; value: string | null; numerator: string | null; denominator: string | null;
+    denominator_type: string; sample_size: number; sample_status: MetricRow["status"]; effective_from: string; effective_to: string; created_at: string;
+  }>(
+    `SELECT DISTINCT ON (f.metric_key, f.dimensions)
+       f.metric_key, f.metric_label, f.value, f.numerator, f.denominator, f.denominator_type, f.sample_size,
+       f.sample_status, f.effective_from::text, f.effective_to::text, f.created_at
+     FROM player_intelligence_features f
+     WHERE f.player_id = $1 AND f.research_window = $2 AND f.effective_to <= $3
+       AND f.dimensions->>'participantRole' = $4
+       AND f.dimensions->>'opponentSide' = 'ALL'
+       AND f.dimensions->>'dayNight' = 'ALL'
+     ORDER BY f.metric_key, f.dimensions, f.effective_to DESC, f.created_at DESC`,
+    [selectedId, researchWindow, effectiveDate, role],
+  );
+  const intelligenceMetrics: MetricRow[] = intelligence.rows.map((row) => ({
+    key: row.metric_key,
+    label: row.metric_label,
+    value: row.value === null ? null : Number(row.value),
+    unit: row.denominator_type === "PA" || row.denominator_type === "BF" || row.denominator_type === "AB" ? "rate" : row.denominator_type,
+    denominator: row.denominator === null ? null : Number(row.denominator),
+    sampleSize: row.sample_size,
+    source: "Baseball Savant / Statcast retained history",
+    definition: "Reproducible historical intelligence derived from retained canonical-ID event observations. The denominator and sample size remain attached.",
+    transformation: "DERIVED_FROM_STATCAST",
+    status: row.sample_status,
+    retrievedAt: isoValue(row.created_at),
+  }));
   const catalog = role === "HITTER" ? hitterCatalog : pitcherCatalog;
   const familyOrder = [...new Set(catalog.map(([family]) => family))];
   const panels = familyOrder.map((family) => {
@@ -1153,18 +1191,25 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
   })) : [];
   const person = identity.rows[0];
   return {
-    sourceStatus: snapshotRows.rows.length ? "RESEARCH EVIDENCE AVAILABLE" : "INSUFFICIENT SOURCE COVERAGE",
+     sourceStatus: snapshotRows.rows.length || intelligenceMetrics.length ? "RESEARCH EVIDENCE AVAILABLE" : "INSUFFICIENT SOURCE COVERAGE",
     searchResults,
     searchResultLimit: LAB_SEARCH_RESULT_LIMIT,
     searchResultsTruncated,
     profile: person ? {
       identity: { playerId: person.player_id, name: person.full_name, team: person.abbreviation ?? "NOT FOUND", bats: person.bats ?? "NOT FOUND", throws: person.throws ?? "NOT FOUND", position: person.primary_position ?? "NOT FOUND", rosterState: person.status ?? "UNKNOWN" },
       window: researchWindow,
-      effectiveFrom: snapshotRows.rows[0] ? isoValue(snapshotRows.rows[0].effective_from) : effectiveDate,
-      effectiveTo: snapshotRows.rows[0] ? isoValue(snapshotRows.rows[0].effective_to) : effectiveDate,
-      freshness: snapshotRows.rows[0] ? isoValue(snapshotRows.rows[0].retrieved_at) : "NOT FOUND",
-      role: snapshotRows.rows[0]?.role ?? (role === "HITTER" ? "HITTER" : "UNKNOWN"),
-       panels: [...panels, ...splitPanels],
+       effectiveFrom: snapshotRows.rows[0] ? isoValue(snapshotRows.rows[0].effective_from) : intelligence.rows[0]?.effective_from ?? effectiveDate,
+       effectiveTo: snapshotRows.rows[0] ? isoValue(snapshotRows.rows[0].effective_to) : intelligence.rows[0]?.effective_to ?? effectiveDate,
+       freshness: snapshotRows.rows[0] ? isoValue(snapshotRows.rows[0].retrieved_at) : intelligence.rows[0] ? isoValue(intelligence.rows[0].created_at) : "NOT FOUND",
+       role: snapshotRows.rows[0]?.role ?? (role === "HITTER" ? "HITTER" : "PITCHER"),
+        panels: [
+          ...panels,
+          ...splitPanels,
+          ...(intelligenceMetrics.length ? [{
+            title: "Persistent historical intelligence · descriptive",
+            metrics: intelligenceMetrics,
+          }] : []),
+        ],
       arsenal,
       notes: [
         "Every research value keeps source, definition, date range, retrieval time, denominator, sample size, and transformation status.",
@@ -1172,9 +1217,11 @@ async function labProfile(role: ResearchRole, playerId: number | null, search: s
          role === "PITCHER"
            ? "Starter and reliever samples are labeled by source role; mixed-role source rows are never relabeled as starter-only. Vs-LHB/RHB panels use explicit batter-side evidence."
            : "Vs-LHP/RHP panels use explicit opposing-pitcher split evidence; the hitter's own batting hand is not used as a substitute.",
+          ...(intelligenceMetrics.length ? ["Persistent historical intelligence is sourced from immutable canonical-ID observations; it is descriptive evidence, not a universal player score or prediction."] : []),
+          ...(historicalOnly ? ["This is a historical-only profile: the player is not currently eligible for today’s operational research, so this evidence is not silently promoted into today’s slate."] : []),
       ],
     } : null,
-    notices: snapshotRows.rows.length ? [] : ["NO MLB SAMPLE / SOURCE COVERAGE for this player and window. The operational shell is retained; the view intentionally does not fall back to another window."],
+    notices: snapshotRows.rows.length || intelligenceMetrics.length ? [] : ["NO MLB SAMPLE / SOURCE COVERAGE for this player and window. The operational shell is retained; the view intentionally does not fall back to another window."],
   };
 }
 

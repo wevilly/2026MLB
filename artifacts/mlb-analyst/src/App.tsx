@@ -1,8 +1,8 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { getGetAnalystPitcherLabQueryKey, getGetAnalystPlayerLabQueryKey, useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore, useGetAnalystDailyMarketBoard, useGetAnalystDailyBoardGameSummary, useRefreshAnalystDailyMarketBoard, useGetAnalystBettorEvaluation, useChatWithAnalystAi, useGetAnalystAiDrafts, useCreateAnalystAiDraft, useApproveAnalystAiDraft, useRejectAnalystAiDraft, useGetAnalystAiSourcingRegister, useDecideAnalystAiSourcingClaim, useGetAnalystAiResearchNotes } from '@workspace/api-client-react';
-import type { AnalystSettings, BackfillFeatureStoreParams, BullpenArm, BullpenRoom, BullpenTeam, CaptureFeatureStoreSlateParams, DataHealth, FeatureStoreCaptureResult, FeatureStoreResult, HealthIssue, HREngineResult, MarketResearchCandidate, PregameFeatureSnapshot, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile, DailyMarketBoard, DailyBoardGameSummary, BettorEvaluation, BettorEvaluationPickMarket, WeatherRefreshResult } from '@workspace/api-client-react';
+import { getGetAnalystPitcherLabQueryKey, getGetAnalystPlayerLabQueryKey, getGetHistoricalIntelligenceCoverageQueryKey, useGetAnalystDataHealth, useGetAnalystMarketResearch, useGetAnalystProjections, useGetAnalystSettings, useGetAnalystToday, useRefreshFantasyPros, useRefreshMlbOfficial, useGetAnalystPlayerLab, useGetAnalystPitcherLab, useGetAnalystGameLab, useRefreshAnalystResearch, useGetAnalystBullpenRoom, useRefreshBullpen, useRefreshMarketResearchTB, useRefreshMarketResearchXBH, useRefreshMarketResearchWALK, useRefreshMarketResearchHR, useCaptureFeatureStoreSlate, useBackfillFeatureStore, useGetAnalystFeatureStore, useGetAnalystDailyMarketBoard, useGetAnalystDailyBoardGameSummary, useRefreshAnalystDailyMarketBoard, useGetAnalystBettorEvaluation, useChatWithAnalystAi, useGetAnalystAiDrafts, useCreateAnalystAiDraft, useApproveAnalystAiDraft, useRejectAnalystAiDraft, useGetAnalystAiSourcingRegister, useDecideAnalystAiSourcingClaim, useGetAnalystAiResearchNotes, useGetHistoricalIntelligenceCoverage } from '@workspace/api-client-react';
+import type { AnalystSettings, BackfillFeatureStoreParams, BullpenArm, BullpenRoom, BullpenTeam, CaptureFeatureStoreSlateParams, DataHealth, FeatureStoreCaptureResult, FeatureStoreResult, HealthIssue, HREngineResult, MarketResearchCandidate, PregameFeatureSnapshot, ProjectionCenter, ProjectionRow, SlateGame, SourceBadge, TBEngineResult, XBHEngineResult, WALKEngineResult, TodayDashboard, ResearchMetric, ResearchSearchResult, ResearchProfile, DailyMarketBoard, DailyBoardGameSummary, BettorEvaluation, BettorEvaluationPickMarket, WeatherRefreshResult, HistoricalIntelligenceCoverage } from '@workspace/api-client-react';
 import { Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BookOpen, CalendarDays, Check, ChevronRight, Cloud, Database, Gauge, GitBranch, Home, LineChart, LockKeyhole, Menu, RefreshCw, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Table2, Target, X, Search, ArrowRight, Send, FilePlus, ThumbsDown, ThumbsUp, ExternalLink, ClipboardList, Download, Play, Square } from 'lucide-react';
 import { Link, Route, Switch, useLocation, useSearch, Router as WouterRouter } from 'wouter';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -612,7 +612,8 @@ function FuturePage({ label }: { label: string }) {
 }
 
 
-function LabSearchPanel({ searchInput, setSearchInput, onSearch, results, onSelect, selectedId, hasSearch, isLoading, truncated, resultLimit, placeholder = "Search entities..." }: { searchInput: string, setSearchInput: (s: string) => void, onSearch: (e: React.FormEvent) => void, results?: ResearchSearchResult[], onSelect: (id: number) => void, selectedId?: number, hasSearch: boolean, isLoading: boolean, truncated?: boolean, resultLimit?: number, placeholder?: string }) {
+function LabSearchPanel({ searchInput, setSearchInput, onSearch, onDirectId, results, onSelect, selectedId, hasSearch, isLoading, truncated, resultLimit, placeholder = "Search entities..." }: { searchInput: string, setSearchInput: (s: string) => void, onSearch: (e: React.FormEvent) => void, onDirectId: (value: string) => void, results?: ResearchSearchResult[], onSelect: (id: number) => void, selectedId?: number, hasSearch: boolean, isLoading: boolean, truncated?: boolean, resultLimit?: number, placeholder?: string }) {
+  const [directId, setDirectId] = useState('');
   return (
     <Panel className="lab-sidebar">
       <SectionHeading eyebrow="Entity resolution" title="Directory" />
@@ -621,6 +622,11 @@ function LabSearchPanel({ searchInput, setSearchInput, onSearch, results, onSele
           <input type="search" className="search-input" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={placeholder} data-testid="input-lab-search" />
           <button type="submit" className="button button-dark" data-testid="button-lab-search"><Search size={14} /></button>
         </form>
+        <form onSubmit={(event) => { event.preventDefault(); onDirectId(directId); }} className="search-box mt-2">
+          <input type="text" inputMode="numeric" className="search-input" value={directId} onChange={(e) => setDirectId(e.target.value)} placeholder="Historical profile ID" aria-label="Historical canonical player ID" data-testid="input-lab-historical-id" />
+          <button type="submit" className="button button-quiet" data-testid="button-lab-historical-id">Open</button>
+        </form>
+        <p className="mt-2 text-muted-foreground text-[10px] font-mono">Optional canonical ID opens retained historical evidence. It does not add a player to today&apos;s slate.</p>
         {results && results.length > 0 && (
           <div className="search-results">
             {results.map((r) => (
@@ -669,6 +675,31 @@ function MetricCard({ metric }: { metric: ResearchMetric }) {
   );
 }
 
+function IntelligenceBrief({ coverage }: {
+  coverage?: HistoricalIntelligenceCoverage;
+}) {
+  const tone = toneFor(coverage?.status);
+  return (
+    <div className="intelligence-brief" data-testid="historical-intelligence-brief">
+      <div>
+        <Kicker>Permanent player intelligence</Kicker>
+        <strong>Retained historical evidence</strong>
+        <p>
+          {coverage?.status === 'READY'
+            ? `${coverage.eventCount.toLocaleString()} source event(s), ${coverage.contextCount.toLocaleString()} shared game context record(s), and ${coverage.derivedFeatureCount.toLocaleString()} derived feature(s).`
+            : coverage?.status === 'PARTIAL'
+              ? 'Source events exist, but profile coverage is still partial. Thin or missing history remains visible.'
+              : 'No retained historical events are available for this player yet. This is not treated as a zero statistic.'}
+        </p>
+      </div>
+      <div className="intelligence-brief-meta">
+        <Badge tone={tone}>{coverage?.status ?? 'NOT FOUND'}</Badge>
+        {coverage?.firstObservationDate && <span>{coverage.firstObservationDate} to {coverage.latestObservationDate}</span>}
+      </div>
+      <small>Background-only and bounded. The permanent all-player worker owns source loading; this profile view never alters today&apos;s slate.</small>
+    </div>
+  );
+}
 function LabProfile({ profile, window, onWindowChange, windows }: { profile: ResearchProfile, window: string, onWindowChange: (w: string) => void, windows: string[] }) {
   return (
     <Panel className="flex-1 overflow-hidden">
@@ -788,6 +819,14 @@ function useLabUrlState() {
       next.delete('search');
     });
   };
+  const handleDirectId = (value: string) => {
+    updateUrl((next) => {
+      const id = value.trim();
+      if (id) next.set('playerId', id);
+      else next.delete('playerId');
+      next.delete('search');
+    });
+  };
 
   const handleWindowChange = (w: string) => {
     updateUrl((next) => next.set('window', w));
@@ -798,7 +837,7 @@ function useLabUrlState() {
       else next.delete('date');
     });
   };
-  return { playerId, search, windowParam, dateParam, searchInput, setSearchInput, invalidParameter, queryEnabled: !invalidParameter, handleSearch, handleSelect, handleWindowChange, handleDateChange };
+  return { playerId, search, windowParam, dateParam, searchInput, setSearchInput, invalidParameter, queryEnabled: !invalidParameter, handleSearch, handleDirectId, handleSelect, handleWindowChange, handleDateChange };
 }
 
 function LabStateNotice({ title, detail, status, notices = [], tone = 'neutral', retry }: { title: string; detail: string; status?: string; notices?: string[]; tone?: Tone; retry?: () => void }) {
@@ -834,6 +873,10 @@ function PlayerLabPage() {
     { query: { enabled: state.queryEnabled, queryKey: getGetAnalystPlayerLabQueryKey(labParams) } },
   );
   const data = query.data;
+  const historical = useGetHistoricalIntelligenceCoverage(
+    { playerId: state.playerId ?? undefined },
+    { query: { enabled: Boolean(state.playerId), queryKey: getGetHistoricalIntelligenceCoverageQueryKey({ playerId: state.playerId ?? undefined }) } },
+  );
   const refresh = useRefreshAnalystResearch({
     mutation: {
       onSuccess: () => {
@@ -864,6 +907,7 @@ function PlayerLabPage() {
           searchInput={state.searchInput}
           setSearchInput={state.setSearchInput}
           onSearch={state.handleSearch}
+          onDirectId={state.handleDirectId}
           results={data?.searchResults} 
           onSelect={state.handleSelect}
           selectedId={state.playerId}
@@ -886,7 +930,7 @@ function PlayerLabPage() {
             window={state.windowParam}
             onWindowChange={state.handleWindowChange}
             windows={[...LAB_WINDOWS]}
-          /><LabStateNotice title="Source and eligibility context" detail="This profile shows only source-backed evidence available for the requested as-of date and research window." status={data.sourceStatus} notices={data.notices} tone={toneFor(data.sourceStatus)} /></div>
+          /><IntelligenceBrief coverage={historical.data} /><LabStateNotice title="Source and eligibility context" detail="This profile shows only source-backed evidence available for the requested as-of date and research window." status={data.sourceStatus} notices={data.notices} tone={toneFor(data.sourceStatus)} /></div>
         ) : (
           <div className="flex-1">
             <LabStateNotice title={data?.sourceStatus === 'SEARCH REQUIRED' ? 'Start with a player name' : 'No profile is available'} detail={data?.notices[0] ?? 'Use the directory to search a player.'} status={data?.sourceStatus} notices={data?.notices.slice(1)} tone={toneFor(data?.sourceStatus)} />
@@ -905,6 +949,10 @@ function PitcherLabPage() {
     { query: { enabled: state.queryEnabled, queryKey: getGetAnalystPitcherLabQueryKey(labParams) } },
   );
   const data = query.data;
+  const historical = useGetHistoricalIntelligenceCoverage(
+    { playerId: state.playerId ?? undefined },
+    { query: { enabled: Boolean(state.playerId), queryKey: getGetHistoricalIntelligenceCoverageQueryKey({ playerId: state.playerId ?? undefined }) } },
+  );
   const refresh = useRefreshAnalystResearch({
     mutation: {
       onSuccess: () => {
@@ -935,6 +983,7 @@ function PitcherLabPage() {
           searchInput={state.searchInput}
           setSearchInput={state.setSearchInput}
           onSearch={state.handleSearch}
+          onDirectId={state.handleDirectId}
           results={data?.searchResults} 
           onSelect={state.handleSelect}
           selectedId={state.playerId}
@@ -957,7 +1006,7 @@ function PitcherLabPage() {
             window={state.windowParam}
             onWindowChange={state.handleWindowChange}
             windows={[...LAB_WINDOWS]}
-          /><LabStateNotice title="Source and eligibility context" detail="This profile shows only source-backed evidence available for the requested as-of date and research window." status={data.sourceStatus} notices={data.notices} tone={toneFor(data.sourceStatus)} /></div>
+          /><IntelligenceBrief coverage={historical.data} /><LabStateNotice title="Source and eligibility context" detail="This profile shows only source-backed evidence available for the requested as-of date and research window." status={data.sourceStatus} notices={data.notices} tone={toneFor(data.sourceStatus)} /></div>
         ) : (
           <div className="flex-1">
             <LabStateNotice title={data?.sourceStatus === 'SEARCH REQUIRED' ? 'Start with a pitcher name' : 'No profile is available'} detail={data?.notices[0] ?? 'Use the directory to search a pitcher.'} status={data?.sourceStatus} notices={data?.notices.slice(1)} tone={toneFor(data?.sourceStatus)} />

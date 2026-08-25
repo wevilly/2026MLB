@@ -5,6 +5,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { startOrchestrationScheduler } from "./services/orchestration";
+import { startHistoricalIntelligenceBackfillWorker } from "./services/historical-intelligence";
 import { invalidateCache } from "./services/cache";
 import { AnalystRequestValidationError } from "./routes/analyst/shared";
 
@@ -109,5 +110,6 @@ app.use((error: unknown, req: express.Request, res: express.Response, _next: exp
 });
 
 startOrchestrationScheduler();
+startHistoricalIntelligenceBackfillWorker();
 
 export default app;

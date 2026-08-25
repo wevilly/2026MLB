@@ -32,6 +32,7 @@ import {
   GetAnalystTodayResponse,
   CorrectFeatureStoreSnapshotBody,
   RefreshAnalystResearchResponse,
+  RefreshHistoricalIntelligenceResponse,
   GetAnalystBatterPitcherResponse,
   RefreshAnalystBatterPitcherResponse,
   GetAnalystRoundRobinComparisonResponse,
@@ -92,6 +93,10 @@ import {
 import { pool } from "@workspace/db";
 import { ingestFantasyPros, ingestMlbOfficial } from "../../services/data-foundation";
 import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFallback, researchHealth } from "../../services/research-foundation";
+import {
+  HistoricalIntelligenceValidationError,
+  materializeHistoricalIntelligence,
+} from "../../services/historical-intelligence";
 import { getBatterPitcherEvidence, refreshBatterPitcherSlate, type BvpMarket } from "../../services/batter-pitcher-research";
 import { compareRoundRobinGame, type RoundRobinBoardId, type RoundRobinCandidate } from "../../services/round-robin-comparison";
 import { LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter } from "../../services/lineup-sources";
@@ -221,6 +226,28 @@ router.post("/analyst/refresh/research/splits-full", async (req, res, next) => {
   try {
     res.status(202).json(await ingestStatcastHandednessFallback(requestedDate(req.query.date), "FULL_UNIVERSE", 24));
   } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/analyst/refresh/historical-intelligence", async (req, res, next) => {
+  try {
+    const from = typeof req.query.from === "string" ? req.query.from : "2024-03-01";
+    const to = typeof req.query.to === "string" ? req.query.to : currentEasternDate();
+    const rawLimit = typeof req.query.limit === "string" ? Number(req.query.limit) : 1000;
+    const cursor = typeof req.query.cursor === "string" ? req.query.cursor : undefined;
+    const result = await materializeHistoricalIntelligence({ from, to, limit: rawLimit, cursor });
+    invalidateCache("player-lab:");
+    invalidateCache("pitcher-lab:");
+    // Validate the contract without serializing Zod's date coercions as
+    // midnight timestamps. These fields are date-only operational bounds.
+    RefreshHistoricalIntelligenceResponse.parse(result);
+    res.status(202).json(result);
+  } catch (error) {
+    if (error instanceof HistoricalIntelligenceValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
     next(error);
   }
 });

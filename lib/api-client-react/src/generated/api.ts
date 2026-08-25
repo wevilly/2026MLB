@@ -97,8 +97,11 @@ import type {
   GetAnalystRoundRobinComparisonParams,
   GetAnalystSettlementsParams,
   GetAnalystTodayParams,
+  GetHistoricalIntelligenceCoverageParams,
   HREngineResult,
   HealthStatus,
+  HistoricalIntelligenceCoverage,
+  HistoricalIntelligenceRefresh,
   HistoricalOutcomeInput,
   IngestOfficialSettlements400,
   IngestOfficialSettlementsParams,
@@ -125,6 +128,7 @@ import type {
   RefreshBullpenParams,
   RefreshFantasyProsParams,
   RefreshFullUniverseStatcastSplitsParams,
+  RefreshHistoricalIntelligenceParams,
   RefreshMarketResearchHRParams,
   RefreshMarketResearchTBParams,
   RefreshMarketResearchWALKParams,
@@ -2035,6 +2039,173 @@ export const useRefreshFullUniverseStatcastSplits = <TError = ErrorType<unknown>
       > => {
       return useMutation(getRefreshFullUniverseStatcastSplitsMutationOptions(options));
     }
+
+export const getRefreshHistoricalIntelligenceUrl = (params?: RefreshHistoricalIntelligenceParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/refresh/historical-intelligence?${stringifiedParams}` : `/api/analyst/refresh/historical-intelligence`
+}
+
+/**
+ * This background-safe operation writes immutable game-context and player-event
+ * records from already retained canonical-ID source observations, then derives
+ * denominator-aware hitter profile features. It never runs in the daily slate
+ * critical path and does not claim coverage for games the configured sources
+ * have not retained.
+ * @summary Materialize bounded historical player intelligence from retained source events
+ */
+export const refreshHistoricalIntelligence = async (params?: RefreshHistoricalIntelligenceParams, options?: Parameters<typeof customFetch>[1]): Promise<HistoricalIntelligenceRefresh> => {
+
+  return customFetch<HistoricalIntelligenceRefresh>(getRefreshHistoricalIntelligenceUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefreshHistoricalIntelligenceMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshHistoricalIntelligence>>, TError,{params?: RefreshHistoricalIntelligenceParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refreshHistoricalIntelligence>>, TError,{params?: RefreshHistoricalIntelligenceParams}, TContext> => {
+
+const mutationKey = ['refreshHistoricalIntelligence'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refreshHistoricalIntelligence>>, {params?: RefreshHistoricalIntelligenceParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  refreshHistoricalIntelligence(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefreshHistoricalIntelligenceMutationResult = NonNullable<Awaited<ReturnType<typeof refreshHistoricalIntelligence>>>
+
+    export type RefreshHistoricalIntelligenceMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Materialize bounded historical player intelligence from retained source events
+ */
+export const useRefreshHistoricalIntelligence = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refreshHistoricalIntelligence>>, TError,{params?: RefreshHistoricalIntelligenceParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refreshHistoricalIntelligence>>,
+        TError,
+        {params?: RefreshHistoricalIntelligenceParams},
+        TContext
+      > => {
+      return useMutation(getRefreshHistoricalIntelligenceMutationOptions(options));
+    }
+
+export const getGetHistoricalIntelligenceCoverageUrl = (params?: GetHistoricalIntelligenceCoverageParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/analyst/historical-intelligence/coverage?${stringifiedParams}` : `/api/analyst/historical-intelligence/coverage`
+}
+
+/**
+ * @summary Get retained historical player-intelligence coverage
+ */
+export const getHistoricalIntelligenceCoverage = async (params?: GetHistoricalIntelligenceCoverageParams, options?: Parameters<typeof customFetch>[1]): Promise<HistoricalIntelligenceCoverage> => {
+
+  return customFetch<HistoricalIntelligenceCoverage>(getGetHistoricalIntelligenceCoverageUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetHistoricalIntelligenceCoverageQueryKey = (params?: GetHistoricalIntelligenceCoverageParams,) => {
+    return [
+    `/api/analyst/historical-intelligence/coverage`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetHistoricalIntelligenceCoverageQueryOptions = <TData = Awaited<ReturnType<typeof getHistoricalIntelligenceCoverage>>, TError = ErrorType<unknown>>(params?: GetHistoricalIntelligenceCoverageParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHistoricalIntelligenceCoverage>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetHistoricalIntelligenceCoverageQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getHistoricalIntelligenceCoverage>>> = ({ signal }) => getHistoricalIntelligenceCoverage(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getHistoricalIntelligenceCoverage>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetHistoricalIntelligenceCoverageQueryResult = NonNullable<Awaited<ReturnType<typeof getHistoricalIntelligenceCoverage>>>
+export type GetHistoricalIntelligenceCoverageQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get retained historical player-intelligence coverage
+ */
+
+export function useGetHistoricalIntelligenceCoverage<TData = Awaited<ReturnType<typeof getHistoricalIntelligenceCoverage>>, TError = ErrorType<unknown>>(
+ params?: GetHistoricalIntelligenceCoverageParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getHistoricalIntelligenceCoverage>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetHistoricalIntelligenceCoverageQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
 
 export const getGetAnalystMarketResearchUrl = (params?: GetAnalystMarketResearchParams,) => {
   const normalizedParams = new URLSearchParams();

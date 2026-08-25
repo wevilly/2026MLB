@@ -461,6 +461,64 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResearchIngestSource"
+  /analyst/refresh/historical-intelligence:
+    post:
+      operationId: refreshHistoricalIntelligence
+      tags: [analyst]
+      summary: Materialize bounded historical player intelligence from retained source events
+      description: |
+        This background-safe operation writes immutable game-context and player-event
+        records from already retained canonical-ID source observations, then derives
+        denominator-aware hitter profile features. It never runs in the daily slate
+        critical path and does not claim coverage for games the configured sources
+        have not retained.
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 5000, default: 1000 }
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque cursor from a prior partial materialization response.
+          schema: { type: string }
+      responses:
+        "202":
+          description: One bounded historical-intelligence materialization completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoricalIntelligenceRefresh"
+        "400":
+          description: Invalid historical materialization request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+  /analyst/historical-intelligence/coverage:
+    get:
+      operationId: getHistoricalIntelligenceCoverage
+      tags: [analyst]
+      summary: Get retained historical player-intelligence coverage
+      parameters:
+        - name: playerId
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Retained event, context, and derived profile coverage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistoricalIntelligenceCoverage"
   /analyst/market-research:
     get:
       operationId: getAnalystMarketResearch
@@ -1906,6 +1964,34 @@ components:
         status: { type: string, enum: [SUCCESS, PARTIAL, FAILED] }
         error: { type: ["string", "null"] }
       required: [source, ingestRunId, rowCount, normalizedRowCount, rejectedRowCount, status, error]
+    HistoricalIntelligenceRefresh:
+      type: object
+      description: Bounded background materialization status. Coverage is limited to retained canonical-ID source events.
+      properties:
+        runId: { type: string, format: uuid }
+        status: { type: string, enum: [READY, PARTIAL, NOT_FOUND, BLOCKED] }
+        requestedFrom: { type: string, format: date }
+        requestedTo: { type: string, format: date }
+        nextCursor: { type: ["string", "null"] }
+        sourceRows: { type: integer, minimum: 0 }
+        contextsWritten: { type: integer, minimum: 0 }
+        observationsWritten: { type: integer, minimum: 0 }
+        featuresWritten: { type: integer, minimum: 0 }
+        notes: { type: array, items: { type: string } }
+      required: [runId, status, requestedFrom, requestedTo, nextCursor, sourceRows, contextsWritten, observationsWritten, featuresWritten, notes]
+    HistoricalIntelligenceCoverage:
+      type: object
+      properties:
+        status: { type: string, enum: [READY, PARTIAL, NOT_FOUND, BLOCKED] }
+        playerId: { type: ["integer", "null"] }
+        firstObservationDate: { type: ["string", "null"], format: date }
+        latestObservationDate: { type: ["string", "null"], format: date }
+        eventCount: { type: integer, minimum: 0 }
+        contextCount: { type: integer, minimum: 0 }
+        derivedFeatureCount: { type: integer, minimum: 0 }
+        latestDerivedAt: { type: ["string", "null"], format: date-time }
+        notes: { type: array, items: { type: string } }
+      required: [status, playerId, firstObservationDate, latestObservationDate, eventCount, contextCount, derivedFeatureCount, latestDerivedAt, notes]
     ResearchHealth:
       type: object
       properties:

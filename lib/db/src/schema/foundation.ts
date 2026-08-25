@@ -865,6 +865,164 @@ export const batterPitcherEvents = pgTable("batter_pitcher_events", {
   pairDateIdx: index("batter_pitcher_pair_date_idx").on(table.batterId, table.pitcherId, table.gameDate),
 }));
 
+// ─── Permanent historical player intelligence ────────────────────────────────
+//
+// These records deliberately sit beside, rather than replace, the named-pair
+// research tables above. Batter-versus-pitcher history is a bounded secondary
+// evidence view. The intelligence tables retain source facts and shared game
+// context so profile calculations can be reproduced without turning a current
+// slate refresh into a historical rebuild.
+
+export const historicalIntelligenceRuns = pgTable("historical_intelligence_runs", {
+  intelligenceRunId: uuid("intelligence_run_id").primaryKey().defaultRandom(),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  requestedFrom: date("requested_from").notNull(),
+  requestedTo: date("requested_to").notNull(),
+  cursorDate: date("cursor_date"),
+  status: ingestStatusEnum("status").notNull().default("RUNNING"),
+  sourceRows: integer("source_rows").notNull().default(0),
+  normalizedRows: integer("normalized_rows").notNull().default(0),
+  rejectedRows: integer("rejected_rows").notNull().default(0),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  errorMessage: text("error_message"),
+  metadata: jsonb("metadata").notNull().default({}),
+}, (table) => ({
+  historicalIntelligenceRunStatusIdx: index("historical_intelligence_run_status_idx")
+    .on(table.status, table.startedAt),
+}));
+
+/**
+ * Append-only source-range receipt for one canonical player and role. Event
+ * existence is never evidence that a requested season/range was fully loaded.
+ */
+export const historicalSourceCoverage = pgTable("historical_source_coverage", {
+  coverageId: uuid("coverage_id").primaryKey().defaultRandom(),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  playerId: integer("player_id").notNull().references(() => players.playerId),
+  participantRole: text("participant_role").notNull(),
+  requestedFrom: date("requested_from").notNull(),
+  requestedTo: date("requested_to").notNull(),
+  ingestRunId: uuid("ingest_run_id").references(() => ingestRuns.ingestRunId),
+  status: ingestStatusEnum("status").notNull(),
+  sourceRows: integer("source_rows").notNull().default(0),
+  normalizedRows: integer("normalized_rows").notNull().default(0),
+  rejectedRows: integer("rejected_rows").notNull().default(0),
+  errorMessage: text("error_message"),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull().defaultNow(),
+  metadata: jsonb("metadata").notNull().default({}),
+}, (table) => ({
+  historicalSourceCoverageLookupIdx: index("historical_source_coverage_lookup_idx")
+    .on(table.sourceId, table.playerId, table.participantRole, table.requestedFrom, table.requestedTo, table.status),
+}));
+
+/**
+ * Shared point-in-time game facts. The facts are create-only because a
+ * corrected schedule, roof state, or actual first pitch must be represented as
+ * a new source observation, not as a rewrite of a prior pregame interpretation.
+ */
+export const historicalGameContexts = pgTable("historical_game_contexts", {
+  contextId: uuid("context_id").primaryKey().defaultRandom(),
+  gamePk: bigint("game_pk", { mode: "number" }),
+  gameDate: date("game_date").notNull(),
+  venueId: integer("venue_id").references(() => venues.venueId),
+  localScheduledStart: timestamp("local_scheduled_start", { withTimezone: true }),
+  localTimezone: text("local_timezone"),
+  actualStartUtc: timestamp("actual_start_utc", { withTimezone: true }),
+  dayNight: text("day_night").notNull().default("NOT_FOUND"),
+  doubleheaderGameNumber: integer("doubleheader_game_number"),
+  roofState: text("roof_state"),
+  temperatureF: numeric("temperature_f"),
+  humidityPercent: numeric("humidity_percent"),
+  windSpeedMph: numeric("wind_speed_mph"),
+  windDirectionDegrees: integer("wind_direction_degrees"),
+  windOutComponentMph: numeric("wind_out_component_mph"),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  rawPayloadId: uuid("raw_payload_id").references(() => rawPayloads.rawPayloadId),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+  effectiveAt: timestamp("effective_at", { withTimezone: true }),
+  contentChecksum: text("content_checksum").notNull(),
+  raw: jsonb("raw").notNull().default({}),
+}, (table) => ({
+  historicalGameContextRevisionIdx: uniqueIndex("historical_game_context_revision_idx")
+    .on(table.sourceId, table.gamePk, table.contentChecksum),
+  historicalGameContextDateIdx: index("historical_game_context_date_idx")
+    .on(table.gameDate, table.gamePk),
+}));
+
+/**
+ * Normalized source events for profile materialization. One source revision is
+ * retained per key and checksum. A correction is another row, allowing frozen
+ * analysis to keep the revision it used.
+ */
+export const historicalPlayerObservations = pgTable("historical_player_observations", {
+  observationId: uuid("observation_id").primaryKey().defaultRandom(),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  sourceEventKey: text("source_event_key").notNull(),
+  sourcePlayerId: text("source_player_id").notNull(),
+  playerId: integer("player_id").notNull().references(() => players.playerId),
+  opponentPlayerId: integer("opponent_player_id").references(() => players.playerId),
+  contextId: uuid("context_id").references(() => historicalGameContexts.contextId),
+  rawPayloadId: uuid("raw_payload_id").references(() => rawPayloads.rawPayloadId),
+  observationDate: date("observation_date").notNull(),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull().defaultNow(),
+  eventType: text("event_type"),
+  pitchType: text("pitch_type"),
+  batterSide: text("batter_side"),
+  pitcherSide: text("pitcher_side"),
+  isTerminalPlateAppearance: boolean("is_terminal_plate_appearance").notNull().default(false),
+  releaseSpeed: numeric("release_speed"),
+  horizontalMovement: numeric("horizontal_movement"),
+  verticalMovement: numeric("vertical_movement"),
+  launchSpeed: numeric("launch_speed"),
+  launchAngle: numeric("launch_angle"),
+  estimatedBa: numeric("estimated_ba"),
+  estimatedSlg: numeric("estimated_slg"),
+  contentChecksum: text("content_checksum").notNull(),
+  transformationVersion: text("transformation_version").notNull(),
+  raw: jsonb("raw").notNull().default({}),
+}, (table) => ({
+  historicalObservationRevisionIdx: uniqueIndex("historical_player_observation_revision_idx")
+    .on(table.sourceId, table.sourceEventKey, table.sourcePlayerId, table.contentChecksum),
+  historicalObservationPlayerDateIdx: index("historical_observation_player_date_idx")
+    .on(table.playerId, table.observationDate),
+  historicalObservationContextIdx: index("historical_observation_context_idx")
+    .on(table.contextId),
+}));
+
+/**
+ * Reproducible profile output. Dimensions make split meaning explicit instead
+ * of encoding it in a metric name, and source inputs remain queryable.
+ */
+export const playerIntelligenceFeatures = pgTable("player_intelligence_features", {
+  intelligenceFeatureId: uuid("intelligence_feature_id").primaryKey().defaultRandom(),
+  playerId: integer("player_id").notNull().references(() => players.playerId),
+  intelligenceRunId: uuid("intelligence_run_id").references(() => historicalIntelligenceRuns.intelligenceRunId),
+  sourceId: text("source_id").notNull().references(() => sourceRegistry.sourceId),
+  researchWindow: researchWindowEnum("research_window").notNull(),
+  effectiveFrom: date("effective_from").notNull(),
+  effectiveTo: date("effective_to").notNull(),
+  dimensions: jsonb("dimensions").notNull().default({}),
+  metricKey: text("metric_key").notNull(),
+  metricLabel: text("metric_label").notNull(),
+  value: numeric("value"),
+  numerator: numeric("numerator"),
+  denominator: numeric("denominator"),
+  denominatorType: text("denominator_type").notNull(),
+  sampleSize: integer("sample_size").notNull().default(0),
+  sampleStatus: researchSampleStatusEnum("sample_status").notNull().default("NOT_FOUND"),
+  transformationVersion: text("transformation_version").notNull(),
+  sourceInputCount: integer("source_input_count").notNull().default(0),
+  sourceInputChecksum: text("source_input_checksum").notNull(),
+  provenance: jsonb("provenance").notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  playerIntelligenceFeatureLookupIdx: index("player_intelligence_feature_lookup_idx")
+    .on(table.playerId, table.researchWindow, table.effectiveTo, table.metricKey),
+  playerIntelligenceFeatureRevisionIdx: uniqueIndex("player_intelligence_feature_revision_idx")
+    .on(table.playerId, table.researchWindow, table.effectiveFrom, table.effectiveTo, table.metricKey, table.transformationVersion, table.dimensions, table.sourceInputChecksum),
+}));
+
 export const batterPitcherSnapshots = pgTable("batter_pitcher_snapshots", {
   snapshotId: uuid("snapshot_id").primaryKey().defaultRandom(),
   batterId: integer("batter_id").notNull().references(() => players.playerId),

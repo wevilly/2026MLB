@@ -24,6 +24,7 @@ GET     /analyst/export/slate-json
 GET     /analyst/export/workbook
 GET     /analyst/feature-store
 GET     /analyst/game-lab
+GET     /analyst/historical-intelligence/coverage
 GET     /analyst/market-board
 GET     /analyst/market-board/game-summary
 GET     /analyst/market-research
@@ -66,6 +67,7 @@ POST    /analyst/postmortems
 POST    /analyst/refresh/batter-pitcher
 POST    /analyst/refresh/bullpen
 POST    /analyst/refresh/fantasypros
+POST    /analyst/refresh/historical-intelligence
 POST    /analyst/refresh/market-research/hr
 POST    /analyst/refresh/market-research/tb
 POST    /analyst/refresh/market-research/walk
