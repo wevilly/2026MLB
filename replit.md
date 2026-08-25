@@ -53,6 +53,7 @@ Read this before adding anything.
 - `pnpm run build` — typecheck plus build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — run pre-push migrations, push schema, then reapply immutability policy (dev only)
+- `DATABASE_URL=... node scripts/research/rank-outcome-audit.mjs` - read-only research audit: does the research rank predict the settled outcome, does the Round Robin comparator beat the side it rejected, and how exposed is the walk settlement assumption
 - Required env: `DATABASE_URL`, `PORT`
 
 ## Stack
