@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { closePool } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
 
@@ -15,7 +16,7 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, (err) => {
+const server = app.listen(port, (err) => {
   if (err) {
     logger.error({ err }, "Error listening on port");
     process.exit(1);
@@ -23,3 +24,16 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
 });
+
+// Deliberate restarts terminate database connections; finish in-flight
+// requests, drain the pool, then exit, so an intentional deploy never
+// surfaces as a crash-with-stack in the logs.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, () => {
+    logger.info({ signal }, "shutdown requested; draining");
+    server.close(() => {
+      void closePool().finally(() => process.exit(0));
+    });
+    setTimeout(() => process.exit(1), 10_000).unref();
+  });
+}

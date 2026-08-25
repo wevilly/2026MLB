@@ -55,14 +55,26 @@ test("BvP sample bands and ranking guardrails keep named history subordinate", (
   assert.ok(service.includes("Math.exp(-ageDays / 730)"), "old named history must decay instead of receiving full weight");
 });
 
-test("BvP slate refresh uses FantasyPros pregame lineups even when a newer official lineup exists", () => {
+test("BvP slate refresh is retired and never applies archived Statcast pairs to current ranks", () => {
+  // The live Statcast BvP scrape was retired under the API-backed daily source
+  // contract. The service must say so explicitly rather than quietly reading
+  // archived pair snapshots into current slates, and its lineup policy import
+  // must remain the shared pregame precedence (no official-source SQL inlined).
   const service = read("artifacts/api-server/src/services/batter-pitcher-research.ts");
-  const selector = service.match(/WITH latest_lineup AS \([\s\S]*?\n\s*\), latest_starter/)?.[0] ?? "";
-  assert.ok(selector.includes("ls.source_id = 'FANTASYPROS'"));
-  assert.ok(selector.includes("ls.state IN ('CONFIRMED', 'PROJECTED')"));
-  assert.ok(selector.includes("CASE WHEN ls.state = 'CONFIRMED' THEN 1 ELSE 2 END"));
-  assert.ok(!selector.includes("POSTED"), "official posted lineups must not enter BvP pregame pairs even if newer");
-  assert.ok(!selector.includes("MLB_OFFICIAL"), "BvP pregame lineup selection must not use MLB source rows");
+  assert.ok(service.includes("Live Statcast BvP refresh retired"), "the slate refresh must disclose its retirement");
+  assert.ok(service.includes("archived Statcast evidence is not applied to current daily ranks"),
+    "current evidence reads must not fall back to archived pair snapshots");
+  assert.ok(service.includes("rankAdjustment: 0,"), "a retired BvP source must contribute a zero rank adjustment");
+  assert.ok(service.includes('import { PREGAME_LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter } from "./lineup-sources"'),
+    "lineup selection must flow through the shared pregame policy");
+  assert.ok(!service.includes("MLB_OFFICIAL"), "BvP must not inline MLB official lineup selection");
+  const policy = read("artifacts/api-server/src/services/lineup-sources.ts");
+  const pregame = policy.slice(
+    policy.indexOf("export const PREGAME_LINEUP_SOURCE_PRECEDENCE"),
+    policy.indexOf("export const OFFICIAL_LINEUP_AUDIT_SOURCE"),
+  );
+  assert.ok(pregame.includes('sourceId: "FANTASYPROS"'));
+  assert.ok(!pregame.includes("MLB_OFFICIAL"), "official posted lineups must not enter pregame selection even if newer");
 });
 
 test("market engines and Round Robin expose BvP only as bounded research context", () => {

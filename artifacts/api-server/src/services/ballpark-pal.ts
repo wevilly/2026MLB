@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { pool } from "@workspace/db";
+import { resolveProviderPlayer } from "./player-identity";
 
 /**
  * Daily-only Ballpark Pal adapter.
@@ -21,6 +22,7 @@ type ProviderGame = {
   venueId: number | null;
   awayTeamId: number | null;
   homeTeamId: number | null;
+  startTimeUtc: string | null;
   gamePk: number | null;
 };
 
@@ -61,11 +63,18 @@ function responseRows(payload: Json, key?: string) {
 function safeGame(row: Json): ProviderGame | null {
   const gameId = number(row.gameId);
   if (!gameId) return null;
+  // The provider's stated first-pitch time, wherever it exposes one. It is
+  // only used to disambiguate same-team doubleheaders against the official
+  // schedule; absent, both halves stay unmapped rather than guessed.
+  const rawStart = row.gameTime ?? row.startTime ?? row.gameDateTime;
   return {
     gameId,
     venueId: number(row.venueId),
     awayTeamId: number(row.teamAwayId),
     homeTeamId: number(row.teamHomeId),
+    startTimeUtc: typeof rawStart === "string" && !Number.isNaN(Date.parse(rawStart))
+      ? new Date(rawStart).toISOString()
+      : null,
     gamePk: null,
   };
 }
@@ -133,13 +142,13 @@ async function storeRaw(ingestRunId: string, effectiveDate: string, payloadType:
   return result.rows[0].raw_payload_id;
 }
 
-async function existingPlayer(playerId: number) {
-  const result = await pool.query(`SELECT 1 FROM players WHERE player_id = $1`, [playerId]);
-  return Boolean(result.rowCount);
-}
-
 async function persistHitter(ingestRunId: string, rawPayloadId: string, effectiveDate: string, gamePk: number, row: ReturnType<typeof permittedBatters>[number]) {
-  if (row.playerId === null || !await existingPlayer(row.playerId)) return false;
+  // The provider ID is not assumed to be an MLBAM ID: the resolution ladder
+  // maps it (alias, direct, or unique name+game match) or quarantines it into
+  // identity_review_queue, so a rejected row is always visible somewhere.
+  if (row.playerId === null) return false;
+  const identity = await resolveProviderPlayer("BALLPARK_PAL", row.playerId, row.playerName, gamePk, effectiveDate);
+  if (identity.outcome !== "RESOLVED") return false;
   const pa = row.plateAppearances;
   const ab = row.atBats;
   const xbh = [row.doubles, row.triples, row.homeRuns].every((value) => value !== null)
@@ -162,8 +171,9 @@ async function persistHitter(ingestRunId: string, rawPayloadId: string, effectiv
     `INSERT INTO player_research_snapshots
      (player_id,source_id,ingest_run_id,raw_payload_id,research_window,effective_from,effective_to,sample_size,denominator_type,denominator,content_checksum,provenance)
      VALUES ($1,$2,$3,$4,'SEASON',$5,$5,$6,'PROJECTED_PA',$7,$8,$9) RETURNING research_snapshot_id`,
-    [row.playerId, SOURCE_ID, ingestRunId, rawPayloadId, effectiveDate, pa === null ? null : Math.round(pa), pa, checksum, {
+    [identity.playerId, SOURCE_ID, ingestRunId, rawPayloadId, effectiveDate, pa === null ? null : Math.round(pa), pa, checksum, {
       provider: "Ballpark Pal API v1", effectiveDate, gamePk, coverage: "DAILY_ONLY",
+      providerPlayerId: row.playerId, identityMethod: identity.method,
       unavailableMetrics: ["xBA", "xSLG", "xwOBA", "exit velocity", "barrel rate", "pitch mix", "historical splits"],
     }],
   );
@@ -180,7 +190,9 @@ async function persistHitter(ingestRunId: string, rawPayloadId: string, effectiv
 }
 
 async function persistPitcher(ingestRunId: string, rawPayloadId: string, effectiveDate: string, gamePk: number, row: ReturnType<typeof permittedPitchers>[number]) {
-  if (row.playerId === null || !await existingPlayer(row.playerId)) return false;
+  if (row.playerId === null) return false;
+  const identity = await resolveProviderPlayer("BALLPARK_PAL", row.playerId, row.playerName, gamePk, effectiveDate);
+  if (identity.outcome !== "RESOLVED") return false;
   const bf = row.battersFaced;
   const metrics: Array<[string, string, string, number | null, string, string]> = [
     ["workload", "bf", "Projected batters faced", bf, "BF", "Ballpark Pal daily simulated average batters faced."],
@@ -192,8 +204,9 @@ async function persistPitcher(ingestRunId: string, rawPayloadId: string, effecti
     `INSERT INTO pitcher_research_snapshots
      (player_id,source_id,ingest_run_id,raw_payload_id,research_window,role,effective_from,effective_to,sample_size,denominator_type,denominator,content_checksum,provenance)
      VALUES ($1,$2,$3,$4,'SEASON',$5,$6,$6,$7,'PROJECTED_BF',$8,$9,$10) RETURNING research_snapshot_id`,
-    [row.playerId, SOURCE_ID, ingestRunId, rawPayloadId, row.isStarter ? "STARTER" : "MIXED", effectiveDate, bf === null ? null : Math.round(bf), bf, checksum, {
+    [identity.playerId, SOURCE_ID, ingestRunId, rawPayloadId, row.isStarter ? "STARTER" : "MIXED", effectiveDate, bf === null ? null : Math.round(bf), bf, checksum, {
       provider: "Ballpark Pal API v1", effectiveDate, gamePk, coverage: "DAILY_ONLY",
+      providerPlayerId: row.playerId, identityMethod: identity.method,
       unavailableMetrics: ["xSLG allowed", "xwOBA allowed", "barrel rate", "pitch arsenal", "historical splits"],
     }],
   );
@@ -315,20 +328,39 @@ export async function ingestBallparkPalResearch(effectiveDate: string) {
     const gamesResponse = await request(`/games?date=${encodeURIComponent(effectiveDate)}`);
     httpStatus = gamesResponse.status;
     const games = responseRows(gamesResponse.payload).map(safeGame).filter((game): game is ProviderGame => game !== null);
+    const TWO_HOURS = 2 * 60 * 60 * 1000;
+    const ONE_HOUR = 60 * 60 * 1000;
     for (const game of games) {
-      const canonical = await pool.query<{ game_pk: number }>(
-        `SELECT game_pk FROM games
+      const pair = await pool.query<{ game_pk: number; start_time_utc: string | null }>(
+        `SELECT game_pk, start_time_utc::text AS start_time_utc FROM games
          WHERE game_date = $1
            AND ((away_team_id = $2 AND home_team_id = $3) OR (away_team_id = $3 AND home_team_id = $2))
-           AND 1 = (
-             SELECT count(*) FROM games same_pair
-             WHERE same_pair.game_date = $1
-               AND ((same_pair.away_team_id = $2 AND same_pair.home_team_id = $3)
-                 OR (same_pair.away_team_id = $3 AND same_pair.home_team_id = $2))
-           )`,
+         ORDER BY start_time_utc NULLS LAST`,
         [effectiveDate, game.awayTeamId, game.homeTeamId],
       );
-      game.gamePk = canonical.rows[0]?.game_pk ?? null;
+      if (pair.rowCount === 1) {
+        game.gamePk = pair.rows[0].game_pk;
+        continue;
+      }
+      if ((pair.rowCount ?? 0) > 1 && game.startTimeUtc) {
+        // Same-team doubleheader: accept only a clear nearest-start-time
+        // winner against the official schedule; a tie stays unmapped.
+        const providerMs = Date.parse(game.startTimeUtc);
+        const scored = pair.rows
+          .filter((row) => row.start_time_utc)
+          .map((row) => ({ row, distance: Math.abs(Date.parse(row.start_time_utc!) - providerMs) }))
+          .sort((a, b) => a.distance - b.distance);
+        const clearWinner = scored.length > 0
+          && scored[0].distance < TWO_HOURS
+          && (scored.length === 1 || scored[1].distance - scored[0].distance > ONE_HOUR);
+        if (clearWinner) {
+          game.gamePk = scored[0].row.game_pk;
+          continue;
+        }
+      }
+      // Unmapped: the rows for this provider game are rejected and surface in
+      // the coverage receipt as game/park gaps, never assigned by guesswork.
+      game.gamePk = null;
     }
     const gameMap = new Map(games.map((game) => [game.gameId, game]));
     const gamesRaw = await storeRaw(ingestRunId, effectiveDate, "ballpark_pal_games_filtered", `/games?date=${effectiveDate}`, {

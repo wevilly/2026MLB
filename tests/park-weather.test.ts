@@ -315,3 +315,82 @@ describe("Task 4.2 the service follows the task 3.5 rules from day one", () => {
     }
   });
 });
+
+describe("Remediation B-03 the Today response exposes stored weather instead of a constant", () => {
+  const route = readFileSync("artifacts/api-server/src/routes/analyst/research.ts", "utf8");
+
+  test("no game card field is hard-coded to NOT FOUND for weather or roof", () => {
+    assert.ok(!route.includes('roof: "NOT FOUND"'), "roof must come from the stored observation or venue");
+    assert.ok(!route.includes('weather: "NOT FOUND"'), "weather must come from the stored observation");
+  });
+
+  test("the Today and Game Lab routes read the slate's preferred observations", () => {
+    assert.ok(route.includes("getSlateWeather(date)"), "the routes must query stored observations");
+    assert.ok(route.includes("formatWeatherSummary("), "the routes must format the stored observation");
+    assert.ok(route.includes("formatRoofLabel("), "the routes must derive the roof label");
+    assert.ok(route.includes("slateWeather.get(Number(game.game_pk))"),
+      "game_pk is a bigint string from pg and must be coerced before the map lookup");
+  });
+
+  test("a game without any stored observation renders a truthful unavailable state", async () => {
+    const { formatWeatherSummary } = await weather;
+    assert.equal(formatWeatherSummary(null), "No stored weather observation");
+  });
+
+  test("a stored FantasyPros observation renders temperature, wind, and source", async () => {
+    const { formatWeatherSummary } = await weather;
+    const summary = formatWeatherSummary({
+      gamePk: 1, venueId: 1, temperatureF: 78, windSpeedMph: 8,
+      windDirectionDegrees: 180, windOutComponentMph: 8, windComponent: "OUT",
+      roofState: "NONE", weatherNeutral: false, environment: "OPEN_AIR",
+      sourceId: "FANTASYPROS", sourceFreshness: null, retrievedAt: null, forecastForUtc: null,
+    });
+    assert.match(summary, /78°F/);
+    assert.match(summary, /wind out 8 mph/);
+    assert.match(summary, /FantasyPros/);
+  });
+
+  test("a dome renders neutral/closed, never missing", async () => {
+    const { formatWeatherSummary, formatRoofLabel } = await weather;
+    const domed = {
+      gamePk: 1, venueId: 1, temperatureF: null, windSpeedMph: null,
+      windDirectionDegrees: null, windOutComponentMph: null, windComponent: "UNKNOWN",
+      roofState: "CLOSED", weatherNeutral: true, environment: "CLOSED_ROOF",
+      sourceId: "OPEN_METEO", sourceFreshness: null, retrievedAt: null, forecastForUtc: null,
+    };
+    assert.match(formatWeatherSummary(domed), /neutral/);
+    assert.ok(!formatWeatherSummary(domed).includes("NOT FOUND"));
+    assert.equal(formatRoofLabel(domed, "DOME"), "Roof closed");
+    assert.equal(formatRoofLabel(null, "DOME"), "Dome");
+    assert.equal(formatRoofLabel(null, null), "Roof unknown");
+  });
+});
+
+describe("Remediation B-09 slate and single-game weather share one source precedence", () => {
+  test("getSlateWeather prefers the FantasyPros pregame observation before recency", async () => {
+    const { getSlateWeather } = await weather;
+    let capturedSql = "";
+    (globalThis as Record<string, unknown>).__workspaceTestPoolQuery = (sql: string) => {
+      capturedSql = sql;
+      return Promise.resolve({ rows: [] });
+    };
+    try {
+      await getSlateWeather("2026-08-25");
+    } finally {
+      delete (globalThis as Record<string, unknown>).__workspaceTestPoolQuery;
+    }
+    assert.ok(capturedSql.includes("DISTINCT ON (game_pk)"), "one preferred observation per game");
+    assert.match(
+      capturedSql,
+      /CASE source_id WHEN 'FANTASYPROS' THEN 0 ELSE 1 END/,
+      "the slate accessor must apply the same FantasyPros-first precedence as getGameWeather",
+    );
+  });
+
+  test("both accessors expose the observation's source for provenance display", () => {
+    const source = readFileSync("artifacts/api-server/src/services/weather-foundation.ts", "utf8");
+    const accessors = source.slice(source.indexOf("export async function getGameWeather"));
+    assert.equal((accessors.match(/sourceId: row\.source_id/g) ?? []).length, 2,
+      "getGameWeather and getSlateWeather must both return the stored source_id");
+  });
+});

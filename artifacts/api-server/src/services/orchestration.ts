@@ -1,6 +1,6 @@
 import { pool } from "@workspace/db";
 import { logger } from "../lib/logger";
-import { ingestFantasyPros, ingestMlbOfficial } from "./data-foundation";
+import { ingestFantasyPros, ingestMlbOfficial, refreshMlbSchedule } from "./data-foundation";
 import { ingestResearch, researchHealth } from "./research-foundation";
 import { refreshBullpen } from "./bullpen-foundation";
 import { refreshWeather } from "./weather-foundation";
@@ -27,6 +27,7 @@ export type RunStep = {
 };
 
 const STEP_NAMES = [
+  "official_schedule_refresh",
   "fantasypros_ingest", "fantasypros_baseline", "research_refresh", "bullpen_refresh",
   "weather_refresh", "slate_matchup_refresh", "tb_engine", "xbh_engine", "walk_engine", "hr_engine", "hrrbi_engine", "market_board",
   "health_check", "feature_snapshot_freeze",
@@ -268,6 +269,11 @@ async function executeRun(runId: string, slateDate: string) {
     : { ...step });
   await persistSteps(runId, steps);
   try {
+    // The official schedule is the canonical game spine: venue geometry, start
+    // times and doubleheader codes must be fresh before the projected slate,
+    // weather, and provider reconciliation read them. Schedule-only: no
+    // lineups or settlement facts are ingested pregame.
+    if (!await runRequiredStep(runId, slateDate, steps, "official_schedule_refresh", () => refreshMlbSchedule(slateDate))) return;
     if (!await runRequiredStep(runId, slateDate, steps, "fantasypros_ingest", () => ingestFantasyPros(slateDate))) return;
     if (!await runRequiredStep(runId, slateDate, steps, "fantasypros_baseline", () => runFantasyProsBaseline(slateDate))) return;
     const postIngestStart = await earliestStart(slateDate);
