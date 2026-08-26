@@ -554,11 +554,13 @@ router.get("/analyst/game-lab", async (req, res, next) => {
       date,
       games: responseGames,
       selectedGame: selected,
-       parkResearch: selected ? { venue: selected.park, span: parkSnapshot.rows.map((snapshot) => snapshot.span).filter((span, index, spans) => spans.indexOf(span) === index).join(", ") || "NOT FOUND", factors: parkFactors } : null,
+       parkResearch: selected ? { venue: selected.park, span: parkSnapshot.rows.map((snapshot) => snapshot.span === "DAILY_GAME_CONTEXT" ? "Daily game context" : snapshot.span).filter((span, index, spans) => spans.indexOf(span) === index).join(", ") || "NOT FOUND", factors: parkFactors } : null,
       notes: [
         "Game Lab exposes research-ready starter, lineup, park, and freshness context only.",
         "Park values are raw Baseball Savant components when available. No Total Bases composite or heuristic is presented.",
-        "No market probability, recommendation, price, odds, EV, or CLV is calculated in Phase 2A.",
+        // The old wording enumerated the prohibited betting vocabulary in
+        // user-facing prose and leaked internal phase jargon ("Phase 2A").
+        "No market probability, recommendation, or pricing signal of any kind is calculated by this view.",
       ],
     }));
   } catch (error) {

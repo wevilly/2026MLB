@@ -1387,6 +1387,24 @@ export async function ingestFantasyPros(requestedDate: string) {
          AND issue_type IN ('IDENTITY_CONFLICT', 'LINEUP_NORMALIZATION_PENDING')`,
       [FANTASY_PROS_SOURCE],
     );
+    // Close review-queue rows whose identity has since been resolved. Nothing
+    // ever transitioned rows out of OPEN, so the queue accumulated every
+    // player ever quarantined — including identities that were mapped years
+    // of slates ago — and read as permanent unresolved review debt.
+    await pool.query(
+      `UPDATE identity_review_queue q SET state = 'RESOLVED', resolved_at = now()
+       WHERE q.state = 'OPEN' AND q.source_id = $1
+         AND (EXISTS (
+                SELECT 1 FROM player_external_ids pei
+                WHERE pei.source_id = q.source_id AND pei.external_player_id = q.external_player_id
+                  AND pei.valid_to IS NULL
+              )
+           OR EXISTS (
+                SELECT 1 FROM player_external_id_aliases a
+                WHERE a.source_id = q.source_id AND a.external_player_id = q.external_player_id
+              ))`,
+      [FANTASY_PROS_SOURCE],
+    );
     if (missingIdentity.size) {
       await recordIssue(
         FANTASY_PROS_SOURCE,

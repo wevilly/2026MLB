@@ -197,7 +197,10 @@ export function formatWeatherSummary(weather: GameWeather | null): string {
       case "IN": parts.push(`wind in ${speed}`); break;
       case "CROSS": parts.push(`crosswind ${speed}`); break;
       case "CALM": parts.push("calm wind"); break;
-      default: parts.push(`wind ${speed}`);
+      // A 17 mph wind matters entirely by direction. When the observation or
+      // the park bearing lacks one, say so instead of printing a bare speed
+      // that reads as if direction were irrelevant.
+      default: parts.push(`wind ${speed} (direction unavailable)`);
     }
   }
   if (!parts.length) return `Observation stored without usable temperature or wind · ${weatherSourceLabel(weather.sourceId)}`;

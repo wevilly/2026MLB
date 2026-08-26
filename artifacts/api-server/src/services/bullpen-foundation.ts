@@ -975,6 +975,7 @@ async function scheduledGamesInWindow(slateDate: string): Promise<number> {
 export async function refreshBullpen(slateDate: string): Promise<{
   status: "SUCCESS" | "PARTIAL" | "FAILED";
   gamesProcessed: number;
+  gamesSkippedNotFinal: number;
   appearancesNormalized: number;
   appearancesRejected: number;
   teamsComputed: number;
@@ -987,6 +988,7 @@ export async function refreshBullpen(slateDate: string): Promise<{
   const runId = await startRun("bullpen_ingest", slateDate);
 
   let gamesProcessed = 0;
+  let gamesSkippedNotFinal = 0;
   let appearancesNormalized = 0;
   let appearancesRejected = 0;
   let runError: string | undefined;
@@ -1005,7 +1007,11 @@ export async function refreshBullpen(slateDate: string): Promise<{
       const date = dateOffset(slateDate, offset);
       const games = await fetchGamesForDate(date, failures);
       for (const game of games) {
-        if (!game.status.toLowerCase().includes("final")) continue;
+        // A game that never went final (postponed, suspended, still live) has
+        // no appearances to ingest. Count the skip: without it, a shortfall
+        // between gamesProcessed and expectedGames was invisible in the
+        // ledger and read as work silently lost.
+        if (!game.status.toLowerCase().includes("final")) { gamesSkippedNotFinal++; continue; }
         const { normalized, rejected } = await persistGameAppearances(
           game.gamePk, date, game.awayTeamId, game.homeTeamId, failures,
         );
@@ -1057,6 +1063,7 @@ export async function refreshBullpen(slateDate: string): Promise<{
     return {
       status,
       gamesProcessed,
+      gamesSkippedNotFinal,
       appearancesNormalized,
       appearancesRejected,
       teamsComputed,
@@ -1075,6 +1082,7 @@ export async function refreshBullpen(slateDate: string): Promise<{
     return {
       status: "FAILED",
       gamesProcessed,
+      gamesSkippedNotFinal,
       appearancesNormalized,
       appearancesRejected,
       teamsComputed: 0,
