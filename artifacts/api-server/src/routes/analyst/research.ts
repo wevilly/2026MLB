@@ -223,11 +223,11 @@ router.get("/analyst/today", async (req, res, next) => {
          LEFT JOIN venues v ON v.venue_id = g.venue_id
          LEFT JOIN LATERAL (
             SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id
-           WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY s.observed_at DESC LIMIT 1
+           WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1
          ) away_start ON true
          LEFT JOIN LATERAL (
             SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id
-           WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY s.observed_at DESC LIMIT 1
+           WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1
          ) home_start ON true
           LEFT JOIN LATERAL (
             SELECT COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'MLB_OFFICIAL' AND state = 'POSTED')::int AS posted_lineup_teams,
@@ -467,8 +467,8 @@ router.get("/analyst/game-lab", async (req, res, next) => {
         COALESCE(lineups.posted_lineup_teams, 0) AS posted_lineup_teams, COALESCE(lineups.projected_lineup_teams, 0) AS projected_lineup_teams
        FROM games g JOIN teams away ON away.team_id = g.away_team_id JOIN teams home ON home.team_id = g.home_team_id
        LEFT JOIN venues v ON v.venue_id = g.venue_id
-       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY s.observed_at DESC LIMIT 1) away_start ON true
-       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY s.observed_at DESC LIMIT 1) home_start ON true
+       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1) away_start ON true
+       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1) home_start ON true
        LEFT JOIN LATERAL (SELECT
          COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'MLB_OFFICIAL' AND state = 'POSTED')::int AS posted_lineup_teams,
          COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'FANTASYPROS' AND state = 'PROJECTED')::int AS projected_lineup_teams

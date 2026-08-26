@@ -587,13 +587,19 @@ async function persistOfficialTeamRoster(
 async function persistOfficialGameFeed(
   ingestRunId: string,
   effectiveDate: string,
+  officialGamePk: number,
+  // The slate's canonical game row (a FantasyPros game ID when the projected
+  // slate established the row). The live feed is fetched by the official MLB
+  // gamePk, but every dependent row — lineups, starters, settlement outcomes —
+  // must be written under the slate key or settlement and training can never
+  // join them back to the board candidates.
   gamePk: number,
   awayTeamId: number,
   homeTeamId: number,
 ) {
-  const response = await fetch(`https://statsapi.mlb.com/api/v1.1/game/${gamePk}/feed/live`);
+  const response = await fetch(`https://statsapi.mlb.com/api/v1.1/game/${officialGamePk}/feed/live`);
   const payload = await response.json() as JsonObject;
-  if (!response.ok) throw new Error(`MLB game feed ${gamePk} returned HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`MLB game feed ${officialGamePk} returned HTTP ${response.status}`);
   await storeRawPayload(ingestRunId, MLB_SOURCE, "game_feed", effectiveDate, payload);
   const boxscoreTeams = asObject(asObject(asObject(payload.liveData).boxscore).teams);
   const gameStatus = String(asObject(asObject(payload.gameData).status).detailedState ?? "");
@@ -1029,32 +1035,90 @@ export async function ingestMlbOfficial(requestedDate: string) {
           [Number(venue.id), String(venue.name ?? "Unknown venue"), venue],
         );
       }
-      await pool.query(
-        `INSERT INTO games (game_pk, game_date, start_time_utc, away_team_id, home_team_id, venue_id, game_status, game_type, doubleheader_code)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (game_pk) DO UPDATE SET
-           start_time_utc = COALESCE(EXCLUDED.start_time_utc, games.start_time_utc),
-           venue_id = COALESCE(EXCLUDED.venue_id, games.venue_id),
-           game_status = EXCLUDED.game_status,
-           game_type = EXCLUDED.game_type, doubleheader_code = EXCLUDED.doubleheader_code, updated_at = now()`,
-        [
-          gamePk,
-          effectiveDate,
-          game.gameDate ? new Date(String(game.gameDate)).toISOString() : null,
-          awayId,
-          homeId,
-          Number.isFinite(Number(venue.id)) ? Number(venue.id) : null,
-          String(asObject(game.status).detailedState ?? "UNKNOWN"),
-          String(game.gameType ?? ""),
-          String(game.doubleHeader ?? ""),
-        ],
+      // The projected slate's game rows use FantasyPros game IDs as game_pk,
+      // so the official gamePk never hits them via ON CONFLICT. Inserting the
+      // official row unconditionally created a parallel game universe postgame:
+      // the FantasyPros rows never reached a terminal status, the official rows
+      // carried the settlement facts, settlementIsComplete counted a doubled
+      // slate that could never settle, and model training found no official
+      // settled rows that joined back to the board candidates. Match each
+      // official game to the slate row by date and unordered team pair — the
+      // same policy as refreshMlbSchedule — and write everything under it.
+      const pairRows = await pool.query<{ game_pk: string }>(
+        `SELECT game_pk::text AS game_pk FROM games
+          WHERE game_date = $1
+            AND ((away_team_id = $2 AND home_team_id = $3) OR (away_team_id = $3 AND home_team_id = $2))
+          ORDER BY game_pk`,
+        [effectiveDate, awayId, homeId],
       );
+      const slateGamePks = pairRows.rows
+        .map((row) => Number(row.game_pk))
+        .filter((slatePk) => slatePk !== gamePk);
+      const officialRowExists = pairRows.rows.some((row) => Number(row.game_pk) === gamePk);
+      let writeGamePk = gamePk;
+      if (slateGamePks.length === 1 && !officialRowExists) {
+        writeGamePk = slateGamePks[0];
+        await pool.query(
+          `UPDATE games SET
+             start_time_utc = COALESCE($2, start_time_utc),
+             venue_id = COALESCE($3, venue_id),
+             game_status = $4,
+             game_type = $5,
+             doubleheader_code = $6,
+             away_team_id = $7,
+             home_team_id = $8,
+             updated_at = now()
+           WHERE game_pk = $1`,
+          [
+            writeGamePk,
+            game.gameDate ? new Date(String(game.gameDate)).toISOString() : null,
+            Number.isFinite(Number(venue.id)) ? Number(venue.id) : null,
+            String(asObject(game.status).detailedState ?? "UNKNOWN"),
+            String(game.gameType ?? ""),
+            String(game.doubleHeader ?? ""),
+            awayId,
+            homeId,
+          ],
+        );
+      } else {
+        if (slateGamePks.length > 1) {
+          // Same-team doubleheader: mapping one official game onto one of two
+          // slate rows would be a guess. Keep the official row and disclose.
+          await recordIssue(
+            MLB_SOURCE,
+            ingestRunId,
+            "DOUBLEHEADER_SETTLEMENT_UNMATCHED",
+            "WARNING",
+            `Official game ${gamePk} matches ${slateGamePks.length} slate rows for the same team pair on ${effectiveDate}; settlement facts stay under the official gamePk.`,
+          );
+        }
+        await pool.query(
+          `INSERT INTO games (game_pk, game_date, start_time_utc, away_team_id, home_team_id, venue_id, game_status, game_type, doubleheader_code)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (game_pk) DO UPDATE SET
+             start_time_utc = COALESCE(EXCLUDED.start_time_utc, games.start_time_utc),
+             venue_id = COALESCE(EXCLUDED.venue_id, games.venue_id),
+             game_status = EXCLUDED.game_status,
+             game_type = EXCLUDED.game_type, doubleheader_code = EXCLUDED.doubleheader_code, updated_at = now()`,
+          [
+            gamePk,
+            effectiveDate,
+            game.gameDate ? new Date(String(game.gameDate)).toISOString() : null,
+            awayId,
+            homeId,
+            Number.isFinite(Number(venue.id)) ? Number(venue.id) : null,
+            String(asObject(game.status).detailedState ?? "UNKNOWN"),
+            String(game.gameType ?? ""),
+            String(game.doubleHeader ?? ""),
+          ],
+        );
+      }
       const awayProbable = asObject(asObject(teams.away).probablePitcher);
       const homeProbable = asObject(asObject(teams.home).probablePitcher);
-      if (Object.keys(awayProbable).length) await upsertStarter(awayProbable, awayId, gamePk, "PROBABLE", awayProbable, effectiveDate);
-      if (Object.keys(homeProbable).length) await upsertStarter(homeProbable, homeId, gamePk, "PROBABLE", homeProbable, effectiveDate);
+      if (Object.keys(awayProbable).length) await upsertStarter(awayProbable, awayId, writeGamePk, "PROBABLE", awayProbable, effectiveDate);
+      if (Object.keys(homeProbable).length) await upsertStarter(homeProbable, homeId, writeGamePk, "PROBABLE", homeProbable, effectiveDate);
       try {
-        normalized += await persistOfficialGameFeed(ingestRunId, effectiveDate, gamePk, awayId, homeId);
+        normalized += await persistOfficialGameFeed(ingestRunId, effectiveDate, gamePk, writeGamePk, awayId, homeId);
       } catch (error) {
         rejected += 1;
         const detail = error instanceof Error ? error.message : "Unknown official game-feed error";

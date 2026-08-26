@@ -31,7 +31,7 @@ test("daily orchestration catches up after startup and claims before execution",
   assert.match(source, /healthStep\.status === "PENDING"/);
   assert.match(source, /recoveredAfterFreeze: true/);
   assert.match(source, /const prerequisites = run\.steps\.filter\(\(step\) => step\.name !== "feature_snapshot_freeze"\)/);
-  assert.match(source, /prerequisites\.some\(\(step\) => step\.status !== "SUCCESS"\)/);
+  assert.match(source, /prerequisites\.some\(\(step\) => step\.status !== "SUCCESS" && step\.status !== "WARNING"\)/);
   assert.doesNotMatch(source, /lastScheduledDate/);
 });
 

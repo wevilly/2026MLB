@@ -166,7 +166,10 @@ export function ReadinessStrip({ health, sources }: { health?: { readiness: Data
       <div className="readiness-meta">
         <span><b>Current</b> {readiness.currentDate}</span>
         <span><b>Observed</b> {new Date(readiness.observedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'America/New_York' })} ET</span>
-        <span><b>Operational</b> {readiness.usable ? 'usable' : 'audit-only'}</span>
+        {/* AUDIT_ONLY specifically means "not the current Eastern slate date".
+            Labelling PARTIAL and BLOCKED as "audit-only" too misstated why
+            outputs were unavailable, so show the real status instead. */}
+        <span><b>Operational</b> {readiness.usable ? 'usable' : readiness.status === 'AUDIT_ONLY' ? 'audit-only' : `not operational (${readiness.status.toLowerCase()})`}</span>
       </div>
       <div className="readiness-sources" aria-label="Source freshness context">
         {contextSources.map((source) => <span key={source.name} className={`readiness-source source-${toneFor(source.status)}`}><b>{source.name}</b> {source.effectiveDate ?? 'no date'} · {source.ageMinutes === null ? 'age —' : `${source.ageMinutes}m`} · {source.isCurrentDate ? 'current' : 'not current'}</span>)}
@@ -378,7 +381,7 @@ function DataHealthPage() {
           <div className="health-summary">
             <Panel className="overall-panel"><div className="health-ring"><Gauge size={25} /><span>{data.overall}</span></div><div><Kicker>{data.selectedDate} / {data.timezone}</Kicker><h2>{data.overall}</h2><p>{data.slateState.replaceAll('_', ' ')} · Last run {data.lastRun}</p></div><div className="health-rule" /></Panel>
             <Metric label="Sources observed" value={data.sources?.length ?? 0} note="In current health run" tone="accent" />
-            <Metric label="Issues requiring review" value={data.issues?.length ?? 0} note={criticalCount ? `${criticalCount} critical` : 'No critical issues'} tone={criticalCount ? 'bad' : data.issues?.length ? 'warn' : 'good'} />
+            <Metric label="Issues requiring review" value={(data.issues?.length ?? 0) >= 50 ? '50+' : data.issues?.length ?? 0} note={(data.issues?.length ?? 0) >= 50 ? 'List capped at 50; totals may be higher' : criticalCount ? `${criticalCount} critical` : 'No critical issues in list'} tone={criticalCount ? 'bad' : data.issues?.length ? 'warn' : 'good'} />
           </div>
           <Panel><SectionHeading eyebrow="Selected-date readiness" title="Operational stage diagnostics" detail="Each stage is evaluated against the selected Eastern slate date." /><div className="issue-list">{data.readinessDiagnostics.map((diagnostic) => <IssueRow key={diagnostic.code} issue={{ label: diagnostic.label, detail: diagnostic.detail, severity: diagnostic.status === 'READY' ? 'INFO' : 'CRITICAL' }} />)}</div></Panel>
           <Panel>
@@ -569,13 +572,22 @@ function OrchestrationPage() {
   </div>;
 }
 
+// Audit rows arrive as raw UTC timestamps with microsecond precision. The
+// operator clock everywhere else in the app is Eastern, so render these in
+// Eastern too and keep the raw value in the title attribute for audit.
+function easternTimestamp(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return `${parsed.toLocaleString('en-CA', { timeZone: 'America/New_York', hour12: false })} ET`;
+}
+
 function AuditTrailPage() {
   const [events, setEvents] = useState<Array<{ auditEventId: string; occurredAt: string; actor: string; action: string; resourceType: string; resourceId: string | null }>>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const load = async () => { setLoading(true); try { setEvents((await operationsRequest<{ events: typeof events }>('/analyst/audit-events?limit=100')).events); setError(null); } catch (e) { setError(e instanceof Error ? e.message : 'Unable to load audit events.'); } finally { setLoading(false); } };
   useEffect(() => { void load(); }, []);
-  return <div className="page-content rise-in" data-testid="page-audit-trail"><div className="page-intro"><div><Kicker>Append-only operator record</Kicker><h1>Audit <span className="slash">//</span> trail</h1><p>Operational runs, settlements, corrections, and review actions retain actor and timestamp context.</p></div><button className="button button-dark" onClick={() => void load()} disabled={loading}><RefreshCw size={15} /> Refresh</button></div>{loading ? <LoadingPanel rows={5} /> : error ? <QueryMessage kind="error" onRetry={() => void load()} /> : events.length === 0 ? <QueryMessage kind="empty" /> : <Panel><div className="table-wrap"><table className="data-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th></tr></thead><tbody>{events.map((event) => <tr key={event.auditEventId}><td className="text-xs">{event.occurredAt}</td><td>{event.actor}</td><td><Badge tone="accent">{event.action}</Badge></td><td className="font-mono text-xs">{event.resourceType}{event.resourceId ? ` / ${event.resourceId.slice(0, 12)}` : ''}</td></tr>)}</tbody></table></div></Panel>}</div>;
+  return <div className="page-content rise-in" data-testid="page-audit-trail"><div className="page-intro"><div><Kicker>Append-only operator record</Kicker><h1>Audit <span className="slash">//</span> trail</h1><p>Operational runs, settlements, corrections, and review actions retain actor and timestamp context.</p></div><button className="button button-dark" onClick={() => void load()} disabled={loading}><RefreshCw size={15} /> Refresh</button></div>{loading ? <LoadingPanel rows={5} /> : error ? <QueryMessage kind="error" onRetry={() => void load()} /> : events.length === 0 ? <QueryMessage kind="empty" /> : <Panel><div className="table-wrap"><table className="data-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th></tr></thead><tbody>{events.map((event) => <tr key={event.auditEventId}><td className="text-xs whitespace-nowrap" title={event.occurredAt}>{easternTimestamp(event.occurredAt)}</td><td>{event.actor}</td><td><Badge tone="accent">{event.action}</Badge></td><td className="font-mono text-xs break-all">{event.resourceType}{event.resourceId ? ` / ${event.resourceId}` : ''}</td></tr>)}</tbody></table></div></Panel>}</div>;
 }
 
 function HealthSource({ source }: { source: SourceBadge }) {

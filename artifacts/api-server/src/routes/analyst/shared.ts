@@ -497,13 +497,34 @@ export async function analystDataHealth(date: string) {
   const [sources, issueResult, lastRun, coverage, research, slate, workflow, bullpen, fantasyProsReferences, weatherRefresh] = await Promise.all([
     sourceBadges(date),
     pool.query<{ issue_type: string; detail: string; severity: string }>(
+      // Identity reviews are scoped to players actually flagged on the
+      // requested slate. The unscoped queue is a historical backlog (players
+      // retired for a decade), and surfacing it here flooded the 50-row page
+      // so blocking issue types sorting after IDENTITY_REVIEW were silently
+      // evicted. Ordering is severity-first for the same reason: the cap must
+      // drop the least important rows, not the alphabetically last ones.
       `SELECT ii.issue_type, ii.detail, ii.severity
        FROM ingest_issues ii JOIN ingest_runs ir ON ir.ingest_run_id = ii.ingest_run_id
        WHERE ii.resolved_at IS NULL AND ir.effective_date = $1
        UNION ALL
-       SELECT 'IDENTITY_REVIEW' AS issue_type, CONCAT(raw_name, ' (FantasyPros ID ', external_player_id, ') requires review') AS detail, 'REVIEW' AS severity
-       FROM identity_review_queue WHERE state = 'OPEN'
-       ORDER BY issue_type LIMIT 50`,
+       SELECT 'IDENTITY_REVIEW' AS issue_type, CONCAT(q.raw_name, ' (FantasyPros ID ', q.external_player_id, ') requires review') AS detail, 'REVIEW' AS severity
+       FROM identity_review_queue q
+       WHERE q.state = 'OPEN'
+         AND EXISTS (
+           SELECT 1 FROM player_eligibility pe
+           WHERE pe.source_id = 'FANTASYPROS'
+             AND pe.external_player_id = q.external_player_id
+             AND pe.effective_date = $1
+             AND pe.requires_identity_review
+         )
+       ORDER BY CASE severity
+           WHEN 'BLOCKING' THEN 0
+           WHEN 'CRITICAL' THEN 1
+           WHEN 'WARNING' THEN 2
+           WHEN 'REVIEW' THEN 3
+           ELSE 4
+         END, issue_type
+       LIMIT 50`,
       [date],
     ),
     pool.query<{ finished_at: string | null }>("SELECT max(finished_at) AS finished_at FROM ingest_runs WHERE effective_date = $1", [date]),

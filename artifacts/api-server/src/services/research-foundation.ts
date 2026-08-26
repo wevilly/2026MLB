@@ -1396,7 +1396,10 @@ export async function researchHealth(effectiveDate: string) {
     identityQuarantines: row?.identity_quarantines ?? 0,
     insufficientSamples: row?.insufficient_samples ?? 0,
     missingArsenal: 0,
-    missingHandednessSplits: 0,
+    // These four were hard-coded to zero / NOT_RUN while the query above
+    // computed the real values, so the Data Health opponent-hand-splits tile
+    // could never show actual coverage. Report what the query measured.
+    missingHandednessSplits: row?.missing_handedness_splits ?? 0,
     metricDefinitionConflicts: row?.metric_definition_conflicts ?? 0,
     staleWindows: row?.stale_windows ?? 0,
     eligibleHitterProfiles: row?.eligible_hitter_profiles ?? 0,
@@ -1408,9 +1411,9 @@ export async function researchHealth(effectiveDate: string) {
     identityOrEligibilityGaps: row?.identity_or_eligibility_gaps ?? 0,
     roleGaps: row?.role_gaps ?? 0,
     handednessCoverageScope: "FULL_ELIGIBLE_HITTER_AND_PITCHER_UNIVERSE",
-    handednessIngestStatus: "NOT_RUN",
-    handednessTargetPlayers: 0,
-    handednessCoveredPlayers: 0,
+    handednessIngestStatus: row?.handedness_ingest_status ?? "NOT_RUN",
+    handednessTargetPlayers: row?.handedness_target_players ?? 0,
+    handednessCoveredPlayers: row?.handedness_covered_players ?? 0,
     parkRequiredVenues: row?.park_required_venues ?? 0,
     parkVenueCoverageGaps: row?.park_venue_coverage_gaps ?? 0,
     handednessPopulationScope: "TODAY_LINEUP_HITTERS_AND_SLATE_STARTERS",

@@ -233,7 +233,7 @@ async function getStarter(gamePk: number, teamId: number): Promise<StarterInfo> 
     `SELECT s.player_id, p.throws, s.starter_state
      FROM starters s LEFT JOIN players p ON p.player_id = s.player_id
      WHERE s.game_pk = $1 AND s.team_id = $2
-     ORDER BY s.observed_at DESC LIMIT 1`,
+     ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1`,
     [gamePk, teamId],
   );
   return result.rows[0]

@@ -417,6 +417,34 @@ export async function queryDailyMarketBoard(slateDate: string, market: BoardMark
        ORDER BY mrc.market, mrc.research_rank ASC NULLS LAST, player_name`,
     [slateDate, dbMarket],
   );
+  // The FantasyPros reference rank and the research rank are different scales:
+  // the reference is FantasyPros' ordering across its whole player pool while
+  // the research rank is a dense per-market ordinal. Requiring the two integers
+  // to be equal made AGREE unreachable and rendered every referenced row as
+  // DISAGREE. Compare like for like instead: place each reference rank as an
+  // ordinal within the same market's referenced field, and call the two ranks
+  // in agreement when both land in the same third of their respective fields.
+  const referenceOrdinals = new Map<string, number>();
+  const referenceFieldSizes = new Map<DbMarket, number>();
+  const researchFieldSizes = new Map<DbMarket, number>();
+  for (const market of new Set(result.rows.map((row) => row.market))) {
+    const referenced = result.rows
+      .filter((row) => row.market === market && row.reference_rank !== null)
+      .sort((a, b) => (a.reference_rank as number) - (b.reference_rank as number));
+    let ordinal = 0;
+    let previous: number | null = null;
+    referenced.forEach((row, index) => {
+      if (previous === null || row.reference_rank !== previous) {
+        ordinal = index + 1;
+        previous = row.reference_rank;
+      }
+      referenceOrdinals.set(row.candidate_id, ordinal);
+    });
+    referenceFieldSizes.set(market, referenced.length);
+    researchFieldSizes.set(market, result.rows.filter((row) => row.market === market && row.research_rank !== null).length);
+  }
+  const third = (rank: number, fieldSize: number) =>
+    fieldSize <= 0 ? 0 : rank <= Math.ceil(fieldSize / 3) ? 0 : rank <= Math.ceil((2 * fieldSize) / 3) ? 1 : 2;
   return result.rows.map((row) => ({
     boardId: row.candidate_id,
     slateDate: row.slate_date,
@@ -432,7 +460,9 @@ export async function queryDailyMarketBoard(slateDate: string, market: BoardMark
     referenceRetrievedAt: row.reference_retrieved_at,
     referenceComparison: row.reference_rank === null || row.research_rank === null
       ? "NOT_AVAILABLE"
-      : row.reference_rank === row.research_rank ? "AGREE" : "DISAGREE",
+      : third(referenceOrdinals.get(row.candidate_id) ?? 0, referenceFieldSizes.get(row.market) ?? 0)
+          === third(row.research_rank, researchFieldSizes.get(row.market) ?? 0)
+        ? "AGREE" : "DISAGREE",
     evidenceStatus: row.research_state === "BLOCKED"
       ? "BLOCKED"
       : row.reference_rank === null || !row.starter_matchup_evidence || !row.bullpen_path_evidence || !row.park_evidence
@@ -467,11 +497,11 @@ export async function queryDailyBoardGameSummary(
        LEFT JOIN venues v ON v.venue_id = g.venue_id
        LEFT JOIN LATERAL (
          SELECT p.full_name, s.starter_state FROM starters s LEFT JOIN players p ON p.player_id = s.player_id
-          WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY s.observed_at DESC LIMIT 1
+          WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1
        ) away_starter ON true
        LEFT JOIN LATERAL (
          SELECT p.full_name, s.starter_state FROM starters s LEFT JOIN players p ON p.player_id = s.player_id
-          WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY s.observed_at DESC LIMIT 1
+          WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1
        ) home_starter ON true
        LEFT JOIN LATERAL (
          SELECT count(*) FILTER (WHERE final_state IN ('AVAILABLE', 'LIKELY_AVAILABLE')) AS available_arms

@@ -390,6 +390,12 @@ export type WeatherRefreshResult = {
   gamesFound: number;
   observationsWritten: number;
   domedGames: number;
+  // Games whose pregame weather is already carried by an append-only
+  // FantasyPros observation, so this Open-Meteo refresh deliberately wrote
+  // nothing for them. Without this count, "0 observations written" on a
+  // fully-covered slate is indistinguishable from a refresh that found no
+  // weather at all.
+  fantasyProsFallbackGames: number;
   gamesWithoutGeography: number;
   failures: WeatherIngestFailure[];
   error?: string;
@@ -605,6 +611,7 @@ async function performWeatherRefresh(
       gamesFound: hydrated.length,
       observationsWritten,
       domedGames,
+      fantasyProsFallbackGames: fantasyProsFallbackGamePks.length,
       gamesWithoutGeography,
       failures,
       ...(error ? { error } : {}),
@@ -705,6 +712,7 @@ function failedWeatherResult(slateDate: string, detail: string): Omit<WeatherRef
     gamesFound: 0,
     observationsWritten: 0,
     domedGames: 0,
+    fantasyProsFallbackGames: 0,
     gamesWithoutGeography: 0,
     failures: [{ scope: "weather_refresh", detail, fatal: true }],
     error: `Weather refresh failed: ${detail}`,

@@ -161,7 +161,11 @@ function responseDetail(value: unknown) {
  */
 const PRODUCED_COUNT_KEYS = [
   "candidatesWritten", "candidatesProcessed", "appearancesNormalized",
-  "modeledRows", "candidatesFound", "normalized", "rowCount",
+  // candidatesFound must be checked before modeledRows: the market board
+  // reports both, and on a research-only day (no ACTIVE model) modeledRows is
+  // legitimately 0 while candidatesFound carries the real produced count.
+  // Matching modeledRows first made every model-less slate read "produced 0".
+  "candidatesFound", "modeledRows", "normalized", "rowCount",
 ] as const;
 
 function producedCount(value: unknown): number | null {
@@ -186,7 +190,6 @@ async function runStep(
   steps: RunStep[],
   name: string,
   action: () => Promise<unknown>,
-  warning = false,
   expectedSlateWork = 0,
 ) {
   const step = steps.find((candidate) => candidate.name === name)!;
@@ -211,9 +214,13 @@ async function runStep(
     // least a WARNING, even in a warning-tolerant position, and the expected
     // versus actual counts are recorded in the step detail.
     const emptyOnRealSlate = produced === 0 && expectedSlateWork > 0;
+    // A clean success in a warning-tolerant position is still a SUCCESS.
+    // Forcing WARNING on every tolerant step made real warnings invisible and
+    // left the freeze prerequisites permanently unsatisfiable, so a run could
+    // never reach COMPLETE and the slate never became operational.
     if (reported === "FAILED") {
       step.status = "FAILED";
-    } else if (warning || reported === "PARTIAL" || emptyOnRealSlate) {
+    } else if (reported === "PARTIAL" || emptyOnRealSlate) {
       step.status = "WARNING";
     } else {
       step.status = "SUCCESS";
@@ -285,22 +292,22 @@ async function executeRun(runId: string, slateDate: string) {
     // that returns nothing on a day with real games is recorded as a WARNING
     // with the expected versus actual counts, not as a clean pass.
     const scheduledGames = await scheduledGameCount(slateDate);
-    await runStep(runId, steps, "research_refresh", () => ingestResearch(slateDate), true, scheduledGames);
-    await runStep(runId, steps, "bullpen_refresh", () => refreshBullpen(slateDate), true, scheduledGames);
+    await runStep(runId, steps, "research_refresh", () => ingestResearch(slateDate), scheduledGames);
+    await runStep(runId, steps, "bullpen_refresh", () => refreshBullpen(slateDate), scheduledGames);
     // Weather must land before the engines: they read the slate's observations
     // and score a bounded weather term from them.
-    await runStep(runId, steps, "weather_refresh", () => refreshWeather(slateDate), true, scheduledGames);
+    await runStep(runId, steps, "weather_refresh", () => refreshWeather(slateDate), scheduledGames);
     await runStep(runId, steps, "slate_matchup_refresh", async () => ({
       status: "SUCCESS",
       candidatesProcessed: scheduledGames,
       note: "No live batter-versus-pitcher scrape is run. Pair-level and pitch-arsenal evidence is explicitly unavailable in the API-backed daily model.",
-    }), true, scheduledGames);
-    await runStep(runId, steps, "tb_engine", () => runTBEngine(slateDate), true, scheduledGames);
-    await runStep(runId, steps, "xbh_engine", () => runXBHEngine(slateDate), true, scheduledGames);
-    await runStep(runId, steps, "walk_engine", () => runWALKEngine(slateDate), true, scheduledGames);
-    await runStep(runId, steps, "hr_engine", () => runHREngine(slateDate), true, scheduledGames);
-    await runStep(runId, steps, "hrrbi_engine", () => runHRRBIEngine(slateDate), true, scheduledGames);
-    await runStep(runId, steps, "market_board", () => populateDailyMarketBoard(slateDate), true, scheduledGames);
+    }), scheduledGames);
+    await runStep(runId, steps, "tb_engine", () => runTBEngine(slateDate), scheduledGames);
+    await runStep(runId, steps, "xbh_engine", () => runXBHEngine(slateDate), scheduledGames);
+    await runStep(runId, steps, "walk_engine", () => runWALKEngine(slateDate), scheduledGames);
+    await runStep(runId, steps, "hr_engine", () => runHREngine(slateDate), scheduledGames);
+    await runStep(runId, steps, "hrrbi_engine", () => runHRRBIEngine(slateDate), scheduledGames);
+    await runStep(runId, steps, "market_board", () => populateDailyMarketBoard(slateDate), scheduledGames);
     if (await cancellationRequested(runId)) {
       markPendingSkipped(steps, "Skipped because the run was interrupted");
       await finaliseRun(runId, slateDate, steps, "CANCELLED");
@@ -326,7 +333,11 @@ async function executeRun(runId: string, slateDate: string) {
       healthStep.finishedAt = new Date().toISOString();
       await persistSteps(runId, steps);
     }
-    if (healthStep.status !== "SUCCESS") { markPendingSkipped(steps, "Freeze blocked by health gate"); await finaliseRun(runId, slateDate, steps, "PARTIAL"); return; }
+    // Health warnings are disclosed, not gating: the platform ranks and
+    // discloses rather than silently withholding a slate, and the frozen
+    // snapshots record per-feature coverage on their own. Only a health check
+    // that itself FAILED (could not be evaluated) blocks the freeze.
+    if (healthStep.status === "FAILED") { markPendingSkipped(steps, "Freeze blocked by health gate"); await finaliseRun(runId, slateDate, steps, "PARTIAL"); return; }
     const run = await queryOrchestrationRun(runId);
     const cutoff = typeof run.schedule.calculatedFreezeUtc === "string" ? Date.parse(run.schedule.calculatedFreezeUtc) : NaN;
     if (!Number.isFinite(cutoff) || Date.now() < cutoff) {
@@ -366,7 +377,12 @@ async function executeDueFreeze(runId: string) {
     }
     const freeze = run.steps.find((step) => step.name === "feature_snapshot_freeze");
     const prerequisites = run.steps.filter((step) => step.name !== "feature_snapshot_freeze");
-    if (!freeze || prerequisites.some((step) => step.status !== "SUCCESS")) return;
+    // Warning-tolerant steps finish as WARNING by design (partial sources,
+    // empty-but-disclosed results). A WARNING is a completed prerequisite; only
+    // a step that failed, was cancelled, or never ran blocks the freeze.
+    // Requiring strict SUCCESS here deadlocked the run: it could never freeze,
+    // stayed RUNNING forever, and the slate never became operational.
+    if (!freeze || prerequisites.some((step) => step.status !== "SUCCESS" && step.status !== "WARNING")) return;
     if (freeze.status === "SUCCESS") {
       await pool.query(`UPDATE orchestration_runs SET overall_status = 'COMPLETE', frozen_at = COALESCE(frozen_at, now()), finished_at = now(), error_message = NULL WHERE run_id = $1`, [runId]);
       await recordAuditEvent({ action: "orchestration.complete", resourceType: "orchestration_run", resourceId: runId, metadata: { slateDate: run.runDate, recoveredAfterFreeze: true } });
