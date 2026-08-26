@@ -299,7 +299,10 @@ async function executeRun(runId: string, slateDate: string) {
     await runStep(runId, steps, "weather_refresh", () => refreshWeather(slateDate), scheduledGames);
     await runStep(runId, steps, "slate_matchup_refresh", async () => ({
       status: "SUCCESS",
-      candidatesProcessed: scheduledGames,
+      // This step is a documented no-op. The count it reports is the number of
+      // games it observed, not candidates processed — the old key implied it
+      // did per-candidate work comparable to the engines.
+      gamesObserved: scheduledGames,
       note: "No live batter-versus-pitcher scrape is run. Pair-level and pitch-arsenal evidence is explicitly unavailable in the API-backed daily model.",
     }), scheduledGames);
     await runStep(runId, steps, "tb_engine", () => runTBEngine(slateDate), scheduledGames);
@@ -574,12 +577,18 @@ export async function automateSettlementDate(rawDate: unknown) {
     });
     postmortemsCreated += 1;
   }
-  await recordAuditEvent({
-    action: "settlement.automated",
-    resourceType: "slate",
-    resourceId: slateDate,
-    metadata: { outcomesWritten: settlement.outcomesWritten, postmortemsCreated },
-  });
+  // Only record the event when settlement actually did something. A failing
+  // date retries on a schedule, and logging "settlement.automated" with zero
+  // outcomes and zero postmortems on every attempt buried the log in rows
+  // that read as though settlement ran when nothing was settled.
+  if (settlement.outcomesWritten > 0 || postmortemsCreated > 0) {
+    await recordAuditEvent({
+      action: "settlement.automated",
+      resourceType: "slate",
+      resourceId: slateDate,
+      metadata: { outcomesWritten: settlement.outcomesWritten, postmortemsCreated },
+    });
+  }
   return { ...settlement, postmortemsCreated, officialRecord: "MLB Analyst Platform" };
 }
 

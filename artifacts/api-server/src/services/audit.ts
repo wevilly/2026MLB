@@ -32,6 +32,11 @@ export async function recordAuditEvent(input: AuditEventInput, executor: AuditEx
   );
 }
 
+export async function countAuditEvents() {
+  const result = await pool.query<{ total: string }>(`SELECT count(*)::text AS total FROM audit_events`);
+  return Number(result.rows[0]?.total ?? 0);
+}
+
 export async function queryAuditEvents(limit = 100) {
   const result = await pool.query<{
     audit_event_id: string; occurred_at: string; actor: string; request_id: string | null;

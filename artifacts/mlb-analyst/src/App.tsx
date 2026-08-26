@@ -398,13 +398,16 @@ function DataHealthPage() {
           <Panel>
             <SectionHeading eyebrow="Research layer" title="Analyst lab metrics" detail="Evidence, profiles, and analytical lab data quality." />
             <div className="metric-grid">
-              <Metric label="Hitter evidence" value={`${data.researchHealth?.playerProfiles ?? 0}/${data.researchHealth?.eligibleHitterProfiles ?? 0}`} note={`${data.researchHealth?.hitterProfilesMissingEvidence ?? 0} eligible shells lack source evidence`} tone={(data.researchHealth?.hitterProfilesMissingEvidence ?? 0) > 0 ? 'warn' : 'good'} />
-              <Metric label="Pitcher evidence" value={`${data.researchHealth?.pitcherProfiles ?? 0}/${data.researchHealth?.eligiblePitcherProfiles ?? 0}`} note={`${data.researchHealth?.pitcherProfilesMissingEvidence ?? 0} eligible shells lack source evidence`} tone={(data.researchHealth?.pitcherProfilesMissingEvidence ?? 0) > 0 ? 'warn' : 'good'} />
+              {/* A zero denominator means the eligible universe itself is
+                  missing — vacuously "0 missing evidence" must not read as
+                  healthy green. */}
+              <Metric label="Hitter evidence" value={`${data.researchHealth?.playerProfiles ?? 0}/${data.researchHealth?.eligibleHitterProfiles ?? 0}`} note={(data.researchHealth?.eligibleHitterProfiles ?? 0) === 0 ? 'No eligible hitter universe recorded for this date' : `${data.researchHealth?.hitterProfilesMissingEvidence ?? 0} eligible shells lack source evidence`} tone={(data.researchHealth?.eligibleHitterProfiles ?? 0) === 0 ? 'warn' : (data.researchHealth?.hitterProfilesMissingEvidence ?? 0) > 0 ? 'warn' : 'good'} />
+              <Metric label="Pitcher evidence" value={`${data.researchHealth?.pitcherProfiles ?? 0}/${data.researchHealth?.eligiblePitcherProfiles ?? 0}`} note={(data.researchHealth?.eligiblePitcherProfiles ?? 0) === 0 ? 'No eligible pitcher universe recorded for this date' : `${data.researchHealth?.pitcherProfilesMissingEvidence ?? 0} eligible shells lack source evidence`} tone={(data.researchHealth?.eligiblePitcherProfiles ?? 0) === 0 ? 'warn' : (data.researchHealth?.pitcherProfilesMissingEvidence ?? 0) > 0 ? 'warn' : 'good'} />
               <Metric label="Park contexts" value={`${data.researchHealth?.parkProfiles ?? 0}/${data.researchHealth?.parkRequiredVenues ?? 0}`} note={`${data.researchHealth?.parkVenueCoverageGaps ?? 0} current-game venue gap(s) across All/L/R raw components`} tone={(data.researchHealth?.parkVenueCoverageGaps ?? 0) > 0 ? 'bad' : 'good'} />
               <Metric label="Stale windows" value={data.researchHealth?.staleWindows ?? 0} note="Requires refresh" tone={(data.researchHealth?.staleWindows ?? 0) > 0 ? 'warn' : 'good'} />
               <Metric label="Quarantined records" value={data.researchHealth?.identityQuarantines ?? 0} note="ID mapping failed" tone={(data.researchHealth?.identityQuarantines ?? 0) > 0 ? 'bad' : 'good'} />
               <Metric label="Insufficient samples" value={data.researchHealth?.insufficientSamples ?? 0} note="Statistically suppressed" tone={(data.researchHealth?.insufficientSamples ?? 0) > 0 ? 'warn' : 'good'} />
-              <Metric label="Opponent-hand splits" value={`${data.researchHealth?.handednessCoveredPlayers ?? 0}/${data.researchHealth?.handednessTargetPlayers ?? 0}`} note="Full official eligible hitter/pitcher universe; explicit L/R Statcast panels" tone={(data.researchHealth?.missingHandednessSplits ?? 0) > 0 ? 'bad' : 'good'} />
+              <Metric label="Opponent-hand splits" value={`${data.researchHealth?.handednessCoveredPlayers ?? 0}/${data.researchHealth?.handednessTargetPlayers ?? 0}`} note={(data.researchHealth?.handednessTargetPlayers ?? 0) === 0 ? 'No split-target universe recorded for this date' : 'Full official eligible hitter/pitcher universe; explicit L/R Statcast panels'} tone={(data.researchHealth?.handednessTargetPlayers ?? 0) === 0 ? 'warn' : (data.researchHealth?.missingHandednessSplits ?? 0) > 0 ? 'bad' : 'good'} />
               <Metric label="Definition conflicts" value={data.researchHealth?.metricDefinitionConflicts ?? 0} note="Formula mismatch" tone={(data.researchHealth?.metricDefinitionConflicts ?? 0) > 0 ? 'bad' : 'good'} />
             </div>
           </Panel>
@@ -566,7 +569,7 @@ function OrchestrationPage() {
     {runs.length === 0 && !loading ? <QueryMessage kind="empty" /> : <div className="space-y-4">
       {runs.map((run) => <Panel key={run.runId} className="p-5" data-testid={`orchestration-run-${run.runId}`}>
         <div className="flex justify-between gap-3 flex-wrap items-start"><div><Kicker>{run.triggeredBy} · {run.runDate}</Kicker><h2 className="text-lg">Run {run.runId.slice(0, 8)} <Badge tone={toneFor(run.overallStatus)}>{run.overallStatus}</Badge></h2><p className="text-xs text-muted-foreground mt-1">Frozen: {run.frozenAt ?? 'not yet'} {run.errorMessage ? `· ${run.errorMessage}` : ''}</p></div>{run.overallStatus === 'RUNNING' && <button className="button button-quiet" disabled={!approvalActive} onClick={() => void interrupt(run.runId)}><Square size={14} /> Interrupt</button>}</div>
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3 mt-4">{run.steps.map((step) => <div className="border border-border p-3 text-xs" key={step.name}><div className="flex justify-between gap-2"><strong>{step.name.replaceAll('_', ' ')}</strong><Badge tone={toneFor(step.status)}>{step.status}</Badge></div><p className="text-muted-foreground mt-2">{step.detail ?? 'Awaiting execution'}</p></div>)}</div>
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3 mt-4">{run.steps.map((step) => <div className="border border-border p-3 text-xs min-w-0" key={step.name}><div className="flex justify-between gap-2"><strong>{step.name.replaceAll('_', ' ')}</strong><Badge tone={toneFor(step.status)}>{step.status}</Badge></div><p className="text-muted-foreground mt-2 break-all">{step.detail ?? 'Awaiting execution'}</p></div>)}</div>
       </Panel>)}
     </div>}
   </div>;
@@ -582,12 +585,22 @@ function easternTimestamp(value: string) {
 }
 
 function AuditTrailPage() {
-  const [events, setEvents] = useState<Array<{ auditEventId: string; occurredAt: string; actor: string; action: string; resourceType: string; resourceId: string | null }>>([]);
+  const [events, setEvents] = useState<Array<{ auditEventId: string; occurredAt: string; actor: string; action: string; resourceType: string; resourceId: string | null; metadata?: Record<string, unknown> }>>([]);
+  const [total, setTotal] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const load = async () => { setLoading(true); try { setEvents((await operationsRequest<{ events: typeof events }>('/analyst/audit-events?limit=100')).events); setError(null); } catch (e) { setError(e instanceof Error ? e.message : 'Unable to load audit events.'); } finally { setLoading(false); } };
+  const load = async () => { setLoading(true); try { const response = await operationsRequest<{ events: typeof events; total?: number }>('/analyst/audit-events?limit=100'); setEvents(response.events); setTotal(typeof response.total === 'number' ? response.total : null); setError(null); } catch (e) { setError(e instanceof Error ? e.message : 'Unable to load audit events.'); } finally { setLoading(false); } };
   useEffect(() => { void load(); }, []);
-  return <div className="page-content rise-in" data-testid="page-audit-trail"><div className="page-intro"><div><Kicker>Append-only operator record</Kicker><h1>Audit <span className="slash">//</span> trail</h1><p>Operational runs, settlements, corrections, and review actions retain actor and timestamp context.</p></div><button className="button button-dark" onClick={() => void load()} disabled={loading}><RefreshCw size={15} /> Refresh</button></div>{loading ? <LoadingPanel rows={5} /> : error ? <QueryMessage kind="error" onRetry={() => void load()} /> : events.length === 0 ? <QueryMessage kind="empty" /> : <Panel><div className="table-wrap"><table className="data-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th></tr></thead><tbody>{events.map((event) => <tr key={event.auditEventId}><td className="text-xs whitespace-nowrap" title={event.occurredAt}>{easternTimestamp(event.occurredAt)}</td><td>{event.actor}</td><td><Badge tone="accent">{event.action}</Badge></td><td className="font-mono text-xs break-all">{event.resourceType}{event.resourceId ? ` / ${event.resourceId}` : ''}</td></tr>)}</tbody></table></div></Panel>}</div>;
+  // The backend records why an event happened (error text, attempt counts) in
+  // metadata. An audit page that hides the reason is not an audit page.
+  const eventDetail = (metadata?: Record<string, unknown>) => {
+    if (!metadata) return null;
+    const parts: string[] = [];
+    if (typeof metadata.error === 'string' && metadata.error) parts.push(metadata.error);
+    if (typeof metadata.attempts === 'number') parts.push(`attempt ${metadata.attempts}${typeof metadata.maxAttempts === 'number' ? `/${metadata.maxAttempts}` : ''}`);
+    return parts.length ? parts.join(' · ') : null;
+  };
+  return <div className="page-content rise-in" data-testid="page-audit-trail"><div className="page-intro"><div><Kicker>Append-only operator record</Kicker><h1>Audit <span className="slash">//</span> trail</h1><p>Operational runs, settlements, corrections, and review actions retain actor and timestamp context.{total !== null && ` Showing the ${Math.min(events.length, total)} most recent of ${total} recorded event(s).`}</p></div><button className="button button-dark" onClick={() => void load()} disabled={loading}><RefreshCw size={15} /> Refresh</button></div>{loading ? <LoadingPanel rows={5} /> : error ? <QueryMessage kind="error" onRetry={() => void load()} /> : events.length === 0 ? <QueryMessage kind="empty" /> : <Panel><div className="table-wrap"><table className="data-table"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Resource</th></tr></thead><tbody>{events.map((event) => { const detail = eventDetail(event.metadata); return <tr key={event.auditEventId}><td className="text-xs whitespace-nowrap" title={event.occurredAt}>{easternTimestamp(event.occurredAt)}</td><td>{event.actor}</td><td><Badge tone="accent">{event.action}</Badge>{detail && <div className="text-xs text-muted-foreground mt-1 break-all">{detail}</div>}</td><td className="font-mono text-xs break-all">{event.resourceType}{event.resourceId ? ` / ${event.resourceId}` : ''}</td></tr>; })}</tbody></table></div></Panel>}</div>;
 }
 
 function HealthSource({ source }: { source: SourceBadge }) {

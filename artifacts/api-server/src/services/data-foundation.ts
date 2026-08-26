@@ -1207,6 +1207,11 @@ export async function ingestFantasyPros(requestedDate: string) {
       payloadIds.set(source.kind, await storeRawPayload(ingestRunId, FANTASY_PROS_SOURCE, source.kind, effectiveDate, source.data));
     }
     let projectionRows = 0;
+    // Rows retained for identity review are raw rows, not normalized ones.
+    // Counting them in both normalizedRowCount and rejectedRowCount made the
+    // ledger read "880 raw · 880 normalized · 119 rejected", which cannot all
+    // be true of the same run. raw = normalized + rejected must reconcile.
+    let unresolvedProjectionRows = 0;
     const missingIdentity = new Set<string>();
     const teamConflicts = new Set<string>();
     for (const item of [
@@ -1310,6 +1315,7 @@ export async function ingestFantasyPros(requestedDate: string) {
         const identityConfidence = resolvedPlayerId ? "CONFIRMED" : "REVIEW_REQUIRED";
         if (!resolvedPlayerId) {
           missingIdentity.add(sourcePlayerId);
+          unresolvedProjectionRows += 1;
           await pool.query(
             `INSERT INTO identity_review_queue (source_id, external_player_id, raw_name, normalized_name, evidence)
              SELECT $1, $2, $3, $4, $5
@@ -1399,8 +1405,8 @@ export async function ingestFantasyPros(requestedDate: string) {
     ]);
     await finishRun(ingestRunId, "PARTIAL", {
       rowCount: projectionRows + newsItems.length,
-      normalizedRowCount: projectionRows + newsItems.length,
-      rejectedRowCount: missingIdentity.size,
+      normalizedRowCount: projectionRows - unresolvedProjectionRows + newsItems.length,
+      rejectedRowCount: unresolvedProjectionRows,
       httpStatus: 200,
       metadata: {
         hitterRows: asArray(hitters.payload.player).length,
@@ -1427,8 +1433,8 @@ export async function ingestFantasyPros(requestedDate: string) {
       source: "FantasyPros",
       ingestRunId,
       rowCount: projectionRows + newsItems.length,
-      normalizedRowCount: projectionRows + newsItems.length,
-      rejectedRowCount: missingIdentity.size,
+      normalizedRowCount: projectionRows - unresolvedProjectionRows + newsItems.length,
+      rejectedRowCount: unresolvedProjectionRows,
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown FantasyPros ingest failure";

@@ -1125,3 +1125,16 @@ button:active:not(:disabled), a:active {
 .ai-claim-actions { flex-shrink: 0; }
 @media (max-width: 1050px) { .ai-workspace { grid-template-columns: 1fr; } .ai-chat-panel { min-height: 540px; } }
 @media (max-width: 640px) { .ai-session-row { grid-template-columns: 1fr; } .ai-composer, .ai-evidence-bar, .ai-claim, .ai-claim-toolbar { flex-direction: column; align-items: stretch; } .ai-message { max-width: 97%; } .ai-claim-actions { width: 100%; } }
+
+/* Print: page captures are an operator's audit record. The fixed sidebar
+   repeated on every sheet, tables clipped their rightmost columns (the
+   Evidence and Decision disclosures on the market board), and long JSON step
+   details overflowed their tiles illegibly. Print the content, whole. */
+@media print {
+  .sidebar, .mobile-menu { display: none !important; }
+  .main-shell { margin-left: 0; }
+  .table-wrap { overflow: visible; }
+  .data-table td, .data-table th { white-space: normal; overflow-wrap: anywhere; }
+  .panel, tr { break-inside: avoid; }
+  .metric-grid { break-inside: avoid; }
+}

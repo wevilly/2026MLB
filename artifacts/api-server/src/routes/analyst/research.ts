@@ -154,7 +154,7 @@ import {
   queryOrchestrationRuns,
 } from "../../services/orchestration";
 import { buildSlateExport, buildWorkbookExport } from "../../services/exports";
-import { queryAuditEvents } from "../../services/audit";
+import { countAuditEvents, queryAuditEvents } from "../../services/audit";
 import { CACHE_POLICY, invalidateCache, readThroughCache } from "../../services/cache";
 import {
   BETTOR_MARKETS,
@@ -507,12 +507,25 @@ router.get("/analyst/game-lab", async (req, res, next) => {
       key, label, value: null, unit: "factor", denominator: null, sampleSize: null,
         source: "NOT FOUND", definition, transformation: "RAW" as const, status: "NOT_FOUND" as const, retrievedAt: "NOT FOUND",
     }));
+    // All sides must come from the same ingest run. Picking the newest
+    // snapshot independently per batter side mixed vintages and sources —
+    // e.g. an overall factor from one ingest beside handed components from
+    // another — so the "overall" tile could sit outside the range of its own
+    // handed components on the same card.
     const parkSnapshot = selectedDb?.venue_id ? await pool.query<{
       span: string; retrieved_at: string; park_research_snapshot_id: string; batter_side: string | null;
+      source_id: string; provenance_source: string | null;
     }>(
-      `SELECT DISTINCT ON (f.batter_side) ps.park_research_snapshot_id, ps.span, ps.retrieved_at, f.batter_side
+      `SELECT DISTINCT ON (f.batter_side) ps.park_research_snapshot_id, ps.span, ps.retrieved_at, f.batter_side,
+              ps.source_id, ps.provenance->>'source' AS provenance_source
        FROM park_research_snapshots ps JOIN park_research_features f ON f.park_research_snapshot_id = ps.park_research_snapshot_id
-       WHERE ps.venue_id = $1 ORDER BY f.batter_side NULLS FIRST, ps.season DESC, ps.retrieved_at DESC`,
+       WHERE ps.venue_id = $1
+         AND ps.ingest_run_id = (
+           SELECT ps2.ingest_run_id FROM park_research_snapshots ps2
+           WHERE ps2.venue_id = $1
+           ORDER BY ps2.season DESC, ps2.retrieved_at DESC LIMIT 1
+         )
+       ORDER BY f.batter_side NULLS FIRST, ps.season DESC, ps.retrieved_at DESC`,
       [selectedDb.venue_id],
     ) : { rows: [] };
     let parkFactors: Array<{
@@ -530,7 +543,10 @@ router.get("/analyst/game-lab", async (req, res, next) => {
       label: `${factor.metric_label}${factor.batter_side ? ` vs ${factor.batter_side}HB` : ""}`,
       value: factor.value === null ? null : Number(factor.value),
       unit: "factor", denominator: null, sampleSize: null,
-      source: "Baseball Savant Statcast Park Factors", definition: factor.definition,
+      // The label was hardcoded to Savant even when the snapshot came from
+      // another provider; attribute what was actually persisted.
+      source: parkSnapshot.rows[0]?.provenance_source ?? parkSnapshot.rows[0]?.source_id ?? "NOT FOUND",
+      definition: factor.definition,
       transformation: factor.transformation, status: factor.sample_status,
        retrievedAt: isoString(parkSnapshot.rows[0]?.retrieved_at) ?? "NOT FOUND",
     })) : fallbackParkFactors;
@@ -588,8 +604,10 @@ router.get("/analyst/audit-events", async (req, res, next) => {
   try {
     const parsed = req.query.limit == null ? 100 : Number(req.query.limit);
     if (!Number.isFinite(parsed)) throw new Error("limit must be numeric");
-    const events = await queryAuditEvents(parsed);
-    res.json({ events, total: events.length });
+    // total is the real table count, not the page size: an operator reading
+    // "100" cannot otherwise tell a full log from a capped page of it.
+    const [events, total] = await Promise.all([queryAuditEvents(parsed), countAuditEvents()]);
+    res.json({ events, total });
   } catch (error) {
     next(error);
   }
