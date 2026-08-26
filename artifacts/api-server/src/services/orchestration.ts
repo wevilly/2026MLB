@@ -341,6 +341,14 @@ async function executeRun(runId: string, slateDate: string) {
     // snapshots record per-feature coverage on their own. Only a health check
     // that itself FAILED (could not be evaluated) blocks the freeze.
     if (healthStep.status === "FAILED") { markPendingSkipped(steps, "Freeze blocked by health gate"); await finaliseRun(runId, slateDate, steps, "PARTIAL"); return; }
+    // A failed warning-tolerant step means the freeze can never satisfy its
+    // prerequisites. Finalise as PARTIAL now instead of queueing a freeze
+    // that will be skipped on every sweep while the run reads RUNNING forever.
+    if (steps.some((step) => step.status === "FAILED")) {
+      markPendingSkipped(steps, "Freeze blocked by a failed prerequisite step");
+      await finaliseRun(runId, slateDate, steps, "PARTIAL");
+      return;
+    }
     const run = await queryOrchestrationRun(runId);
     const cutoff = typeof run.schedule.calculatedFreezeUtc === "string" ? Date.parse(run.schedule.calculatedFreezeUtc) : NaN;
     if (!Number.isFinite(cutoff) || Date.now() < cutoff) {
@@ -385,7 +393,15 @@ async function executeDueFreeze(runId: string) {
     // a step that failed, was cancelled, or never ran blocks the freeze.
     // Requiring strict SUCCESS here deadlocked the run: it could never freeze,
     // stayed RUNNING forever, and the slate never became operational.
-    if (!freeze || prerequisites.some((step) => step.status !== "SUCCESS" && step.status !== "WARNING")) return;
+    if (!freeze) return;
+    // A FAILED or CANCELLED prerequisite can never recover, so a silent
+    // return here would leave the run RUNNING forever — finalise instead.
+    if (prerequisites.some((step) => step.status === "FAILED" || step.status === "CANCELLED")) {
+      markPendingSkipped(run.steps, "Freeze blocked by a failed prerequisite step");
+      await finaliseRun(runId, run.runDate, run.steps, "PARTIAL");
+      return;
+    }
+    if (prerequisites.some((step) => step.status !== "SUCCESS" && step.status !== "WARNING")) return;
     if (freeze.status === "SUCCESS") {
       await pool.query(`UPDATE orchestration_runs SET overall_status = 'COMPLETE', frozen_at = COALESCE(frozen_at, now()), finished_at = now(), error_message = NULL WHERE run_id = $1`, [runId]);
       await recordAuditEvent({ action: "orchestration.complete", resourceType: "orchestration_run", resourceId: runId, metadata: { slateDate: run.runDate, recoveredAfterFreeze: true } });
@@ -546,7 +562,10 @@ export async function detectLateScratches(slateDate: string) {
   return { slateDate, corrections, targetedRerun: corrections > 0 };
 }
 
-export async function automateSettlementDate(rawDate: unknown) {
+export async function automateSettlementDate(
+  rawDate: unknown,
+  trigger: "SCHEDULED" | "OPERATOR" = "OPERATOR",
+) {
   const slateDate = dateOnly(rawDate);
   const settlement = await settleOfficialDate(slateDate);
   const links = await pool.query<{ snapshot_id: string; outcome_id: string; process_error_taxonomy: string | null }>(
@@ -577,16 +596,18 @@ export async function automateSettlementDate(rawDate: unknown) {
     });
     postmortemsCreated += 1;
   }
-  // Only record the event when settlement actually did something. A failing
-  // date retries on a schedule, and logging "settlement.automated" with zero
-  // outcomes and zero postmortems on every attempt buried the log in rows
-  // that read as though settlement ran when nothing was settled.
-  if (settlement.outcomesWritten > 0 || postmortemsCreated > 0) {
+  // A scheduled retry that settled nothing is suppressed: the nightly job
+  // already records its own failed/terminal event for every attempt, and
+  // logging "settlement.automated" with zero outcomes on each retry buried
+  // the log in rows that read as though settlement ran. An operator-triggered
+  // run is always recorded, empty or not — the operator acted, and the
+  // append-only record must show it.
+  if (trigger === "OPERATOR" || settlement.outcomesWritten > 0 || postmortemsCreated > 0) {
     await recordAuditEvent({
       action: "settlement.automated",
       resourceType: "slate",
       resourceId: slateDate,
-      metadata: { outcomesWritten: settlement.outcomesWritten, postmortemsCreated },
+      metadata: { trigger, outcomesWritten: settlement.outcomesWritten, postmortemsCreated },
     });
   }
   return { ...settlement, postmortemsCreated, officialRecord: "MLB Analyst Platform" };
@@ -653,7 +674,7 @@ export async function runNightlySettlement(
   rawDate: unknown,
   dependencies: SettlementDependencies = {
     ingestOfficial: ingestMlbOfficial,
-    automate: automateSettlementDate,
+    automate: (slateDate: string) => automateSettlementDate(slateDate, "SCHEDULED"),
   },
 ): Promise<SettlementAutomationRun> {
   const slateDate = dateOnly(rawDate);

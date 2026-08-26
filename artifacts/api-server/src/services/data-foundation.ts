@@ -1056,7 +1056,22 @@ export async function ingestMlbOfficial(requestedDate: string) {
         .filter((slatePk) => slatePk !== gamePk);
       const officialRowExists = pairRows.rows.some((row) => Number(row.game_pk) === gamePk);
       let writeGamePk = gamePk;
-      if (slateGamePks.length === 1 && !officialRowExists) {
+      // A stray official row from a previous ingest (every date processed
+      // before this matching existed is in that state) is removed when it
+      // carries no dependent evidence, so legacy doubled dates repair
+      // themselves on the next postgame run instead of persisting silently.
+      const adoptable = slateGamePks.length === 1
+        && (!officialRowExists || await removeDuplicateOfficialGame(gamePk));
+      if (slateGamePks.length === 1 && !adoptable) {
+        await recordIssue(
+          MLB_SOURCE,
+          ingestRunId,
+          "DUPLICATE_OFFICIAL_GAME_ROW",
+          "WARNING",
+          `Official game row ${gamePk} duplicates projected-slate row ${slateGamePks[0]} but carries dependent evidence and was not removed; settlement facts stay under the official gamePk.`,
+        );
+      }
+      if (adoptable) {
         writeGamePk = slateGamePks[0];
         await pool.query(
           `UPDATE games SET

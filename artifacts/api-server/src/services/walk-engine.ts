@@ -37,7 +37,7 @@
 
 import { pool } from "@workspace/db";
 import { MARKET_TO_DB } from "./market-codes";
-import { conflictsFor, querySlateLineupPlayers } from "./lineup-sources";
+import { conflictsFor, querySlateLineupPlayers, STARTER_SOURCE_PRIORITY_SQL } from "./lineup-sources";
 import { getSlateWeather, weatherAdjustment, type GameWeather } from "./weather-foundation";
 import { getBatterPitcherEvidence } from "./batter-pitcher-research";
 import { getBullpenRolePath, type BullpenRolePath } from "./bullpen-foundation";
@@ -212,7 +212,7 @@ async function getStarter(gamePk: number, teamId: number): Promise<StarterInfo> 
     `SELECT s.player_id, p.throws, s.starter_state
      FROM starters s LEFT JOIN players p ON p.player_id = s.player_id
      WHERE s.game_pk = $1 AND s.team_id = $2
-     ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1`,
+     ORDER BY ${STARTER_SOURCE_PRIORITY_SQL} LIMIT 1`,
     [gamePk, teamId],
   );
   return result.rows[0]

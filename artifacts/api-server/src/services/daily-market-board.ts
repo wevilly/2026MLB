@@ -17,6 +17,7 @@ import {
   trainableVector,
   type ModelArtifact,
 } from "./model-math";
+import { STARTER_SOURCE_PRIORITY_SQL } from "./lineup-sources";
 
 type JsonObject = Record<string, unknown>;
 export type BoardMarket = ModelMarket | "H_R_RBI";
@@ -421,27 +422,37 @@ export async function queryDailyMarketBoard(slateDate: string, market: BoardMark
   // the reference is FantasyPros' ordering across its whole player pool while
   // the research rank is a dense per-market ordinal. Requiring the two integers
   // to be equal made AGREE unreachable and rendered every referenced row as
-  // DISAGREE. Compare like for like instead: place each reference rank as an
-  // ordinal within the same market's referenced field, and call the two ranks
-  // in agreement when both land in the same third of their respective fields.
+  // DISAGREE. Compare like for like instead: within each market, take only the
+  // rows that carry BOTH ranks, place each rank as an ordinal within that
+  // common subset, and call the two in agreement when both land in the same
+  // third of it. Ranking one side against a wider field than the other would
+  // reintroduce systematic false DISAGREE wherever reference coverage is
+  // partial.
   const referenceOrdinals = new Map<string, number>();
-  const referenceFieldSizes = new Map<DbMarket, number>();
-  const researchFieldSizes = new Map<DbMarket, number>();
-  for (const market of new Set(result.rows.map((row) => row.market))) {
-    const referenced = result.rows
-      .filter((row) => row.market === market && row.reference_rank !== null)
-      .sort((a, b) => (a.reference_rank as number) - (b.reference_rank as number));
+  const researchOrdinals = new Map<string, number>();
+  const comparableFieldSizes = new Map<DbMarket, number>();
+  const ordinalsInto = (
+    target: Map<string, number>,
+    rows: typeof result.rows,
+    rankOf: (row: (typeof result.rows)[number]) => number,
+  ) => {
+    const sorted = [...rows].sort((a, b) => rankOf(a) - rankOf(b));
     let ordinal = 0;
     let previous: number | null = null;
-    referenced.forEach((row, index) => {
-      if (previous === null || row.reference_rank !== previous) {
+    sorted.forEach((row, index) => {
+      if (previous === null || rankOf(row) !== previous) {
         ordinal = index + 1;
-        previous = row.reference_rank;
+        previous = rankOf(row);
       }
-      referenceOrdinals.set(row.candidate_id, ordinal);
+      target.set(row.candidate_id, ordinal);
     });
-    referenceFieldSizes.set(market, referenced.length);
-    researchFieldSizes.set(market, result.rows.filter((row) => row.market === market && row.research_rank !== null).length);
+  };
+  for (const market of new Set(result.rows.map((row) => row.market))) {
+    const comparable = result.rows
+      .filter((row) => row.market === market && row.reference_rank !== null && row.research_rank !== null);
+    ordinalsInto(referenceOrdinals, comparable, (row) => row.reference_rank as number);
+    ordinalsInto(researchOrdinals, comparable, (row) => row.research_rank as number);
+    comparableFieldSizes.set(market, comparable.length);
   }
   const third = (rank: number, fieldSize: number) =>
     fieldSize <= 0 ? 0 : rank <= Math.ceil(fieldSize / 3) ? 0 : rank <= Math.ceil((2 * fieldSize) / 3) ? 1 : 2;
@@ -460,8 +471,8 @@ export async function queryDailyMarketBoard(slateDate: string, market: BoardMark
     referenceRetrievedAt: row.reference_retrieved_at,
     referenceComparison: row.reference_rank === null || row.research_rank === null
       ? "NOT_AVAILABLE"
-      : third(referenceOrdinals.get(row.candidate_id) ?? 0, referenceFieldSizes.get(row.market) ?? 0)
-          === third(row.research_rank, researchFieldSizes.get(row.market) ?? 0)
+      : third(referenceOrdinals.get(row.candidate_id) ?? 0, comparableFieldSizes.get(row.market) ?? 0)
+          === third(researchOrdinals.get(row.candidate_id) ?? 0, comparableFieldSizes.get(row.market) ?? 0)
         ? "AGREE" : "DISAGREE",
     evidenceStatus: row.research_state === "BLOCKED"
       ? "BLOCKED"
@@ -497,11 +508,11 @@ export async function queryDailyBoardGameSummary(
        LEFT JOIN venues v ON v.venue_id = g.venue_id
        LEFT JOIN LATERAL (
          SELECT p.full_name, s.starter_state FROM starters s LEFT JOIN players p ON p.player_id = s.player_id
-          WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1
+          WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY ${STARTER_SOURCE_PRIORITY_SQL} LIMIT 1
        ) away_starter ON true
        LEFT JOIN LATERAL (
          SELECT p.full_name, s.starter_state FROM starters s LEFT JOIN players p ON p.player_id = s.player_id
-          WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1
+          WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY ${STARTER_SOURCE_PRIORITY_SQL} LIMIT 1
        ) home_starter ON true
        LEFT JOIN LATERAL (
          SELECT count(*) FILTER (WHERE final_state IN ('AVAILABLE', 'LIKELY_AVAILABLE')) AS available_arms

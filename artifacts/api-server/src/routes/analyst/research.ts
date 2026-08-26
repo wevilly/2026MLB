@@ -98,7 +98,7 @@ import { getPitcherLab, getPlayerLab, ingestResearch, ingestStatcastHandednessFa
 import { historicalIntelligenceCoverage } from "../../services/historical-intelligence";
 import { getBatterPitcherEvidence, refreshBatterPitcherSlate, type BvpMarket } from "../../services/batter-pitcher-research";
 import { compareRoundRobinGame, type RoundRobinBoardId, type RoundRobinCandidate } from "../../services/round-robin-comparison";
-import { LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter } from "../../services/lineup-sources";
+import { LINEUP_SOURCE_PRECEDENCE, lineupSourceFilter, STARTER_SOURCE_PRIORITY_SQL } from "../../services/lineup-sources";
 import { RR_DB_TO_MARKET, RR_MARKET_TO_DB } from "../../services/market-codes";
 import { getBullpenRoom, refreshBullpen } from "../../services/bullpen-foundation";
 import { formatRoofLabel, formatWeatherSummary, getSlateWeather } from "../../services/weather-foundation";
@@ -223,11 +223,11 @@ router.get("/analyst/today", async (req, res, next) => {
          LEFT JOIN venues v ON v.venue_id = g.venue_id
          LEFT JOIN LATERAL (
             SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id
-           WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1
+           WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY ${STARTER_SOURCE_PRIORITY_SQL} LIMIT 1
          ) away_start ON true
          LEFT JOIN LATERAL (
             SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id
-           WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1
+           WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY ${STARTER_SOURCE_PRIORITY_SQL} LIMIT 1
          ) home_start ON true
           LEFT JOIN LATERAL (
             SELECT COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'MLB_OFFICIAL' AND state = 'POSTED')::int AS posted_lineup_teams,
@@ -467,8 +467,8 @@ router.get("/analyst/game-lab", async (req, res, next) => {
         COALESCE(lineups.posted_lineup_teams, 0) AS posted_lineup_teams, COALESCE(lineups.projected_lineup_teams, 0) AS projected_lineup_teams
        FROM games g JOIN teams away ON away.team_id = g.away_team_id JOIN teams home ON home.team_id = g.home_team_id
        LEFT JOIN venues v ON v.venue_id = g.venue_id
-       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1) away_start ON true
-       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC LIMIT 1) home_start ON true
+       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.away_team_id ORDER BY ${STARTER_SOURCE_PRIORITY_SQL} LIMIT 1) away_start ON true
+       LEFT JOIN LATERAL (SELECT s.starter_state, p.full_name, p.throws FROM starters s LEFT JOIN players p ON p.player_id = s.player_id WHERE s.game_pk = g.game_pk AND s.team_id = g.home_team_id ORDER BY ${STARTER_SOURCE_PRIORITY_SQL} LIMIT 1) home_start ON true
        LEFT JOIN LATERAL (SELECT
          COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'MLB_OFFICIAL' AND state = 'POSTED')::int AS posted_lineup_teams,
          COUNT(DISTINCT team_id) FILTER (WHERE source_id = 'FANTASYPROS' AND state = 'PROJECTED')::int AS projected_lineup_teams
@@ -517,7 +517,7 @@ router.get("/analyst/game-lab", async (req, res, next) => {
       source_id: string; provenance_source: string | null;
     }>(
       `SELECT DISTINCT ON (f.batter_side) ps.park_research_snapshot_id, ps.span, ps.retrieved_at, f.batter_side,
-              ps.source_id, ps.provenance->>'source' AS provenance_source
+              ps.source_id, COALESCE(ps.provenance->>'source', ps.provenance->>'provider') AS provenance_source
        FROM park_research_snapshots ps JOIN park_research_features f ON f.park_research_snapshot_id = ps.park_research_snapshot_id
        WHERE ps.venue_id = $1
          AND ps.ingest_run_id = (
@@ -557,7 +557,9 @@ router.get("/analyst/game-lab", async (req, res, next) => {
        parkResearch: selected ? { venue: selected.park, span: parkSnapshot.rows.map((snapshot) => snapshot.span === "DAILY_GAME_CONTEXT" ? "Daily game context" : snapshot.span).filter((span, index, spans) => spans.indexOf(span) === index).join(", ") || "NOT FOUND", factors: parkFactors } : null,
       notes: [
         "Game Lab exposes research-ready starter, lineup, park, and freshness context only.",
-        "Park values are raw Baseball Savant components when available. No Total Bases composite or heuristic is presented.",
+        // Daily ingest can serve Ballpark Pal normalized multipliers, not only
+        // Savant raw components — the note must describe what the card shows.
+        "Park values are the persisted provider's components, attributed per tile with their transformation. No Total Bases composite or heuristic is presented.",
         // The old wording enumerated the prohibited betting vocabulary in
         // user-facing prose and leaked internal phase jargon ("Phase 2A").
         "No market probability, recommendation, or pricing signal of any kind is calculated by this view.",

@@ -61,6 +61,18 @@ export const OFFICIAL_LINEUP_AUDIT_SOURCE: readonly LineupSourceRule[] = [{
   rationale: "The club-submitted lineup card, retained as late official confirmation and historical lineage.",
 }];
 
+/**
+ * ORDER BY fragment for picking one starters row per (game, team): the
+ * official record outranks a projection source, then recency breaks ties.
+ * Interpolate as `ORDER BY ${STARTER_SOURCE_PRIORITY_SQL} LIMIT 1` in a query
+ * whose starters table alias is `s`. One definition, so the next change to
+ * starter-source policy cannot silently miss one of its copies. This is
+ * STARTER precedence: it does not admit official cards into pregame LINEUP
+ * selection, which stays governed by PREGAME_LINEUP_SOURCE_PRECEDENCE above.
+ */
+export const STARTER_SOURCE_PRIORITY_SQL =
+  "CASE WHEN s.source_id = 'MLB_OFFICIAL' THEN 0 ELSE 1 END, s.observed_at DESC";
+
 /** State ordering for explicitly requested comparison views. */
 export const LINEUP_STATE_RANK: Record<string, number> = {
   POSTED: 1,

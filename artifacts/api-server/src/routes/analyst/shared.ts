@@ -503,20 +503,24 @@ export async function analystDataHealth(date: string) {
       // so blocking issue types sorting after IDENTITY_REVIEW were silently
       // evicted. Ordering is severity-first for the same reason: the cap must
       // drop the least important rows, not the alphabetically last ones.
-      `SELECT ii.issue_type, ii.detail, ii.severity
-       FROM ingest_issues ii JOIN ingest_runs ir ON ir.ingest_run_id = ii.ingest_run_id
-       WHERE ii.resolved_at IS NULL AND ir.effective_date = $1
-       UNION ALL
-       SELECT 'IDENTITY_REVIEW' AS issue_type, CONCAT(q.raw_name, ' (FantasyPros ID ', q.external_player_id, ') requires review') AS detail, 'REVIEW' AS severity
-       FROM identity_review_queue q
-       WHERE q.state = 'OPEN'
-         AND EXISTS (
-           SELECT 1 FROM player_eligibility pe
-           WHERE pe.source_id = 'FANTASYPROS'
-             AND pe.external_player_id = q.external_player_id
-             AND pe.effective_date = $1
-             AND pe.requires_identity_review
-         )
+      // The union is wrapped in a subquery because PostgreSQL only accepts
+      // output column names, not expressions, in a set operation's ORDER BY.
+      `SELECT issue_type, detail, severity FROM (
+         SELECT ii.issue_type, ii.detail, ii.severity
+         FROM ingest_issues ii JOIN ingest_runs ir ON ir.ingest_run_id = ii.ingest_run_id
+         WHERE ii.resolved_at IS NULL AND ir.effective_date = $1
+         UNION ALL
+         SELECT 'IDENTITY_REVIEW' AS issue_type, CONCAT(q.raw_name, ' (FantasyPros ID ', q.external_player_id, ') requires review') AS detail, 'REVIEW' AS severity
+         FROM identity_review_queue q
+         WHERE q.state = 'OPEN'
+           AND EXISTS (
+             SELECT 1 FROM player_eligibility pe
+             WHERE pe.source_id = 'FANTASYPROS'
+               AND pe.external_player_id = q.external_player_id
+               AND pe.effective_date = $1
+               AND pe.requires_identity_review
+           )
+       ) issues
        ORDER BY CASE severity
            WHEN 'BLOCKING' THEN 0
            WHEN 'CRITICAL' THEN 1
