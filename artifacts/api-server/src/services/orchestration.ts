@@ -366,7 +366,15 @@ async function executeDueFreeze(runId: string) {
     }
     const freeze = run.steps.find((step) => step.name === "feature_snapshot_freeze");
     const prerequisites = run.steps.filter((step) => step.name !== "feature_snapshot_freeze");
-    if (!freeze || prerequisites.some((step) => step.status !== "SUCCESS")) return;
+    // The freeze gate must match the gate that queued the freeze: the health
+    // check is the authority and must be SUCCESS, while warning-tolerant steps
+    // legitimately persist as WARNING ("completed with limitations" - e.g.
+    // disclosed provider absences). Requiring SUCCESS from every step here
+    // left every queued freeze pending forever, because essentially every
+    // real run carries at least one WARNING step.
+    const health = run.steps.find((step) => step.name === "health_check");
+    if (!freeze || health?.status !== "SUCCESS") return;
+    if (prerequisites.some((step) => step.status !== "SUCCESS" && step.status !== "WARNING")) return;
     if (freeze.status === "SUCCESS") {
       await pool.query(`UPDATE orchestration_runs SET overall_status = 'COMPLETE', frozen_at = COALESCE(frozen_at, now()), finished_at = now(), error_message = NULL WHERE run_id = $1`, [runId]);
       await recordAuditEvent({ action: "orchestration.complete", resourceType: "orchestration_run", resourceId: runId, metadata: { slateDate: run.runDate, recoveredAfterFreeze: true } });
