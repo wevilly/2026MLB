@@ -389,7 +389,9 @@ async function buildFeatureVector(
        JOIN lineup_snapshots ls ON ls.lineup_snapshot_id = le.lineup_snapshot_id
        JOIN accepted a ON a.source_id = ls.source_id AND a.state = ls.state::text
        WHERE le.player_id = $1 AND ls.game_pk = $2
-       ORDER BY array_position($4::text[], ls.source_id), ls.observed_at DESC
+       -- Morning lineup basis: the game's first accepted snapshot decides the
+       -- batter's team, consistent with the engines' operating lineup.
+       ORDER BY array_position($4::text[], ls.source_id), ls.observed_at ASC
        LIMIT 1
      ),
      opposing_starter AS (

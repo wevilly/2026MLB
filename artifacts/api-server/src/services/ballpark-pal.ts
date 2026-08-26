@@ -263,16 +263,30 @@ async function coverageReceipt(ingestRunId: string, effectiveDate: string) {
   }>(
     `WITH expected_games AS (
        SELECT game_pk FROM games WHERE game_date = $1
-     ), expected_hitters AS (
-       SELECT DISTINCT g.game_pk, le.player_id
-       FROM lineup_entries le
-       JOIN lineup_snapshots ls ON ls.lineup_snapshot_id = le.lineup_snapshot_id
+     ), basis_lineup AS (
+       -- Morning lineup basis: the day's FIRST projected snapshot per team is
+       -- the slate's expected-hitter universe. Later lineup churn must not
+       -- grow or shrink the coverage denominator; a basis player who does not
+       -- play resolves as DNP at nightly settlement.
+       SELECT DISTINCT ON (ls.game_pk, ls.team_id) ls.lineup_snapshot_id, ls.game_pk
+       FROM lineup_snapshots ls
        JOIN games g ON g.game_pk = ls.game_pk
-       WHERE g.game_date = $1 AND le.player_id IS NOT NULL
+       WHERE g.game_date = $1 AND ls.source_id = 'FANTASYPROS' AND ls.state = 'PROJECTED'
+       ORDER BY ls.game_pk, ls.team_id,
+         CASE WHEN (ls.observed_at AT TIME ZONE 'America/New_York')::date = g.game_date THEN 0 ELSE 1 END,
+         ls.observed_at ASC
+     ), expected_hitters AS (
+       SELECT DISTINCT bl.game_pk, le.player_id
+       FROM basis_lineup bl
+       JOIN lineup_entries le ON le.lineup_snapshot_id = bl.lineup_snapshot_id
+       WHERE le.player_id IS NOT NULL
      ), expected_pitchers AS (
-       SELECT DISTINCT g.game_pk, s.player_id
+       SELECT DISTINCT ON (s.game_pk, s.team_id) s.game_pk, s.player_id
        FROM starters s JOIN games g ON g.game_pk = s.game_pk
        WHERE g.game_date = $1 AND s.player_id IS NOT NULL
+       ORDER BY s.game_pk, s.team_id,
+         CASE WHEN (s.observed_at AT TIME ZONE 'America/New_York')::date = g.game_date THEN 0 ELSE 1 END,
+         s.observed_at ASC
      )
      SELECT
        (SELECT count(*)::int FROM expected_games g WHERE

@@ -619,7 +619,11 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
        latest_lineup AS (
          -- One projected lineup per team, selected through the documented
          -- pregame policy in lineup-sources.ts. Official MLB cards are
-         -- retained separately for audit and settlement context.
+         -- retained separately for audit and settlement context. Morning
+         -- lineup basis: the day's FIRST accepted snapshot wins, not the
+         -- newest — the 8 AM projected lineup is the slate's operating
+         -- lineup for the whole day and later churn resolves as DNP at
+         -- nightly settlement.
          SELECT DISTINCT ON (ls.game_pk, ls.team_id)
             ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state, ls.source_id
          FROM lineup_snapshots ls
@@ -635,7 +639,8 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
              WHEN 'PROJECTED' THEN 4
              ELSE 9
            END,
-           ls.observed_at DESC
+           CASE WHEN (ls.observed_at AT TIME ZONE 'America/New_York')::date = g.game_date THEN 0 ELSE 1 END,
+           ls.observed_at ASC
        )
        SELECT mrc.candidate_id, mrc.game_pk::bigint, mrc.player_id, COALESCE(p.full_name, 'Unknown') AS player_name,
               mrc.market, mrc.research_rank, mrc.research_state, mrc.primary_mechanism,
@@ -729,6 +734,8 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
       home_lineup_observed_at: string | null; home_lineup_hitters: number;
     }>(
       `WITH latest_lineup AS (
+         -- Morning lineup basis: the day's first projected snapshot per team,
+         -- matching the engines' and coverage receipt's operating lineup.
          SELECT DISTINCT ON (ls.game_pk, ls.team_id)
            ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.state, ls.source_id, ls.observed_at
          FROM lineup_snapshots ls
@@ -737,7 +744,8 @@ router.get("/analyst/round-robin/comparison", async (req, res, next) => {
            AND ls.source_id = 'FANTASYPROS'
            AND ls.state = 'PROJECTED'
          ORDER BY ls.game_pk, ls.team_id,
-           ls.observed_at DESC
+           CASE WHEN (ls.observed_at AT TIME ZONE 'America/New_York')::date = g.game_date THEN 0 ELSE 1 END,
+           ls.observed_at ASC
        ),
        lineup_hitter_counts AS (
          SELECT lineup_snapshot_id, count(*)::int AS hitter_count
