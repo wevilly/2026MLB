@@ -304,7 +304,7 @@ function GameCard({ game }: { game: SlateGame }) {
     <article className="game-card" data-testid={`card-game-${game.id}`}>
       <div className="game-card-top"><span className="game-time">{game.time}</span><Badge tone={readinessTone}>{game.state}</Badge><span className="game-id">{game.id}</span></div>
       <div className="matchup"><div><strong>{game.away}</strong><span>{game.awayStarter.name} <i>{game.awayStarter.hand}</i></span></div><div className="at-mark">@</div><div className="home-team"><strong>{game.home}</strong><span>{game.homeStarter.name} <i>{game.homeStarter.hand}</i></span></div></div>
-      <div className="game-details"><span><Cloud size={13} /> {game.weather}</span><span><span className="diamond-mark" /> {game.park}</span><span className="lineup-state"><StatusDot tone={toneFor(game.lineupState)} /> {game.lineupState}</span></div>
+      <div className="game-details"><span><Cloud size={13} /> {game.weather}</span><span><Home size={13} /> {game.roof}</span><span><span className="diamond-mark" /> {game.park}</span><span className="lineup-state"><StatusDot tone={toneFor(game.lineupState)} /> {game.lineupState}</span></div>
       {(game.flag || game.awayStarter.note || game.homeStarter.note) && <div className="starter-note"><Bell size={13} /> <span>{game.flag || game.awayStarter.note || game.homeStarter.note}</span></div>}
     </article>
   );

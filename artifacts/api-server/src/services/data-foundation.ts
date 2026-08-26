@@ -883,9 +883,15 @@ export async function refreshMlbSchedule(requestedDate: string) {
              start_time_utc = COALESCE($3, start_time_utc),
              game_status = $4,
              doubleheader_code = $5,
+             away_team_id = $6,
+             home_team_id = $7,
              updated_at = now()
            WHERE game_pk = $1`,
-          [slateGamePk, venueId, startTimeUtc, gameStatus, doubleheaderCode],
+          // The official schedule is authoritative for away/home orientation:
+          // the FantasyPros ingest sorts the clubs alphabetically when its
+          // payload does not state sides, which reverses roughly half the
+          // matchups (e.g. DET @ TB instead of TB @ DET).
+          [slateGamePk, venueId, startTimeUtc, gameStatus, doubleheaderCode, awayId, homeId],
         );
         const awayProbable = asObject(asObject(teams.away).probablePitcher);
         const homeProbable = asObject(asObject(teams.home).probablePitcher);
@@ -893,13 +899,18 @@ export async function refreshMlbSchedule(requestedDate: string) {
         if (Object.keys(homeProbable).length) await upsertStarter(homeProbable, homeId, slateGamePk, "PROBABLE", homeProbable, effectiveDate);
         normalized += 1;
       } else {
-        // Same-team doubleheader: the venue is shared and safe to set on both
-        // rows. A per-game start time or starter assignment would be a guess,
-        // so it is recorded as an unresolved issue instead of assigned.
+        // Same-team doubleheader: the venue and official away/home orientation
+        // are shared and safe to set on both rows. A per-game start time or
+        // starter assignment would be a guess, so it is recorded as an
+        // unresolved issue instead of assigned.
         await pool.query(
-          `UPDATE games SET venue_id = COALESCE($2, venue_id), updated_at = now()
+          `UPDATE games SET
+             venue_id = COALESCE($2, venue_id),
+             away_team_id = $3,
+             home_team_id = $4,
+             updated_at = now()
            WHERE game_pk = ANY($1)`,
-          [slateGamePks, venueId],
+          [slateGamePks, venueId, awayId, homeId],
         );
         await recordIssue(
           MLB_SOURCE,

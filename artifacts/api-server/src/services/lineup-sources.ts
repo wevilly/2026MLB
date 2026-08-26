@@ -240,8 +240,14 @@ export type SlateLineupPlayer = {
 };
 
 /**
- * Reads the slate's configured pregame lineups, picks the latest approved
- * snapshot for each team, and reports disagreements only inside that policy.
+ * Reads the slate's configured pregame lineups, picks the MORNING BASIS
+ * snapshot for each team — the day's first accepted projected lineup, not the
+ * newest — and reports disagreements only inside that policy.
+ *
+ * The 8 AM projected lineup is the operating basis for the entire day: later
+ * lineup churn never changes which batters and pitchers the slate is about,
+ * and a basis player who ends up not playing is resolved as DID NOT PLAY at
+ * nightly settlement rather than swapped out pregame.
  *
  * Shared by all four per-candidate market engines. Each one previously carried
  * its own copy of this query with source_id = 'FANTASYPROS' written into it.
@@ -266,6 +272,7 @@ export async function querySlateLineupPlayers(
        SELECT DISTINCT ON (ls.game_pk, ls.team_id, ls.source_id)
          ls.lineup_snapshot_id, ls.game_pk, ls.team_id, ls.source_id, ls.state AS lineup_state
        FROM lineup_snapshots ls
+       JOIN games sg ON sg.game_pk = ls.game_pk
        JOIN accepted a ON a.source_id = ls.source_id AND a.state = ls.state::text
        WHERE ls.game_pk = ANY($1)
        ORDER BY ls.game_pk, ls.team_id, ls.source_id,
@@ -276,7 +283,15 @@ export async function querySlateLineupPlayers(
            WHEN 'PROJECTED' THEN 4
            ELSE 9
          END,
-         ls.observed_at DESC
+         -- Morning lineup basis: the day's FIRST accepted snapshot per team is
+         -- the slate's operating lineup, deliberately NOT the newest. The 8 AM
+         -- projected lineup is the basis for the whole day; later churn never
+         -- changes who the slate is about, and a player who ends up not
+         -- playing is resolved as DNP at nightly settlement. Snapshots
+         -- captured on the slate date itself outrank any earlier speculative
+         -- capture.
+         CASE WHEN (ls.observed_at AT TIME ZONE 'America/New_York')::date = sg.game_date THEN 0 ELSE 1 END,
+         ls.observed_at ASC
      )
      SELECT le.player_id, p.full_name, p.bats, le.batting_order,
             bl.game_pk::text AS game_pk, bl.team_id, bl.lineup_state, bl.source_id,

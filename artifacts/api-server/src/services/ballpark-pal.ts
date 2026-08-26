@@ -263,16 +263,30 @@ async function coverageReceipt(ingestRunId: string, effectiveDate: string) {
   }>(
     `WITH expected_games AS (
        SELECT game_pk FROM games WHERE game_date = $1
-     ), expected_hitters AS (
-       SELECT DISTINCT g.game_pk, le.player_id
-       FROM lineup_entries le
-       JOIN lineup_snapshots ls ON ls.lineup_snapshot_id = le.lineup_snapshot_id
+     ), basis_lineup AS (
+       -- Morning lineup basis: the day's FIRST projected snapshot per team is
+       -- the slate's expected-hitter universe. Later lineup churn must not
+       -- grow or shrink the coverage denominator; a basis player who does not
+       -- play resolves as DNP at nightly settlement.
+       SELECT DISTINCT ON (ls.game_pk, ls.team_id) ls.lineup_snapshot_id, ls.game_pk
+       FROM lineup_snapshots ls
        JOIN games g ON g.game_pk = ls.game_pk
-       WHERE g.game_date = $1 AND le.player_id IS NOT NULL
+       WHERE g.game_date = $1 AND ls.source_id = 'FANTASYPROS' AND ls.state = 'PROJECTED'
+       ORDER BY ls.game_pk, ls.team_id,
+         CASE WHEN (ls.observed_at AT TIME ZONE 'America/New_York')::date = g.game_date THEN 0 ELSE 1 END,
+         ls.observed_at ASC
+     ), expected_hitters AS (
+       SELECT DISTINCT bl.game_pk, le.player_id
+       FROM basis_lineup bl
+       JOIN lineup_entries le ON le.lineup_snapshot_id = bl.lineup_snapshot_id
+       WHERE le.player_id IS NOT NULL
      ), expected_pitchers AS (
-       SELECT DISTINCT g.game_pk, s.player_id
+       SELECT DISTINCT ON (s.game_pk, s.team_id) s.game_pk, s.player_id
        FROM starters s JOIN games g ON g.game_pk = s.game_pk
        WHERE g.game_date = $1 AND s.player_id IS NOT NULL
+       ORDER BY s.game_pk, s.team_id,
+         CASE WHEN (s.observed_at AT TIME ZONE 'America/New_York')::date = g.game_date THEN 0 ELSE 1 END,
+         s.observed_at ASC
      )
      SELECT
        (SELECT count(*)::int FROM expected_games g WHERE
@@ -298,11 +312,69 @@ async function coverageReceipt(ingestRunId: string, effectiveDate: string) {
     [effectiveDate, ingestRunId],
   );
   const row = result.rows[0] ?? { game_gaps: 0, hitter_gaps: 0, pitcher_gaps: 0, park_gaps: 0 };
+
+  // Per-player classification of the hitter gaps. A gap whose player has a
+  // snapshot elsewhere in this run is a game-assignment problem and blocks; a
+  // gap whose player has no snapshot anywhere in the run is a verified
+  // provider absence, which the owner's policy accepts with disclosure
+  // (Ballpark Pal systematically omits some projected hitters, largely
+  // catchers and bottom-of-order bats).
+  const hitterGapDetail = await pool.query<{
+    game_pk: string; player_id: number; full_name: string; team: string | null; wrong_game: boolean;
+  }>(
+    `WITH basis_lineup AS (
+       SELECT DISTINCT ON (ls.game_pk, ls.team_id) ls.lineup_snapshot_id, ls.game_pk
+       FROM lineup_snapshots ls
+       JOIN games g ON g.game_pk = ls.game_pk
+       WHERE g.game_date = $1 AND ls.source_id = 'FANTASYPROS' AND ls.state = 'PROJECTED'
+       ORDER BY ls.game_pk, ls.team_id,
+         CASE WHEN (ls.observed_at AT TIME ZONE 'America/New_York')::date = g.game_date THEN 0 ELSE 1 END,
+         ls.observed_at ASC
+     ), expected_hitters AS (
+       SELECT DISTINCT bl.game_pk, le.player_id
+       FROM basis_lineup bl
+       JOIN lineup_entries le ON le.lineup_snapshot_id = bl.lineup_snapshot_id
+       WHERE le.player_id IS NOT NULL
+     )
+     SELECT e.game_pk::text AS game_pk, e.player_id, p.full_name, t.abbreviation AS team,
+            EXISTS (
+              SELECT 1 FROM player_research_snapshots rp
+              WHERE rp.ingest_run_id = $2 AND rp.player_id = e.player_id
+            ) AS wrong_game
+     FROM expected_hitters e
+     JOIN players p ON p.player_id = e.player_id
+     LEFT JOIN teams t ON t.team_id = p.current_team_id
+     WHERE NOT EXISTS (
+       SELECT 1 FROM player_research_snapshots ps
+       WHERE ps.ingest_run_id = $2 AND ps.player_id = e.player_id
+         AND (ps.provenance->>'gamePk')::bigint = e.game_pk
+     )
+     ORDER BY e.game_pk, p.full_name`,
+    [effectiveDate, ingestRunId],
+  );
+  // Unresolved identity work for this slate is mapping debt, never a
+  // disclosed absence: a quarantined provider row might BE one of the
+  // "absent" hitters under an unrecognised external ID.
+  const openReviews = await pool.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM identity_review_queue
+      WHERE source_id = $2 AND state = 'OPEN' AND evidence->>'effectiveDate' = $1`,
+    [effectiveDate, SOURCE_ID],
+  );
+  const gapHitters = hitterGapDetail.rows.map((gap) => ({
+    gamePk: Number(gap.game_pk),
+    playerId: gap.player_id,
+    name: gap.full_name,
+    team: gap.team,
+    classification: gap.wrong_game ? "GAME_ASSIGNMENT_MISMATCH" as const : "PROVIDER_ABSENT" as const,
+  }));
   return {
     gameGaps: Number(row.game_gaps),
     hitterGaps: Number(row.hitter_gaps),
     pitcherGaps: Number(row.pitcher_gaps),
     parkGaps: Number(row.park_gaps),
+    gapHitters,
+    disclosedProviderAbsences: gapHitters.filter((gap) => gap.classification === "PROVIDER_ABSENT"),
+    openIdentityReviews: Number(openReviews.rows[0]?.count ?? 0),
   };
 }
 
@@ -403,14 +475,32 @@ export async function ingestBallparkPalResearch(effectiveDate: string) {
       }
     }
     const coverage = await coverageReceipt(ingestRunId, effectiveDate);
-    const coverageGaps = coverage.gameGaps + coverage.hitterGaps + coverage.pitcherGaps + coverage.parkGaps;
-    const status = rowCount === 0 || rejected || coverageGaps ? "PARTIAL" : "SUCCESS";
+    // Owner policy: a hitter gap that is a VERIFIED provider absence (no
+    // snapshot for the player anywhere in the run, and no open identity
+    // review for this slate) is accepted with disclosure rather than
+    // blocking the slate — Ballpark Pal systematically omits some projected
+    // hitters. Game, pitcher, and park gaps, game-assignment mismatches,
+    // and unresolved identity reviews still block.
+    const disclosedAbsences = coverage.disclosedProviderAbsences;
+    const blockingHitterGaps = coverage.hitterGaps - (coverage.openIdentityReviews === 0 ? disclosedAbsences.length : 0);
+    const blockingGaps = coverage.gameGaps + blockingHitterGaps + coverage.pitcherGaps + coverage.parkGaps + coverage.openIdentityReviews;
+    const status = rowCount === 0 || rejected || blockingGaps ? "PARTIAL" : "SUCCESS";
     const noDataNote = rowCount === 0
       ? "Ballpark Pal returned no daily records for the requested date. Daily-only provider data is unavailable rather than backfilled from retired sources."
       : null;
-    const coverageNote = coverageGaps
-      ? `Daily coverage is incomplete: ${coverage.gameGaps} game, ${coverage.hitterGaps} hitter, ${coverage.pitcherGaps} pitcher, and ${coverage.parkGaps} park gap(s). The run cannot support an operational freeze.`
+    const coverageNote = blockingGaps
+      ? `Daily coverage is incomplete: ${coverage.gameGaps} game, ${coverage.hitterGaps} hitter (${disclosedAbsences.length} verified provider absence(s)), ${coverage.pitcherGaps} pitcher, and ${coverage.parkGaps} park gap(s), with ${coverage.openIdentityReviews} open identity review(s). The run cannot support an operational freeze.`
       : null;
+    const absenceNote = !blockingGaps && disclosedAbsences.length
+      ? `${disclosedAbsences.length} projected hitter(s) have no Ballpark Pal projection (documented provider absence, ranked without provider research evidence): ${disclosedAbsences.map((gap) => `${gap.name}${gap.team ? ` (${gap.team})` : ""}`).join(", ")}.`
+      : null;
+    if (absenceNote) {
+      await pool.query(
+        `INSERT INTO ingest_issues (source_id, ingest_run_id, issue_type, severity, detail)
+         VALUES ($1, $2, 'BALLPARK_PAL_PROVIDER_ABSENCE', 'WARNING', $3)`,
+        [SOURCE_ID, ingestRunId, absenceNote],
+      );
+    }
     await pool.query(
       `UPDATE ingest_runs SET status=$2,finished_at=now(),row_count=$3,normalized_row_count=$4,rejected_row_count=$5,http_status=$6,duration_ms=$7,metadata=metadata || $8::jsonb WHERE ingest_run_id=$1`,
       [ingestRunId, status, rowCount, normalized, rejected, httpStatus, Date.now() - started, JSON.stringify({ gameReceiptRawPayloadId: gamesRaw, rawPayloadsFiltered: true, noData: rowCount === 0, coverage })],
@@ -424,6 +514,7 @@ export async function ingestBallparkPalResearch(effectiveDate: string) {
         "Probabilities, odds, implied odds, matchup probability fields, fantasy fields, pitch-level metrics, expected stats, and historical projections were excluded or marked unavailable.",
         ...noDataNote ? [noDataNote] : [],
         ...coverageNote ? [coverageNote] : [],
+        ...absenceNote ? [absenceNote] : [],
       ],
     };
   } catch (error) {

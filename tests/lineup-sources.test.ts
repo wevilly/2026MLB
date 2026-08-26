@@ -164,3 +164,66 @@ describe("Task 2.7 name collisions are raised, not resolved", () => {
     assert.ok(/profile: null/.test(guard), "an ambiguous name must not return a profile");
   });
 });
+
+describe("morning lineup basis: the 8 AM projected lineup is the day's operating lineup", () => {
+  const BASIS_ORDER = /CASE WHEN \(ls\.observed_at AT TIME ZONE 'America\/New_York'\)::date = (?:sg|g)\.game_date THEN 0 ELSE 1 END,\s+ls\.observed_at ASC/;
+
+  test("the shared engine reader selects the day's FIRST accepted snapshot, never the newest", () => {
+    const source = readFileSync("artifacts/api-server/src/services/lineup-sources.ts", "utf8");
+    assert.match(source, BASIS_ORDER, "best_lineup must prefer same-day snapshots, earliest first");
+    assert.ok(!/best_lineup[\s\S]*?observed_at DESC/.test(source.slice(source.indexOf("best_lineup AS"))),
+      "the pregame reader must not fall back to newest-snapshot selection");
+  });
+
+  test("the coverage receipt's expected-hitter universe is the basis snapshot, not every snapshot of the day", () => {
+    const source = readFileSync("artifacts/api-server/src/services/ballpark-pal.ts", "utf8");
+    assert.ok(source.includes("basis_lineup AS ("), "the receipt must derive expected hitters from a basis CTE");
+    assert.match(source, BASIS_ORDER, "the basis CTE must pick the day's first projected snapshot per team");
+    assert.ok(!source.includes("SELECT DISTINCT g.game_pk, le.player_id"),
+      "expected hitters must not be the union of all snapshots (that made the denominator churn all day)");
+    assert.ok(source.includes("DISTINCT ON (s.game_pk, s.team_id) s.game_pk, s.player_id"),
+      "expected pitchers must also be one basis starter per team");
+  });
+
+  test("Round Robin lineage and game summaries read the same basis", () => {
+    const route = readFileSync("artifacts/api-server/src/routes/analyst/research.ts", "utf8");
+    const matches = route.match(/CASE WHEN \(ls\.observed_at AT TIME ZONE 'America\/New_York'\)::date = g\.game_date THEN 0 ELSE 1 END,\s+ls\.observed_at ASC/g) ?? [];
+    assert.equal(matches.length, 2, "both lineup-snapshot selections in the research routes must use the basis ordering");
+    assert.ok(!/latest_lineup AS \([\s\S]{0,900}?observed_at DESC/.test(route),
+      "no lineup selection may prefer the newest snapshot");
+  });
+
+  test("feature snapshots resolve the batter's team from the basis, and DNP resolution lives in settlement", () => {
+    const featureStore = readFileSync("artifacts/api-server/src/services/feature-store.ts", "utf8");
+    assert.ok(featureStore.includes("array_position($4::text[], ls.source_id), ls.observed_at ASC"),
+      "batter team resolution must use the game's first accepted snapshot");
+    const settlement = readFileSync("artifacts/api-server/src/services/settlement.ts", "utf8");
+    assert.ok(settlement.includes("The candidate was on the board but produced no settlement row."),
+      "a basis player who did not play must surface by name in the settlement reconciliation");
+  });
+});
+
+describe("verified provider absences are accepted with disclosure, everything else blocks", () => {
+  const source = readFileSync("artifacts/api-server/src/services/ballpark-pal.ts", "utf8");
+
+  test("only blocking gaps decide the run status", () => {
+    assert.ok(source.includes("const blockingGaps = coverage.gameGaps + blockingHitterGaps + coverage.pitcherGaps + coverage.parkGaps + coverage.openIdentityReviews"),
+      "game, pitcher, park, mismatch, and open-review gaps must all block");
+    assert.ok(source.includes('rowCount === 0 || rejected || blockingGaps ? "PARTIAL" : "SUCCESS"'),
+      "a run whose only hitter gaps are verified provider absences must be SUCCESS");
+  });
+
+  test("an absence is verified, never assumed", () => {
+    assert.ok(source.includes('"GAME_ASSIGNMENT_MISMATCH"'),
+      "a gap player with a snapshot elsewhere in the run must be classified as a mismatch, not an absence");
+    assert.ok(source.includes("coverage.openIdentityReviews === 0 ? disclosedAbsences.length : 0"),
+      "open identity reviews for the slate must disable absence forgiveness entirely");
+  });
+
+  test("accepted absences are disclosed by name, not silently forgiven", () => {
+    assert.ok(source.includes("BALLPARK_PAL_PROVIDER_ABSENCE"),
+      "a disclosure issue must be recorded so Data Health lists the absent players");
+    assert.ok(source.includes("documented provider absence, ranked without provider research evidence"),
+      "the disclosure must state what the absence means for those candidates");
+  });
+});
