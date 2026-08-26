@@ -202,3 +202,28 @@ describe("morning lineup basis: the 8 AM projected lineup is the day's operating
       "a basis player who did not play must surface by name in the settlement reconciliation");
   });
 });
+
+describe("verified provider absences are accepted with disclosure, everything else blocks", () => {
+  const source = readFileSync("artifacts/api-server/src/services/ballpark-pal.ts", "utf8");
+
+  test("only blocking gaps decide the run status", () => {
+    assert.ok(source.includes("const blockingGaps = coverage.gameGaps + blockingHitterGaps + coverage.pitcherGaps + coverage.parkGaps + coverage.openIdentityReviews"),
+      "game, pitcher, park, mismatch, and open-review gaps must all block");
+    assert.ok(source.includes('rowCount === 0 || rejected || blockingGaps ? "PARTIAL" : "SUCCESS"'),
+      "a run whose only hitter gaps are verified provider absences must be SUCCESS");
+  });
+
+  test("an absence is verified, never assumed", () => {
+    assert.ok(source.includes('"GAME_ASSIGNMENT_MISMATCH"'),
+      "a gap player with a snapshot elsewhere in the run must be classified as a mismatch, not an absence");
+    assert.ok(source.includes("coverage.openIdentityReviews === 0 ? disclosedAbsences.length : 0"),
+      "open identity reviews for the slate must disable absence forgiveness entirely");
+  });
+
+  test("accepted absences are disclosed by name, not silently forgiven", () => {
+    assert.ok(source.includes("BALLPARK_PAL_PROVIDER_ABSENCE"),
+      "a disclosure issue must be recorded so Data Health lists the absent players");
+    assert.ok(source.includes("documented provider absence, ranked without provider research evidence"),
+      "the disclosure must state what the absence means for those candidates");
+  });
+});
