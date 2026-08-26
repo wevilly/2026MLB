@@ -31,7 +31,9 @@ test("daily orchestration catches up after startup and claims before execution",
   assert.match(source, /healthStep\.status === "PENDING"/);
   assert.match(source, /recoveredAfterFreeze: true/);
   assert.match(source, /const prerequisites = run\.steps\.filter\(\(step\) => step\.name !== "feature_snapshot_freeze"\)/);
-  assert.match(source, /prerequisites\.some\(\(step\) => step\.status !== "SUCCESS"\)/);
+  // The freeze gate accepts WARNING prerequisites (warning-tolerant steps
+  // legitimately finish as WARNING); only the health check must be SUCCESS.
+  assert.match(source, /prerequisites\.some\(\(step\) => step\.status !== "SUCCESS" && step\.status !== "WARNING"\)/);
   assert.doesNotMatch(source, /lastScheduledDate/);
 });
 
@@ -85,4 +87,23 @@ test("selected-date readiness and operator controls remain wired through contrac
   assert.match(server, /market-board\\\/refresh/);
   assert.match(roundRobin, /useGetAnalystDataHealth\(\{ date \}\)/);
   assert.match(roundRobin, /UNSUPPORTED/);
+});
+test("the queued freeze executes under the same gate that queued it", async () => {
+  // The main pipeline queues the freeze once health_check is SUCCESS, with
+  // warning-tolerant steps allowed to persist as WARNING. The scheduler's
+  // executeDueFreeze re-check previously demanded SUCCESS from every step,
+  // so every queued freeze on a real run (which always carries WARNING
+  // steps, e.g. disclosed provider absences) hung PENDING forever and the
+  // slate never left "latest workflow is running".
+  const orchestration = await readFile("artifacts/api-server/src/services/orchestration.ts", "utf8");
+  assert.match(
+    orchestration,
+    /const health = run\.steps\.find\(\(step\) => step\.name === "health_check"\);\s+if \(!freeze \|\| health\?\.status !== "SUCCESS"\) return;/,
+    "the health check must remain the freeze authority in the scheduler path",
+  );
+  assert.match(
+    orchestration,
+    /prerequisites\.some\(\(step\) => step\.status !== "SUCCESS" && step\.status !== "WARNING"\)/,
+    "warning-tolerant prerequisites must not park the freeze forever",
+  );
 });
